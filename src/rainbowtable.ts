@@ -1,6 +1,7 @@
 import sqlite3 from 'sqlite3'
 import { InputOutputReplacer, Gate } from './types.js'
 import { evalCircuit, generateCombinations, getUniqueVars, ioHash, toBatches } from './utils.js'
+import { LimitedMap } from './limitedMap.js'
 
 // Create table if not exists
 const createTable = (db: sqlite3.Database) => {
@@ -54,7 +55,12 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: InputOutpu
 	})
 }
 
-export const getReplacerById = async (db: sqlite3.Database, ioIdentifier: string) => {
+export const getReplacerById = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, ioIdentifier: string) => {
+	const cacheHit = ioIdentifierCache.get(ioIdentifier)
+	if (cacheHit !== undefined) {
+		if (cacheHit === null) return null
+		return { ioIdentifier: ioIdentifier, replacerGates: cacheHit }
+	}
 	return new Promise<InputOutputReplacer | null>((resolve, reject) => {
 		db.get('SELECT * FROM InputOutputReplacers WHERE ioIdentifier = ?', [ioIdentifier], (err: unknown, row: any) => {
 			if (err) {
@@ -62,8 +68,10 @@ export const getReplacerById = async (db: sqlite3.Database, ioIdentifier: string
 			} else {
 				if (row) {
 					const replacerGates = JSON.parse(row.replacerGates) as Gate[]
+					ioIdentifierCache.set(row.ioIdentifier, replacerGates)
 					resolve({ ioIdentifier: row.ioIdentifier, replacerGates })
 				} else {
+					ioIdentifierCache.set(ioIdentifier, null)
 					resolve(null)
 				}
 			}

@@ -4,6 +4,7 @@ import { findSwappableLines, shuffleLinesWithinGroups } from './lineswapper.js'
 import { areBooleanArraysEqual, calculateAllOutputsArray, convertToOriginal, gatesToText, generateCombinations, getControlFunc, getRandomNumberInRange, getVars, ioHash, mapCircuit, mapVariablesToIndexes, readJsonFile, replace, reverseMapCircuit, simplifyGateOperatorIfGatesMatch, verifyCircuit, writeDictionaryToFile } from './utils.js'
 import { CircuitData, Gate } from './types.js'
 import { createRainbowTable, getReplacerById } from './rainbowtable.js'
+import { LimitedMap } from './limitedMap.js'
 
 const BYTE_ALL_INPUTS = new Map<number, boolean[][]>([
 	[5, generateCombinations(5)],
@@ -36,29 +37,33 @@ const findUselessVars = (sliceGates: Gate[], variableIndexMapping: number[], ver
 const RAINBOW_TABLE_WIRES = 4
 const FOUR_BYTE_ALL_INPUTS = generateCombinations(RAINBOW_TABLE_WIRES)
 
-const optimizeStep = async (db: sqlite3.Database, gates: Gate[], sliceSize: number, verbose: boolean): Promise<Gate[]> => {
+const optimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, gates: Gate[], sliceSize: number, verbose: boolean): Promise<Gate[]> => {
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
+	let uselessVarsFound = 0
 	for (let a = 0; a < gates.length - sliceSize; a++) {
 		const start = a
 		const end = a + sliceSize
 		const sliceGates = gates.slice(start, end)
 		const variableIndexMapping = mapVariablesToIndexes(sliceGates) // map variables to smaller amount of wires
-		const replacement = findUselessVars(sliceGates, variableIndexMapping, verbose)
-		if (replacement !== undefined) {
-			replacements.push({ start, end: end - 1, replacement: gateSimplifier(replacement, verbose) })
-			a += sliceSize - 1 // increment by slice amount that we don't optimize the same part again
-			continue
+		if (sliceSize > 2) {
+			const replacement = findUselessVars(sliceGates, variableIndexMapping, verbose)
+			if (replacement !== undefined) {
+				replacements.push({ start, end: end - 1, replacement: gateSimplifier(replacement, verbose) })
+				uselessVarsFound++
+				a += sliceSize - 1 // increment by slice amount that we don't optimize the same part again
+				continue
+			}
 		}
 		if (variableIndexMapping.length > RAINBOW_TABLE_WIRES) continue
 		const mappedGates = mapCircuit(sliceGates, variableIndexMapping)
 		const allOutputs = calculateAllOutputsArray(mappedGates, FOUR_BYTE_ALL_INPUTS)
 		const ioIdentifier = ioHash(allOutputs)
-		const rainbowMatch = await getReplacerById(db, ioIdentifier)
+		const rainbowMatch = await getReplacerById(db, ioIdentifierCache, ioIdentifier)
 		if (rainbowMatch && rainbowMatch.replacerGates.length < sliceSize) { //replace if we find a match and its better
 			replacements.push({
 				start,
 				end: end - 1,
-				replacement: gateSimplifier(reverseMapCircuit(rainbowMatch.replacerGates, variableIndexMapping), verbose)
+				replacement: reverseMapCircuit(rainbowMatch.replacerGates, variableIndexMapping)
 			})
 			a += sliceSize - 1 // increment by slice amount that we don't optimize the same part again
 		}
@@ -66,7 +71,9 @@ const optimizeStep = async (db: sqlite3.Database, gates: Gate[], sliceSize: numb
 	if (replacements.length === 0) return gates
 	const newCircuit = replace(gates, replacements)
 	const diff = gates.length - newCircuit.length
-	if (diff > 0) console.log(`Removed ${ diff } gates (${ gates.length } -> ${ newCircuit.length }) with slice ${ sliceSize }`)
+	if (diff > 0 || uselessVarsFound > 0) {
+		console.log(`Removed ${ diff } gates (${ gates.length } -> ${ newCircuit.length }) and simplified ${ uselessVarsFound } vars. With slice ${ sliceSize }`)
+	}
 	return newCircuit
 }
 
@@ -88,19 +95,30 @@ const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: numb
 	let prevSavedLength = originalGates.length
 	
 	optimizedVersion = gateSimplifier(optimizedVersion, verbose)
-
+	let sliceToUse = 2
+	let lastSaved = performance.now()
+	const ioIdentifierCache = new LimitedMap<string, Gate[] | null>(100000)
 	while (true) {
-		const maxSliceSize = iterations % 10 === 0 ? 20 : 5 // alternative between slicing with big 10 amounts and smaller 5 amounts.
-		for (let sliceSize = maxSliceSize; sliceSize > 1; sliceSize--) {
-			optimizedVersion = await optimizeStep(db, optimizedVersion, sliceSize, verbose)
+		const currentGates = optimizedVersion.length
+		optimizedVersion = await optimizeStep(db, ioIdentifierCache, optimizedVersion, sliceToUse, verbose)
+		if (currentGates === optimizedVersion.length || iterations % 10 === 0) {
+			// if we did not remove any gates, adjust slice to find bigger chunks
+			sliceToUse++
+			if (sliceToUse >= 10) sliceToUse = 2
 		}
-		if (/*iterations % 200 === 0 &&*/ prevSavedLength !== optimizedVersion.length) {
-			prevSavedLength = optimizedVersion.length
-			const filename = `${ problemName }.solved-${ iterations }.json`
-			console.log(`Saving a version with ${ optimizedVersion.length } gates to ${ filename } (${ Math.floor(optimizedVersion.length/originalGates.length*100) }% of original)`)
-			console.log(`Program size in sum(wiresInGatePlusTarget): ${ optimizedVersion.flatMap((gate) => getVars(gate).length).reduce((a, c) => a + c, 0) }`)
-			verifyCircuit(originalGates, optimizedVersion, wires, 20)
-			fs.writeFileSync(filename, convertToOriginal(wires, optimizedVersion), 'utf8')
+		if (prevSavedLength !== optimizedVersion.length) {
+			const endTime = performance.now()
+			const timeDiffMins = (endTime - lastSaved) / 60000
+			if (timeDiffMins >= 10) {
+				prevSavedLength = optimizedVersion.length
+				const filename = `${ problemName }.solved-${ iterations }.json`
+				optimizedVersion = gateSimplifier(optimizedVersion, verbose)
+				console.log(`Saving a version with ${ optimizedVersion.length } gates to ${ filename } (${ Math.floor(optimizedVersion.length/originalGates.length*100) }% of original)`)
+				console.log(`Average gate complexity: ${ optimizedVersion.flatMap((gate) => getVars(gate).length).reduce((a, c) => a + c, 0) / optimizedVersion.length }`)
+				verifyCircuit(originalGates, optimizedVersion, wires, 20)
+				fs.writeFileSync(filename, convertToOriginal(wires, optimizedVersion), 'utf8')
+				lastSaved = endTime
+			}
 		}
 		// shuffle every second time with small max group size to move group boundaries around
 		const swapLines = iterations % 2 ? findSwappableLines(optimizedVersion, getRandomNumberInRange(2, 3)) : findSwappableLines(optimizedVersion, maxGates)
