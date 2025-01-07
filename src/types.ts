@@ -15,3 +15,8 @@ export type InputOutputReplacer = {
 	ioIdentifier: string
 	replacerGates: Gate[]
 }
+
+export type DependencyNode = {
+	lineNumber: number,
+	dependOnLines: number[]
+}

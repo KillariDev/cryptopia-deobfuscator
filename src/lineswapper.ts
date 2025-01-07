@@ -1,11 +1,5 @@
-import { getVars } from "./utils";
-
-type Gate = {
-	a: number;
-	b: number;
-	target: number;
-	gate_i: number;
-}
+import { DependencyNode, Gate } from "./types.js"
+import { getVars } from "./utils.js"
 
 const setHasAny = (set: Set<number>, vars: number[]) => {
 	for (const oneVar of vars) {
@@ -60,4 +54,23 @@ export function shuffleLinesWithinGroups(lines: Gate[], groups: number[][]): Gat
 		shuffledLines = shuffleGroup(shuffledLines, group);
 	})
 	return shuffledLines;
+}
+
+export const createDependencyGraph = (gates: Gate[]) => {
+	const dependencyGraph: DependencyNode[] = []
+	const variableDependedLast = new Map<number, number>() // <variable, line>
+	gates.forEach((line, currentLineNumber) => {
+		const vars = getVars(line)
+		const dependOnLines = Array.from(new Set(vars.map((variable) => variableDependedLast.get(variable)).filter((variableOrUndefined): variableOrUndefined is number => variableOrUndefined !== undefined)))
+		dependencyGraph.push({ lineNumber: currentLineNumber, dependOnLines })
+		vars.forEach((x) => variableDependedLast.set(x, currentLineNumber))
+	})
+	return dependencyGraph
+}
+
+export const getDependencyGraphAsString = (dependencyGraph: DependencyNode[]) => {
+	return dependencyGraph.map((x) => `${x.lineNumber}: [${ x.dependOnLines.join(',') }]`).join('\n')
+}
+export const getDependencyGraphAsEdgesString = (dependencyGraph: DependencyNode[]) => {
+	return dependencyGraph.flatMap((x) => x.dependOnLines.map((l) => `a${x.lineNumber} a${ l }`)).join('\n')
 }

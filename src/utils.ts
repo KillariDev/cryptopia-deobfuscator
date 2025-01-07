@@ -131,11 +131,6 @@ export const mapCircuit = (gates: Gate[], indexMapping: number[]) => {
 			target: indexMapping.indexOf(gate.target),
 			gate_i: gate.gate_i
 		}
-		if (newGate.a === -1 || newGate.b === -1 || newGate.target === -1) {
-			console.log(newGate)
-			console.log(indexMapping)
-			throw new Error('MAPPING FAILED!')
-		}
 		return newGate
 	})
 }
@@ -146,13 +141,6 @@ export const reverseMapCircuit = (mappedGates: Gate[], indexMapping: number[]) =
 			b: indexMapping[gate.b] || 0, // if a variable is missing, its not a mandatory variable
 			target: indexMapping[gate.target],
 			gate_i: gate.gate_i
-		}
-		if (newGate.a === undefined || newGate.b === undefined || newGate.target === undefined) {
-			console.log(mappedGates)
-			console.log(gate)
-			console.log(newGate)
-			console.log(indexMapping)
-			throw new Error('REVERSE MAPPING FAILED!')
 		}
 		return newGate
 	})
@@ -213,6 +201,21 @@ export const hashBooleanArrays = (array: boolean[]): string => {
 	return hash.digest('hex')
 }
 
+export const hashNumberArray = (array: number[]): string => {
+	// Allocate a buffer large enough to hold the numbers (assuming 4 bytes per number)
+	const buffer = Buffer.alloc(array.length * 4)  // 4 bytes per number
+	let offset = 0
+	// Write each number as a 4-byte integer
+	for (const n of array) {
+		buffer.writeInt32BE(n, offset)  // Write a 32-bit integer in big-endian format
+		offset += 4
+	}
+	// Create the SHA-256 hash
+	const hash = createHash('sha256')
+	hash.update(buffer)
+	return hash.digest('hex')
+}
+
 export function ioHash(mapping: boolean[]) {
 	return hashBooleanArrays(mapping)
 }
@@ -267,10 +270,13 @@ export const verifyCircuit = (oldGates: Gate[], newGates: Gate[], wires: number,
 		const original = evalCircuit(oldGates, input)
 		const optimized = evalCircuit(newGates, input)
 		if (!areBooleanArraysEqual(original, optimized)) {
-			console.log('CORRUPTION!')
 			console.log('input', input.join(','))
-			console.log('original output', original.join(','))
-			console.log('optimized output', optimized.join(','))
+			console.log('CORRUPTION!')
+			input.forEach((_,index) => {
+				if (original[index] !== optimized[index]) {
+					console.log(`v${index} differs`)
+				}
+			})
 			throw 'Circuit got corrupted!'
 		}
 	}
@@ -287,6 +293,11 @@ export const gateToText = (gate: Gate) => {
 	const control = getControlFunc(gate.gate_i)
 	return `${ targetName} ^= ${ placeVariables(aName, bName, control) }`
 }
+
 export const gatesToText = (gates: Gate[]) => {
 	return gates.map((gate) => gateToText(gate)).join('\n')
+}
+
+export function assertNever(value: never): never {
+	throw new Error(`Unhandled discriminated union member: ${JSON.stringify(value)}`)
 }

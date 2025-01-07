@@ -2,19 +2,23 @@
 	"name": "io-crypto",
 	"version": "1.0.0",
 	"description": "",
+	"type": "module",
 	"main": "index.js",
 	"scripts": {
-		"build": "npx tsc && node --max-old-space-size=16384 dist/index.js"
+		"optimize": "npx tsc && node --max-old-space-size=16384 dist/index.js"
 	},
 	"keywords": [],
 	"author": "",
 	"license": "ISC",
 	"devDependencies": {
+		"@types/d3": "^7.4.3",
 		"@types/node": "22.10.1",
 		"@types/sqlite3": "3.1.11",
 		"typescript": "5.7.2"
 	},
 	"dependencies": {
+		"canvas": "^3.0.1",
+		"d3": "^7.9.0",
 		"sqlite3": "5.1.7"
 	}
 }
