@@ -1,5 +1,6 @@
 import { map } from 'd3'
 import { DependencyNode } from './types.js'
+import { hashNumberArray } from './utils.js'
 
 export function* findAllTopologicalSorts(nodes: DependencyNode[]): Generator<number[]> {
 	const graph = buildGraph(nodes)
@@ -156,6 +157,7 @@ export function findGroupsThatDoNotDependFromOthers(nodes: DependencyNode[]): nu
 	return groups
 }
 
+/*
 export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] => {
 	const nodeMap: Map<number, DependencyNode> = new Map()
 	const memo: Map<number, number[]> = new Map()
@@ -167,14 +169,10 @@ export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] =
 
 	// Helper function to recursively find the longest path to a node
 	const findLongestPath = (lineNumber: number): number[] => {
-		if (memo.has(lineNumber)) {
-			return memo.get(lineNumber) as number[]
-		}
+		if (memo.has(lineNumber)) return memo.get(lineNumber) as number[]
 
 		const node = nodeMap.get(lineNumber)
-		if (!node) {
-			return []
-		}
+		if (!node) return []
 
 		let longestPath: number[] = []
 
@@ -193,50 +191,271 @@ export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] =
 	// Create an array to store the critical path for each node
 	const criticalPaths: number[][] = []
 
+	let iterator = 0
 	for (const node of nodes) {
+		if (iterator % 100) console.log(`CriticalPaths${iterator / nodes.length*100}%`)
+		iterator++
 		criticalPaths.push(findLongestPath(node.lineNumber))
+	}
+
+	return criticalPaths
+}
+*/
+
+export const findCriticalPath = (nodes: DependencyNode[]): number[] => {
+	const n = nodes.length
+	const pathLengths: number[] = new Array(n).fill(0)
+	const parents: number[] = new Array(n).fill(-1)
+
+	for (let i = 0; i < n; i++) {
+		const currentNode = nodes[i]
+		const dependencies = currentNode.dependOnLines
+
+		// If the node has no dependencies, it has a path length of 1 (itself)
+		if (dependencies.length === 0) {
+			pathLengths[i] = 1
+		} else {
+			// Otherwise, find the longest path from the dependencies
+			let maxPathLength = 0
+			let maxDependency = -1
+			for (const dependencyIndex of dependencies) {
+				if (pathLengths[dependencyIndex] > maxPathLength) {
+					maxPathLength = pathLengths[dependencyIndex]
+					maxDependency = dependencyIndex
+				}
+			}
+			// The path length of this node is 1 (itself) + the longest path length of its dependencies
+			pathLengths[i] = 1 + maxPathLength
+			// Record the parent node in the critical path
+			parents[i] = maxDependency
+		}
+	}
+
+	// Stack-based iterative method to collect the critical path
+	const criticalPath: number[] = []
+	const visited = new Set<number>()
+
+	// Start from the last node (the last element in the array)
+	let currentNodeIndex = n - 1
+
+	// Use a stack to store the nodes and traverse their dependencies
+	const stack: number[] = [currentNodeIndex, ...nodes[currentNodeIndex].dependOnLines]
+
+	while (stack.length > 0) {
+		const nodeIndex = stack[stack.length - 1]
+		const node = nodes[nodeIndex]
+
+		// If this node has been fully processed (all dependencies are collected), add it to the critical path
+		if (visited.has(nodeIndex)) {
+			// Add the current node to the critical path
+			criticalPath.push(node.lineNumber)
+			stack.pop()
+		} else {
+			// If not yet processed, push its dependencies to the stack
+			for (const dependencyIndex of node.dependOnLines) {
+				if (!visited.has(dependencyIndex)) {
+					stack.push(dependencyIndex)
+				}
+			}
+			// Mark the current node as visited for when we revisit it
+			visited.add(nodeIndex)
+		}
+	}
+	
+	return Array.from(new Set(criticalPath)).sort((a, b) => a - b)
+}
+
+export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] => {
+	const nodeMap: Map<number, DependencyNode> = new Map()
+	const inDegrees: Map<number, number> = new Map()
+	const adjList: Map<number, number[]> = new Map()
+	const pathLengths: Map<number, number> = new Map()
+
+	// Build adjacency list and track in-degrees
+	for (const node of nodes) {
+		nodeMap.set(node.lineNumber, node)
+		inDegrees.set(node.lineNumber, 0)
+		adjList.set(node.lineNumber, [])
+	}
+
+	for (const node of nodes) {
+		for (const dep of node.dependOnLines) {
+			adjList.get(dep)?.push(node.lineNumber)
+			inDegrees.set(node.lineNumber, (inDegrees.get(node.lineNumber) || 0) + 1)
+		}
+	}
+
+	// Perform topological sort
+	const queue: number[] = []
+	for (const [lineNumber, degree] of inDegrees.entries()) {
+		if (degree === 0) queue.push(lineNumber)
+	}
+
+	// Process nodes in topological order
+	while (queue.length > 0) {
+		const current = queue.shift() as number
+		if (current % 100) console.log(`CriticalPaths${current / nodes.length*100}%`)
+		const currentLength = pathLengths.get(current) || 0
+
+		for (const neighbor of adjList.get(current) || []) {
+			// Update the longest path length for the neighbor
+			const neighborLength = pathLengths.get(neighbor) || 0
+			pathLengths.set(neighbor, Math.max(neighborLength, currentLength + 1))
+
+			// Decrement in-degree and enqueue if it reaches 0
+			const updatedDegree = (inDegrees.get(neighbor) || 1) - 1
+			inDegrees.set(neighbor, updatedDegree)
+			if (updatedDegree === 0) {
+				queue.push(neighbor)
+			}
+		}
+	}
+	console.log(`rebuild`)
+
+	// Rebuild critical paths
+	const criticalPaths: number[][] = []
+	for (const node of nodes) {
+		const path: number[] = []
+		let current = node.lineNumber
+		if (current % 100) console.log(`rebuilding${current / nodes.length*100}%`)
+
+		while (pathLengths.has(current)) {
+			path.push(current)
+
+			let nextNode = null
+			let maxLength = -1
+
+			for (const dep of nodeMap.get(current)?.dependOnLines || []) {
+				const depLength = pathLengths.get(dep) || 0
+				if (depLength > maxLength) {
+					maxLength = depLength
+					nextNode = dep
+				}
+			}
+
+			if (nextNode === null) break
+			current = nextNode
+		}
+
+		path.reverse()
+		criticalPaths.push(path)
 	}
 
 	return criticalPaths
 }
 
 export function findLongestUniquePaths(data: number[][]): number[][] {
-    const uniquePaths: number[][] = []
+	const uniquePaths: number[][] = []
+	let iterator = 0
+	for (const path of data) {
+		let shouldAdd = true
+		if (iterator % 100) console.log(`Unique criticals ${iterator / data.length*100}%`)
+		iterator++
 
-    // Iterate over the paths
-    for (const path of data) {
-        let isUnique = true
+		for (let i = 0; i < uniquePaths.length; i++) {
+			const otherPath = uniquePaths[i]
+			const result = checkPrefixRelationship(path, otherPath)
 
-        // Compare with other paths
-        for (const otherPath of uniquePaths) {
-            // Check if the current path shares a prefix with any existing unique path
-            if (isPrefix(path, otherPath)) {
-                isUnique = false
-                break
-            }
-            if (isPrefix(otherPath, path)) {
-                // If the other path is a prefix, replace the shorter one
-                const index = uniquePaths.indexOf(otherPath)
-                if (index !== -1) {
-                    uniquePaths.splice(index, 1)
-                }
-            }
-        }
+			if (result === 'prefix') {
+				// Path is a prefix of otherPath; it's not unique
+				shouldAdd = false
+				break
+			} else if (result === 'superset') {
+				// OtherPath is a prefix of path; remove otherPath
+				uniquePaths.splice(i, 1)
+				i-- // Adjust index after removal
+			}
+		}
 
-        // If the path is unique, add it
-        if (isUnique) {
-            uniquePaths.push(path)
-        }
-    }
+		if (shouldAdd) {
+			uniquePaths.push(path)
+		}
+	}
 
-    return uniquePaths
+	return uniquePaths
 }
 
-// Helper function to check if path1 is a prefix of path2
-function isPrefix(path1: number[], path2: number[]): boolean {
-    if (path1.length > path2.length) return false
-    for (let i = 0; i < path1.length; i++) {
-        if (path1[i] !== path2[i]) return false
-    }
-    return true
+// Helper function to check the prefix relationship
+function checkPrefixRelationship(path1: number[], path2: number[]): 'prefix' | 'superset' | 'none' {
+	const minLength = Math.min(path1.length, path2.length)
+
+	for (let i = 0; i < minLength; i++) {
+		if (path1[i] !== path2[i]) {
+			return 'none'
+		}
+	}
+
+	if (path1.length === path2.length) {
+		return 'none' // Paths are identical, so neither is a prefix
+	}
+
+	return path1.length < path2.length ? 'prefix' : 'superset'
+}
+
+export const findUniqueCriticalPaths = (nodes: DependencyNode[]): number[][] => {
+	const nodeMap: Map<number, DependencyNode> = new Map()
+	const inDegrees: Map<number, number> = new Map()
+	const adjList: Map<number, number[]> = new Map()
+	const pathLengths: Map<number, number> = new Map()
+	const longestPaths: Map<number, number[]> = new Map()  // Tracks the longest path for each node
+
+	// Build adjacency list and track in-degrees
+	for (const node of nodes) {
+		nodeMap.set(node.lineNumber, node)
+		inDegrees.set(node.lineNumber, 0)
+		adjList.set(node.lineNumber, [])
+	}
+
+	for (const node of nodes) {
+		for (const dep of node.dependOnLines) {
+			adjList.get(dep)?.push(node.lineNumber)
+			inDegrees.set(node.lineNumber, (inDegrees.get(node.lineNumber) || 0) + 1)
+		}
+	}
+
+	// Perform topological sort
+	const queue: number[] = []
+	for (const [lineNumber, degree] of inDegrees.entries()) {
+		if (degree === 0) queue.push(lineNumber)
+	}
+
+	// Process nodes in topological order
+	while (queue.length > 0) {
+		const current = queue.shift() as number
+		const currentLength = pathLengths.get(current) || 0
+
+		for (const neighbor of adjList.get(current) || []) {
+			// Update the longest path length for the neighbor
+			const neighborLength = pathLengths.get(neighbor) || 0
+			if (currentLength + 1 > neighborLength) {
+				pathLengths.set(neighbor, currentLength + 1)
+				// Build the path incrementally
+				longestPaths.set(neighbor, [...(longestPaths.get(current) || []), current])
+			}
+
+			// Decrement in-degree and enqueue if it reaches 0
+			const updatedDegree = (inDegrees.get(neighbor) || 1) - 1
+			inDegrees.set(neighbor, updatedDegree)
+			if (updatedDegree === 0) {
+				queue.push(neighbor)
+			}
+		}
+	}
+
+	// Keep only unique critical paths
+	const uniquePaths: Set<string> = new Set() // Use a Set to store unique path representations
+	const finalPaths = []
+	// For each node, build the critical path and store its unique representation
+	for (const node of nodes) {
+		const path = [...(longestPaths.get(node.lineNumber) || []), node.lineNumber]
+		const pathString = hashNumberArray(path)
+
+		if (!uniquePaths.has(pathString)) {
+			uniquePaths.add(pathString) // Only add unique paths
+			finalPaths.push(path)
+			console.log(finalPaths.length)
+		}
+	}
+
+	return finalPaths
 }
