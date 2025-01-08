@@ -100,6 +100,7 @@ const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: Limited
 					uselessVarsFoundProb++
 					a += sliceSize - 1 // increment by slice amount that we don't optimize the same part again
 					console.log(`Probabilistically simplified 1 vars. With slice ${ sliceSize }`)
+					continue
 				}
 			}
 		}
@@ -145,7 +146,7 @@ const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: numb
 	console.log('Optimizer started')
 	while (true) {
 		// sort to a critical path
-		const lastVariableEditLine = iterations % (optimizedVersion.length - 5) + 5
+		const lastVariableEditLine = (Math.abs(optimizedVersion.length - iterations - 10)) % (optimizedVersion.length - 5) + 5
 		const dependencies = createDependencyGraph(optimizedVersion.slice(0, lastVariableEditLine))
 		const criticalPathToVariable = findCriticalPath(dependencies)
 		const criticalPath = criticalPathToVariable.map((line) => optimizedVersion[line])
@@ -161,7 +162,6 @@ const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: numb
 			// shuffle every second time with small max group size to move group boundaries around
 			//const swapLines = iterations % 2 ? findSwappableLines(optimizedVersion, getRandomNumberInRange(2, 3)) : findSwappableLines(optimizedVersion, 100000)
 			//optimizedVersion = shuffleLinesWithinGroups(optimizedVersion, swapLines)
-		
 		}
 		if (prevSavedLength !== optimizedVersion.length) {
 			const endTime = performance.now()
