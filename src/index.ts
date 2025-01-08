@@ -76,7 +76,7 @@ const insertArrayAtIndex = (originalArray: Gate[], newArray: Gate[], index: numb
 const RAINBOW_TABLE_WIRES = 4
 const FOUR_BYTE_ALL_INPUTS = generateCombinations(RAINBOW_TABLE_WIRES)
 
-const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, gates: Gate[], sliceSize: number, lastrow: number, useProbabilistically: boolean, circuitSize: number) => {
+const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, gates: Gate[], sliceSize: number, lastrow: number, useProbabilistically: boolean) => {
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
 	let uselessVarsFound = 0
 	let uselessVarsFoundProb = 0
@@ -120,7 +120,7 @@ const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: Limited
 	if (replacements.length === 0) return { gates, changed: false }
 	const newCircuit = replace(gates, replacements)
 	const diff = gates.length - newCircuit.length
-	console.log(`${ Math.floor(lastrow / circuitSize * 100) }% Removed ${ diff } gates (${ gates.length } -> ${ newCircuit.length }), exact simplified ${ uselessVarsFound } vars, probabilistically simplified ${ uselessVarsFoundProb } vars. With slice ${ sliceSize }`)
+	console.log(`${ Math.floor(lastrow / gates.length * 100) }% Removed ${ diff } gates (${ gates.length } -> ${ newCircuit.length }), exact simplified ${ uselessVarsFound } vars, probabilistically simplified ${ uselessVarsFoundProb } vars. With slice ${ sliceSize }`)
 	return { gates: newCircuit, changed: true }
 }
 
@@ -143,8 +143,8 @@ const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: numb
 	let lastSaved = performance.now()
 	const ioIdentifierCache = new LimitedMap<string, Gate[] | null>(1000000)
 	console.log('Optimizer started')
-	const circuitSize = originalGates.length
 	while (true) {
+		// sort to a critical path
 		const lastVariableEditLine = iterations % (optimizedVersion.length - 5) + 5
 		const dependencies = createDependencyGraph(optimizedVersion.slice(0, lastVariableEditLine))
 		const criticalPathToVariable = findCriticalPath(dependencies)
@@ -152,9 +152,9 @@ const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: numb
 		const oldremoved = replace(optimizedVersion, criticalPathToVariable.map((l) => ({ start: l, end: l, replacement: [] })))
 		optimizedVersion = insertArrayAtIndex(oldremoved, criticalPath, criticalPathToVariable[0])
 		
-		const MAX_SLICES = Math.min(20, lastVariableEditLine-1)
+		const MAX_SLICES = Math.min(20, lastVariableEditLine - 1)
 		for (let sliceToUse = 2; sliceToUse < MAX_SLICES; sliceToUse++) {
-			const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, optimizedVersion, sliceToUse, lastVariableEditLine, true, circuitSize)
+			const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, optimizedVersion, sliceToUse, lastVariableEditLine, true)
 			if (optimizationOutput.changed) {
 				optimizedVersion = optimizationOutput.gates
 			}
@@ -163,7 +163,6 @@ const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: numb
 			//optimizedVersion = shuffleLinesWithinGroups(optimizedVersion, swapLines)
 		
 		}
-		verifyCircuit(originalGates, optimizedVersion, 64, 20)
 		if (prevSavedLength !== optimizedVersion.length) {
 			const endTime = performance.now()
 			const timeDiffMins = (endTime - lastSaved) / 60000
