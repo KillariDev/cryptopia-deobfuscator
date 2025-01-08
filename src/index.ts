@@ -66,72 +66,21 @@ const findUselessVars = (sliceGates: Gate[], variableIndexMapping: number[]) => 
 	return undefined
 }
 
-const criticalPathOptimizer = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, gates: Gate[], sliceSize: number, uniqueCriticalPaths: number[][], useProbabilistically: boolean): Promise<{ changed: boolean, gates: Gate[] }> => {
-	const insertArrayAtIndex = (originalArray: Gate[], newArray: Gate[], index: number): Gate[] => {
-		if (index < 0 || index > originalArray.length) {
-			throw new Error('Index out of bounds')
-		}
-	
-		const before = originalArray.slice(0, index)
-		const after = originalArray.slice(index)
-	
-		return [...before, ...newArray, ...after]
-	}
-	
-	const processedSegment = new Set<string>()
-	for (const lineNumbers of uniqueCriticalPaths) {
-		for (let a = 0; a < lineNumbers.length - sliceSize; a++) {
-			const chosenLines = lineNumbers.slice(a, a+sliceSize)
-			const segmentHash = hashNumberArray(chosenLines)
-			if (processedSegment.has(segmentHash)) continue
-			processedSegment.add(segmentHash)
-			const sliceGates = chosenLines.map((l) => gates[l])
-			const firstRow = chosenLines[0]
-			const variableIndexMapping = mapVariablesToIndexes(sliceGates) // map variables to smaller amount of wires
-			if (variableIndexMapping.length >= RAINBOW_TABLE_WIRES) {
-				const replacement = findUselessVars(sliceGates, variableIndexMapping)
-				if (replacement !== undefined) {
-					const oldremoved = replace(gates, chosenLines.map((l) => ({ start: l, end: l, replacement: [] })))
-					const newCircuit = insertArrayAtIndex(oldremoved, gateSimplifier(replacement), firstRow)
-					console.log(`Simplified 1 vars. With slice ${ sliceSize }`)
-					return { changed: true, gates: newCircuit }
-				}
-				if (useProbabilistically) {
-					const replacement = findProbabilisticUselessVars(sliceGates, variableIndexMapping)
-					if (replacement !== undefined) {
-						const oldremoved = replace(gates, chosenLines.map((l) => ({ start: l, end: l, replacement: [] })))
-						const newCircuit = insertArrayAtIndex(oldremoved, gateSimplifier(replacement), firstRow)
-						console.log(`Probabilistically simplified 1 vars. With slice ${ sliceSize }`)
-						return { changed: true, gates: newCircuit }
-					}
-				}
-			}
-			
-			if (variableIndexMapping.length > RAINBOW_TABLE_WIRES) continue
-			const mappedGates = mapCircuit(sliceGates, variableIndexMapping)
-			const allOutputs = calculateAllOutputsArray(mappedGates, FOUR_BYTE_ALL_INPUTS)
-			const ioIdentifier = ioHash(allOutputs)
-			const rainbowMatch = await getReplacerById(db, ioIdentifierCache, ioIdentifier)
-			if (rainbowMatch && rainbowMatch.replacerGates.length < chosenLines.length) { //replace if we find a match and its better
-				const replacement = reverseMapCircuit(rainbowMatch.replacerGates, variableIndexMapping)
-				const oldremoved = replace(gates, chosenLines.map((l) => ({ start: l, end: l, replacement: [] })))
-				const newCircuit = insertArrayAtIndex(oldremoved, replacement, firstRow)
-				const diff = gates.length - newCircuit.length
-				console.log(`Removed ${ diff } gates (${ gates.length } -> ${ newCircuit.length }). With slice ${ sliceSize }`)
-				return { changed: true, gates: newCircuit }
-			}
-		}
-	}
-	return { changed: false, gates }
+const insertArrayAtIndex = (originalArray: Gate[], newArray: Gate[], index: number): Gate[] => {
+	if (index < 0 || index > originalArray.length) throw new Error('Index out of bounds')
+	const before = originalArray.slice(0, index)
+	const after = originalArray.slice(index)
+	return [...before, ...newArray, ...after]
 }
 
 const RAINBOW_TABLE_WIRES = 4
 const FOUR_BYTE_ALL_INPUTS = generateCombinations(RAINBOW_TABLE_WIRES)
 
-const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, gates: Gate[], sliceSize: number, verbose: boolean) => {
+const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, gates: Gate[], sliceSize: number, lastrow: number, useProbabilistically: boolean, circuitSize: number) => {
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
 	let uselessVarsFound = 0
-	for (let a = 0; a < gates.length - sliceSize; a++) {
+	let uselessVarsFoundProb = 0
+	for (let a = 0; a < Math.min(gates.length - sliceSize,lastrow); a++) {
 		const start = a
 		const end = a + sliceSize
 		const sliceGates = gates.slice(start, end)
@@ -143,6 +92,15 @@ const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: Limited
 				uselessVarsFound++
 				a += sliceSize - 1 // increment by slice amount that we don't optimize the same part again
 				continue
+			}
+			if (useProbabilistically) {
+				const replacement = findProbabilisticUselessVars(sliceGates, variableIndexMapping)
+				if (replacement !== undefined) {
+					replacements.push({ start, end: end - 1, replacement: gateSimplifier(replacement) })
+					uselessVarsFoundProb++
+					a += sliceSize - 1 // increment by slice amount that we don't optimize the same part again
+					console.log(`Probabilistically simplified 1 vars. With slice ${ sliceSize }`)
+				}
 			}
 		}
 		if (variableIndexMapping.length > RAINBOW_TABLE_WIRES) continue
@@ -162,7 +120,7 @@ const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: Limited
 	if (replacements.length === 0) return { gates, changed: false }
 	const newCircuit = replace(gates, replacements)
 	const diff = gates.length - newCircuit.length
-	console.log(`Removed ${ diff } gates (${ gates.length } -> ${ newCircuit.length }) and simplified ${ uselessVarsFound } vars. With slice ${ sliceSize }`)
+	console.log(`${ Math.floor(lastrow / circuitSize * 100) }% Removed ${ diff } gates (${ gates.length } -> ${ newCircuit.length }), exact simplified ${ uselessVarsFound } vars, probabilistically simplified ${ uselessVarsFoundProb } vars. With slice ${ sliceSize }`)
 	return { gates: newCircuit, changed: true }
 }
 
@@ -177,61 +135,33 @@ const gateSimplifier = (gates: Gate[]) => {
 	})
 }
 
-type Stages = 'MassOptimizer' | 'CriticalPathOptimizer' | 'CriticalPathOptimizerWithProbabilistic'
-const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, verbose: boolean, startStage: Stages) => {
+const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string) => {
 	let iterations = 0
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	optimizedVersion = gateSimplifier(optimizedVersion)
 	let lastSaved = performance.now()
 	const ioIdentifierCache = new LimitedMap<string, Gate[] | null>(1000000)
-	let optimizerState = startStage
 	console.log('Optimizer started')
+	const circuitSize = originalGates.length
 	while (true) {
-		// mass optimizer, scans throught everything
-		switch(optimizerState) {
-			case 'MassOptimizer': {
-				let failedToOptimize = true
-				const MAX_SLICES = 20
-				for (let sliceToUse = 2; sliceToUse < MAX_SLICES; sliceToUse++) {
-					const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, optimizedVersion, sliceToUse, verbose)
-					if (optimizationOutput.changed) {
-						optimizedVersion = optimizationOutput.gates
-						failedToOptimize = false
-						break
-					}
-					// shuffle every second time with small max group size to move group boundaries around
-					const swapLines = iterations % 2 ? findSwappableLines(optimizedVersion, getRandomNumberInRange(2, 3)) : findSwappableLines(optimizedVersion, 100000)
-					optimizedVersion = shuffleLinesWithinGroups(optimizedVersion, swapLines)
-				}
-				if (failedToOptimize) {
-					console.log('change to OneThingOptimizer')
-					optimizerState = 'CriticalPathOptimizer' // change optimizer when the mass thing fails once to find anything
-				}
-				break
+		const lastVariableEditLine = iterations % (optimizedVersion.length - 5) + 5
+		const dependencies = createDependencyGraph(optimizedVersion.slice(0, lastVariableEditLine))
+		const criticalPathToVariable = findCriticalPath(dependencies)
+		const criticalPath = criticalPathToVariable.map((line) => optimizedVersion[line])
+		const oldremoved = replace(optimizedVersion, criticalPathToVariable.map((l) => ({ start: l, end: l, replacement: [] })))
+		optimizedVersion = insertArrayAtIndex(oldremoved, criticalPath, criticalPathToVariable[0])
+		
+		const MAX_SLICES = Math.min(20, lastVariableEditLine-1)
+		for (let sliceToUse = 2; sliceToUse < MAX_SLICES; sliceToUse++) {
+			const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, optimizedVersion, sliceToUse, lastVariableEditLine, true, circuitSize)
+			if (optimizationOutput.changed) {
+				optimizedVersion = optimizationOutput.gates
 			}
-			case 'CriticalPathOptimizerWithProbabilistic':
-			case 'CriticalPathOptimizer': {
-				// tries to find one thing to optimize
-				const dependencies = createDependencyGraph(optimizedVersion)
-				//const variableIndex = iterations % wires
-				//const lastVariableEditLine = optimizedVersion.length - 1 - optimizedVersion.slice().reverse().findIndex((x) => x.target === variableIndex)
-				const lastVariableEditLine = iterations % (dependencies.length - 2) + 2
-				const criticalPathToVariable = findCriticalPath(dependencies.slice(0, lastVariableEditLine))
-				const uniqueCriticalPaths = [criticalPathToVariable]
-				const probabilistic = optimizerState === 'CriticalPathOptimizerWithProbabilistic'
-				const slices = [1000,100,50,20,10,8,7,6,5,4,3,2]
-				for (const sliceToUse of slices) {
-					const optimizationOutput = await criticalPathOptimizer(db, ioIdentifierCache, optimizedVersion, sliceToUse, uniqueCriticalPaths, probabilistic)
-					if (optimizationOutput.changed) {
-						optimizedVersion = optimizationOutput.gates
-						break
-					}
-				}
-				break
-			}
-			default: assertNever(optimizerState)
-
+			// shuffle every second time with small max group size to move group boundaries around
+			//const swapLines = iterations % 2 ? findSwappableLines(optimizedVersion, getRandomNumberInRange(2, 3)) : findSwappableLines(optimizedVersion, 100000)
+			//optimizedVersion = shuffleLinesWithinGroups(optimizedVersion, swapLines)
+		
 		}
 		verifyCircuit(originalGates, optimizedVersion, 64, 20)
 		if (prevSavedLength !== optimizedVersion.length) {
@@ -276,7 +206,7 @@ const run = async (pathToFileWithoutExt: string, verbose: boolean) => {
 	//drawDependencyGraph(dependencies, `${ pathToFileWithoutExt }.dependency-graph.png`,8048, 8048)
 	
 	try {
-		await optimize(db, gates, inputCircuit.wire_count, pathToFileWithoutExt, verbose, 'CriticalPathOptimizerWithProbabilistic')
+		await optimize(db, gates, inputCircuit.wire_count, pathToFileWithoutExt)
 	} catch(e: unknown) {
 		console.error(e)
 	}
