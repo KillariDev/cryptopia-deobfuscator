@@ -27,7 +27,6 @@ const findProbabilisticUselessVars = (sliceGates: Gate[], variableIndexMapping: 
 	
 	const nVariables = variableIndexMapping.length
 	if (nVariables < 8) return undefined // no need to do this approach for less than 8 vars as we have exact way already
-	if (nVariables > 32) return undefined // try max 32
 	const attempts = getAttemptsToBeConfident(0.995, nVariables)+100
 	const mappedGates = mapCircuit(sliceGates, variableIndexMapping)
 	for (let variableIndex = 0; variableIndex < nVariables; variableIndex++) {
@@ -76,11 +75,11 @@ const insertArrayAtIndex = (originalArray: Gate[], newArray: Gate[], index: numb
 const RAINBOW_TABLE_WIRES = 4
 const FOUR_BYTE_ALL_INPUTS = generateCombinations(RAINBOW_TABLE_WIRES)
 
-const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, gates: Gate[], sliceSize: number, lastrow: number, useProbabilistically: boolean) => {
+const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, gates: Gate[], sliceSize: number, useProbabilistically: boolean) => {
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
 	let uselessVarsFound = 0
 	let uselessVarsFoundProb = 0
-	for (let a = 0; a < Math.min(gates.length - sliceSize,lastrow); a++) {
+	for (let a = 0; a < gates.length - sliceSize; a++) {
 		const start = a
 		const end = a + sliceSize
 		const sliceGates = gates.slice(start, end)
@@ -121,7 +120,7 @@ const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: Limited
 	if (replacements.length === 0) return { gates, changed: false }
 	const newCircuit = replace(gates, replacements)
 	const diff = gates.length - newCircuit.length
-	console.log(`${ Math.floor(lastrow / gates.length * 100) }% Removed ${ diff } gates (${ gates.length } -> ${ newCircuit.length }), exact simplified ${ uselessVarsFound } vars, probabilistically simplified ${ uselessVarsFoundProb } vars. With slice ${ sliceSize }`)
+	console.log(`Removed ${ diff } gates (${ gates.length } -> ${ newCircuit.length }), exact simplified ${ uselessVarsFound } vars, probabilistically simplified ${ uselessVarsFoundProb } vars. With slice ${ sliceSize }`)
 	return { gates: newCircuit, changed: true }
 }
 
@@ -136,28 +135,44 @@ const gateSimplifier = (gates: Gate[]) => {
 	})
 }
 
+function arrayOfRandomOrder(n: number): number[] {
+	const numbers = Array.from({ length: n + 1 }, (_, i) => i)
+
+	// Shuffle the array using Fisher-Yates algorithm
+	for (let i = numbers.length - 1; i > 0; i--) {
+		const randomIndex: number = Math.floor(Math.random() * (i + 1));
+		[numbers[i], numbers[randomIndex]] = [numbers[randomIndex], numbers[i]]
+	}
+	return numbers
+}
+
 const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string) => {
 	let iterations = 0
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	optimizedVersion = gateSimplifier(optimizedVersion)
 	let lastSaved = performance.now()
+	let iterationOrder: number[] = []
 	const ioIdentifierCache = new LimitedMap<string, Gate[] | null>(1000000)
 	console.log('Optimizer started')
 	while (true) {
 		// sort to a critical path
-		const lastVariableEditLine = (Math.abs(optimizedVersion.length - iterations - 10)) % (optimizedVersion.length - 5) + 5
+		if (iterationOrder.length != optimizedVersion.length) {
+			iterationOrder = arrayOfRandomOrder(optimizedVersion.length)
+		}
+		const lastVariableEditLine = iterationOrder[iterations%iterationOrder.length] % (optimizedVersion.length - 5) + 5
 		const dependencies = createDependencyGraph(optimizedVersion.slice(0, lastVariableEditLine))
 		const criticalPathToVariable = findCriticalPath(dependencies)
 		const criticalPath = criticalPathToVariable.map((line) => optimizedVersion[line])
 		const oldremoved = replace(optimizedVersion, criticalPathToVariable.map((l) => ({ start: l, end: l, replacement: [] })))
 		optimizedVersion = insertArrayAtIndex(oldremoved, criticalPath, criticalPathToVariable[0])
 		
-		const MAX_SLICES = Math.min(20, lastVariableEditLine - 1)
-		for (let sliceToUse = 2; sliceToUse < MAX_SLICES; sliceToUse++) {
-			const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, optimizedVersion, sliceToUse, lastVariableEditLine, true)
+		const slices = [2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 40, 80, 200]
+		for (const sliceToUse of slices) {
+			const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, optimizedVersion, sliceToUse, true)
 			if (optimizationOutput.changed) {
 				optimizedVersion = optimizationOutput.gates
+				break
 			}
 			// shuffle every second time with small max group size to move group boundaries around
 			//const swapLines = iterations % 2 ? findSwappableLines(optimizedVersion, getRandomNumberInRange(2, 3)) : findSwappableLines(optimizedVersion, 100000)
