@@ -18,5 +18,6 @@ export type InputOutputReplacer = {
 
 export type DependencyNode = {
 	lineNumber: number,
-	dependOnLines: number[]
+	dependOnPastLines: number[]
+	dependOnFutureLine: number
 }

@@ -1,7 +1,9 @@
 import { createCanvas } from 'canvas'
 import * as fs from 'fs'
 import * as d3 from 'd3'
-import { DependencyNode } from './types.js'
+import { DependencyNode, Gate } from './types.js'
+import { createDependencyGraph } from './lineswapper.js'
+import { groupTopologicalSort } from './cycles.js'
 
 interface D3Node extends d3.SimulationNodeDatum {
 	id: number
@@ -33,7 +35,9 @@ function scaleNodesToFit(nodes: D3Node[], width: number, height: number): void {
 	});
   }
 
-export function drawDependencyGraph(dependencyData: DependencyNode[], outputFilePath: string, width: number, height: number): void {
+export function drawDependencyGraph(gates: Gate[], wires: number, outputFilePath: string, width: number, height: number): void {
+	const dependencyData = createDependencyGraph(gates, wires)
+	const groups = groupTopologicalSort(dependencyData)
 	// Create a canvas for rendering
 	const canvas = createCanvas(width, height)
 	const context = canvas.getContext('2d')
@@ -46,11 +50,11 @@ export function drawDependencyGraph(dependencyData: DependencyNode[], outputFile
 	const nodes: D3Node[] = dependencyData.map(node => ({
 		id: node.lineNumber,
 		x: node.lineNumber,
-		y: 0
+		y: node.lineNumber
 	}))
 
 	const links: D3Link[] = dependencyData.flatMap(node =>
-		node.dependOnLines.map(target => ({
+		node.dependOnPastLines.map(target => ({
 			source: node.lineNumber,
 			target: target
 		}))
@@ -63,16 +67,11 @@ export function drawDependencyGraph(dependencyData: DependencyNode[], outputFile
 		.stop()
 
 	// Run the simulation to compute node positions
-	for (let i = 0; i < 100; ++i) simulation.tick()
-	nodes.forEach(node => { node.x = node.id })
-	scaleNodesToFit(nodes, width, height)
-	for (let i = 0; i < 100; ++i) simulation.tick()
-	nodes.forEach(node => { node.x = node.id })
-	scaleNodesToFit(nodes, width, height)
-	for (let i = 0; i < 2000; ++i) simulation.tick()
-	nodes.forEach(node => { node.x = node.id })
-	scaleNodesToFit(nodes, width, height)
-
+	for (let i = 0; i < 500; ++i) {
+		simulation.tick()
+		nodes.forEach(node => { node.y = groups[node.id]*10 })
+		scaleNodesToFit(nodes, width, height)
+	}
 
 	// Draw links
 	context.strokeStyle = '#aaa'

@@ -12,7 +12,7 @@ export function* findAllTopologicalSorts(nodes: DependencyNode[]): Generator<num
 		inDegreeMap[node.lineNumber] = 0
 	})
 	graph.forEach(node => {
-		node.dependOnLines.forEach(dep => {
+		node.dependOnPastLines.forEach(dep => {
 			inDegreeMap[dep]++
 		})
 	})
@@ -34,7 +34,7 @@ export function* findAllTopologicalSorts(nodes: DependencyNode[]): Generator<num
 		for (const node of availableNodes) {
 			// Add node to current sort and adjust in-degree of its neighbors
 			currentSort.push(node)
-			for (const neighbor of graph.find(n => n.lineNumber === node)!.dependOnLines) {
+			for (const neighbor of graph.find(n => n.lineNumber === node)!.dependOnPastLines) {
 				inDegreeMap[neighbor]--
 			}
 
@@ -43,7 +43,7 @@ export function* findAllTopologicalSorts(nodes: DependencyNode[]): Generator<num
 
 			// Backtrack: remove node and restore in-degrees
 			currentSort.pop()
-			for (const neighbor of graph.find(n => n.lineNumber === node)!.dependOnLines) {
+			for (const neighbor of graph.find(n => n.lineNumber === node)!.dependOnPastLines) {
 				inDegreeMap[neighbor]++
 			}
 		}
@@ -56,17 +56,17 @@ function buildGraph(nodes: DependencyNode[]): DependencyNode[] {
 	const graph: DependencyNode[] = []
 	const lineNumberToNodeMap: { [key: number]: DependencyNode } = {}
 
-	for (const { lineNumber, dependOnLines } of nodes) {
+	for (const { lineNumber, dependOnPastLines } of nodes) {
 		if (!lineNumberToNodeMap[lineNumber]) {
-			lineNumberToNodeMap[lineNumber] = { lineNumber, dependOnLines: [] }
+			lineNumberToNodeMap[lineNumber] = { lineNumber, dependOnPastLines: [], dependOnFutureLine: -1 }
 			graph.push(lineNumberToNodeMap[lineNumber])
 		}
-		for (const dep of dependOnLines) {
+		for (const dep of dependOnPastLines) {
 			if (!lineNumberToNodeMap[dep]) {
-				lineNumberToNodeMap[dep] = { lineNumber: dep, dependOnLines: [] }
+				lineNumberToNodeMap[dep] = { lineNumber: dep, dependOnPastLines: [], dependOnFutureLine: -1 }
 				graph.push(lineNumberToNodeMap[dep])
 			}
-			lineNumberToNodeMap[dep].dependOnLines.push(lineNumber)
+			lineNumberToNodeMap[dep].dependOnPastLines.push(lineNumber)
 		}
 	}
 
@@ -85,7 +85,7 @@ export function groupTopologicalSort(nodes: DependencyNode[]): number[] {
 		groupIds[node.lineNumber] = 0
 	})
 	graph.forEach(node => {
-		node.dependOnLines.forEach(dep => {
+		node.dependOnPastLines.forEach(dep => {
 			inDegreeMap[dep]++
 		})
 	})
@@ -107,7 +107,7 @@ export function groupTopologicalSort(nodes: DependencyNode[]): number[] {
 		const currentNode = nodeQueue.shift()!
 
 		// For each dependent node, update its group ID and process further
-		for (const dep of graph.find(n => n.lineNumber === currentNode)!.dependOnLines) {
+		for (const dep of graph.find(n => n.lineNumber === currentNode)!.dependOnPastLines) {
 			groupIds[dep] = Math.max(groupIds[dep], groupIds[currentNode] + 1)
 			inDegreeMap[dep]--
 
@@ -131,7 +131,7 @@ export function findGroupsThatDoNotDependFromOthers(nodes: DependencyNode[]): nu
 	const findAllThatDepend = (lineNumber: number) => {
 		let dependents: DependencyNode[] = []
 		for (const node of nodes) {
-			if(node.dependOnLines.indexOf(lineNumber) >= 0) {
+			if(node.dependOnPastLines.indexOf(lineNumber) >= 0) {
 				dependents = [...dependents, node] 
 			}
 		}
@@ -141,10 +141,10 @@ export function findGroupsThatDoNotDependFromOthers(nodes: DependencyNode[]): nu
 	const knownGroups = new Map<number, number[]>()
 	
 	for (const node of nodes) {
-		const a = node.dependOnLines
+		const a = node.dependOnPastLines
 		const deps = Array.from(new Set(a.flatMap((x) => findAllThatDepend(x)).map((x) => x.lineNumber))).sort((a, b) => a - b)
-		const getMidDependnceis = deps.filter((x) => !(x >= node.lineNumber || node.dependOnLines.indexOf(x) >= 0))
-		const newGroup = [node.lineNumber, ...node.dependOnLines, ...getMidDependnceis]
+		const getMidDependnceis = deps.filter((x) => !(x >= node.lineNumber || node.dependOnPastLines.indexOf(x) >= 0))
+		const newGroup = [node.lineNumber, ...node.dependOnPastLines, ...getMidDependnceis]
 		newGroup.forEach((x) => {
 			const known = knownGroups.get(x)
 			if (known) newGroup.push(...known)
@@ -157,7 +157,7 @@ export function findGroupsThatDoNotDependFromOthers(nodes: DependencyNode[]): nu
 	return groups
 }
 
-/*
+
 export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] => {
 	const nodeMap: Map<number, DependencyNode> = new Map()
 	const memo: Map<number, number[]> = new Map()
@@ -176,14 +176,14 @@ export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] =
 
 		let longestPath: number[] = []
 
-		for (const dep of node.dependOnLines) {
+		for (const dep of node.dependOnPastLines) {
 			const path = findLongestPath(dep)
 			if (path.length > longestPath.length) {
 				longestPath = path
 			}
 		}
 
-		const result = Array.from(new Set([...longestPath, ...node.dependOnLines, lineNumber])).sort((a, b) => a - b)
+		const result = Array.from(new Set([...longestPath, ...node.dependOnPastLines, lineNumber])).sort((a, b) => a - b)
 		memo.set(lineNumber, result)
 		return result
 	}
@@ -193,23 +193,23 @@ export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] =
 
 	let iterator = 0
 	for (const node of nodes) {
-		if (iterator % 100) console.log(`CriticalPaths${iterator / nodes.length*100}%`)
 		iterator++
 		criticalPaths.push(findLongestPath(node.lineNumber))
 	}
 
 	return criticalPaths
 }
-*/
+
 
 export const findCriticalPath = (nodes: DependencyNode[]): number[] => {
 	const n = nodes.length
 	const pathLengths: number[] = new Array(n).fill(0)
 	const parents: number[] = new Array(n).fill(-1)
 
+	// First, calculate the longest path lengths and parent dependencies
 	for (let i = 0; i < n; i++) {
 		const currentNode = nodes[i]
-		const dependencies = currentNode.dependOnLines
+		const dependencies = currentNode.dependOnPastLines
 
 		// If the node has no dependencies, it has a path length of 1 (itself)
 		if (dependencies.length === 0) {
@@ -231,40 +231,46 @@ export const findCriticalPath = (nodes: DependencyNode[]): number[] => {
 		}
 	}
 
-	// Stack-based iterative method to collect the critical path
+	// Now, we'll backtrack starting from the last node (n - 1)
 	const criticalPath: number[] = []
 	const visited = new Set<number>()
+	const stack: number[] = [n - 1] // Start with the last node in the stack
+	const inProgress = new Set<number>() // Tracks nodes that are being processed
 
-	// Start from the last node (the last element in the array)
-	let currentNodeIndex = n - 1
-
-	// Use a stack to store the nodes and traverse their dependencies
-	const stack: number[] = [currentNodeIndex, ...nodes[currentNodeIndex].dependOnLines]
-
+	// Use a while loop to simulate recursion
 	while (stack.length > 0) {
 		const nodeIndex = stack[stack.length - 1]
 		const node = nodes[nodeIndex]
 
-		// If this node has been fully processed (all dependencies are collected), add it to the critical path
+		// If the node is already fully processed (added to the path), pop it and continue
 		if (visited.has(nodeIndex)) {
-			// Add the current node to the critical path
+			stack.pop()
+			continue
+		}
+
+		// If the node is in progress, it means all its dependencies are processed
+		if (inProgress.has(nodeIndex)) {
+			// Add the node to the critical path
 			criticalPath.push(node.lineNumber)
+			visited.add(nodeIndex)
 			stack.pop()
 		} else {
-			// If not yet processed, push its dependencies to the stack
-			for (const dependencyIndex of node.dependOnLines) {
-				if (!visited.has(dependencyIndex)) {
+			// Mark the node as in progress and push its dependencies to the stack
+			inProgress.add(nodeIndex)
+
+			// Push all dependencies of the current node to the stack
+			for (const dependencyIndex of node.dependOnPastLines) {
+				if (!visited.has(dependencyIndex) && !inProgress.has(dependencyIndex)) {
 					stack.push(dependencyIndex)
 				}
 			}
-			// Mark the current node as visited for when we revisit it
-			visited.add(nodeIndex)
 		}
 	}
-	
-	return Array.from(new Set(criticalPath)).sort((a, b) => a - b)
-}
 
+	// Return the critical path in the correct order (from start to end)
+	return criticalPath
+}
+/*
 export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] => {
 	const nodeMap: Map<number, DependencyNode> = new Map()
 	const inDegrees: Map<number, number> = new Map()
@@ -279,7 +285,7 @@ export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] =
 	}
 
 	for (const node of nodes) {
-		for (const dep of node.dependOnLines) {
+		for (const dep of node.dependOnPastLines) {
 			adjList.get(dep)?.push(node.lineNumber)
 			inDegrees.set(node.lineNumber, (inDegrees.get(node.lineNumber) || 0) + 1)
 		}
@@ -294,7 +300,6 @@ export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] =
 	// Process nodes in topological order
 	while (queue.length > 0) {
 		const current = queue.shift() as number
-		if (current % 100) console.log(`CriticalPaths${current / nodes.length*100}%`)
 		const currentLength = pathLengths.get(current) || 0
 
 		for (const neighbor of adjList.get(current) || []) {
@@ -310,14 +315,12 @@ export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] =
 			}
 		}
 	}
-	console.log(`rebuild`)
 
 	// Rebuild critical paths
 	const criticalPaths: number[][] = []
 	for (const node of nodes) {
 		const path: number[] = []
 		let current = node.lineNumber
-		if (current % 100) console.log(`rebuilding${current / nodes.length*100}%`)
 
 		while (pathLengths.has(current)) {
 			path.push(current)
@@ -325,7 +328,7 @@ export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] =
 			let nextNode = null
 			let maxLength = -1
 
-			for (const dep of nodeMap.get(current)?.dependOnLines || []) {
+			for (const dep of nodeMap.get(current)?.dependOnPastLines || []) {
 				const depLength = pathLengths.get(dep) || 0
 				if (depLength > maxLength) {
 					maxLength = depLength
@@ -342,15 +345,12 @@ export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] =
 	}
 
 	return criticalPaths
-}
+}*/
 
 export function findLongestUniquePaths(data: number[][]): number[][] {
 	const uniquePaths: number[][] = []
-	let iterator = 0
 	for (const path of data) {
 		let shouldAdd = true
-		if (iterator % 100) console.log(`Unique criticals ${iterator / data.length*100}%`)
-		iterator++
 
 		for (let i = 0; i < uniquePaths.length; i++) {
 			const otherPath = uniquePaths[i]
@@ -407,7 +407,7 @@ export const findUniqueCriticalPaths = (nodes: DependencyNode[]): number[][] => 
 	}
 
 	for (const node of nodes) {
-		for (const dep of node.dependOnLines) {
+		for (const dep of node.dependOnPastLines) {
 			adjList.get(dep)?.push(node.lineNumber)
 			inDegrees.set(node.lineNumber, (inDegrees.get(node.lineNumber) || 0) + 1)
 		}
@@ -453,7 +453,6 @@ export const findUniqueCriticalPaths = (nodes: DependencyNode[]): number[][] => 
 		if (!uniquePaths.has(pathString)) {
 			uniquePaths.add(pathString) // Only add unique paths
 			finalPaths.push(path)
-			console.log(finalPaths.length)
 		}
 	}
 

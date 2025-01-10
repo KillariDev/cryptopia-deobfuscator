@@ -1,5 +1,5 @@
 import { DependencyNode, Gate } from "./types.js"
-import { getVars } from "./utils.js"
+import { gateToText, getVars } from "./utils.js"
 
 const setHasAny = (set: Set<number>, vars: number[]) => {
 	for (const oneVar of vars) {
@@ -9,7 +9,7 @@ const setHasAny = (set: Set<number>, vars: number[]) => {
 }
 
 // todo, some functions don't have both a&b vars or either
-export function findSwappableLines(lines: Gate[], maxGroupSize: number): number[][] {
+export function findSwappableLines(lines: Gate[], maxGroupSize: number, wires: number): number[][] {
 	let currentLeftSideDependencies = new Set<number>()
 	let currentRightSideDependencies = new Set<number>()
 	let currentLines: number[] = []
@@ -21,7 +21,7 @@ export function findSwappableLines(lines: Gate[], maxGroupSize: number): number[
 		currentLeftSideDependencies = new Set<number>()
 	}
 	lines.forEach((line, index) => {
-		const vars = getVars(line)
+		const vars = getVars(line, wires)
 		const leftSide = vars[0]
 		const rightSide = vars
 		// the line depends on other if
@@ -56,21 +56,38 @@ export function shuffleLinesWithinGroups(lines: Gate[], groups: number[][]): Gat
 	return shuffledLines;
 }
 
-export const createDependencyGraph = (gates: Gate[]) => {
+export const createDependencyGraph = (gates: Gate[], wires: number) => {
 	const dependencyGraph: DependencyNode[] = []
 	const variableDependedLast = new Map<number, number>() // <variable, line>
+	const variableSetLast = new Map<number, number>() // <variable, line>
 	gates.forEach((line, currentLineNumber) => {
-		const vars = getVars(line)
-		const dependOnLines = Array.from(new Set(vars.map((variable) => variableDependedLast.get(variable)).filter((variableOrUndefined): variableOrUndefined is number => variableOrUndefined !== undefined)))
-		dependencyGraph.push({ lineNumber: currentLineNumber, dependOnLines })
+		const vars = getVars(line, wires)
+		const target = vars[0]
+		const rest = vars.slice(1)
+		const targetDepends = variableDependedLast.get(target)
+		const restDepends = rest.map((variable) => variableSetLast.get(variable)).filter((variableOrUndefined): variableOrUndefined is number => variableOrUndefined !== undefined)
+		const dependOnFuture = gates.slice(currentLineNumber + 1).findIndex((futureLine) => {
+			const futureVars = getVars(futureLine, wires)
+			const futureTarget = futureVars[0]
+			return futureVars.includes(target) || rest.includes(futureTarget)
+		})
+		dependencyGraph.push({
+			lineNumber: currentLineNumber,
+			dependOnPastLines: Array.from(new Set([...targetDepends ? [targetDepends] : [], ...restDepends])).sort((a, b) => a - b),
+			dependOnFutureLine: dependOnFuture < 0 ? dependOnFuture : dependOnFuture + currentLineNumber +1,
+		})
 		vars.forEach((x) => variableDependedLast.set(x, currentLineNumber))
+		variableSetLast.set(vars[0], currentLineNumber)
 	})
 	return dependencyGraph
 }
 
 export const getDependencyGraphAsString = (dependencyGraph: DependencyNode[]) => {
-	return dependencyGraph.map((x) => `${x.lineNumber}: [${ x.dependOnLines.join(',') }]`).join('\n')
+	return dependencyGraph.map((x) => `${x.lineNumber}: [${ x.dependOnPastLines.join(',') }] -> ${ x.dependOnFutureLine }`).join('\n')
+}
+export const getDependencyGraphAsStringWithGates = (dependencyGraph: DependencyNode[], gates: Gate[]) => {
+	return dependencyGraph.map((x) => `${x.lineNumber}: [${ x.dependOnPastLines.join(',') }] -> ${ x.dependOnFutureLine } = ${gateToText(gates[x.lineNumber])}`).join('\n')
 }
 export const getDependencyGraphAsEdgesString = (dependencyGraph: DependencyNode[]) => {
-	return dependencyGraph.flatMap((x) => x.dependOnLines.map((l) => `a${x.lineNumber} a${ l }`)).join('\n')
+	return dependencyGraph.flatMap((x) => x.dependOnPastLines.map((l) => `a${x.lineNumber} a${ l }`)).join('\n')
 }
