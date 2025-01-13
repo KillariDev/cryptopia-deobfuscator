@@ -10,38 +10,39 @@ import { join, parse } from 'path'
 import { drawDependencyGraph } from './drawGraph.js'
 
 const removeVariable = (gates: Gate[], variable: number) => {
-	return gates.filter((x) => x.target !== variable && !(x.a === x.b && x.a === variable)).map((gate) => {
+	return gates.map((gate) => {
+		if (gate.target === variable) return undefined
+		const vars = getVars(gate)
+		if (vars.length === 2 && vars[1] === variable) return undefined
 		if (gate.a === variable) return simplifyGate({ ...gate, a: gate.b })
 		if (gate.b === variable) return simplifyGate({ ...gate, b: gate.a })
 		return gate
-	})
+	}).filter((gate): gate is Gate => gate !== undefined)
 }
 
-const randomInputs = generateNRandomBooleanArray(102, 64)
+
+const areCircuitsProbabilisticallyTheSame = (cachedOutputs: boolean[][], oldCircuit: Gate[], newCircuit: Gate[], attempts: number, nVariables: number) => {
+	for (let attempt = 0; attempt < attempts; attempt++) {
+		const randomInput = randomInputs[attempt].slice(0, nVariables)
+		if (cachedOutputs[attempt] === undefined) cachedOutputs.push(evalCircuit(oldCircuit, randomInput))
+		const newOutput = evalCircuit(newCircuit, randomInput)
+		if (!areBooleanArraysEqual(cachedOutputs[attempt], newOutput)) return false
+	}
+	return true
+}
+
+const INPUTS = 202
+const randomInputs = generateNRandomBooleanArray(INPUTS, 64)
 const findProbabilisticUselessVars = (sliceGates: Gate[], variableIndexMapping: number[]) => {
 	const nVariables = variableIndexMapping.length
 	const cachedOutputs: boolean[][] = []
-	const areCircuitsProbabilisticallyTheSame = (oldCircuit: Gate[], newCircuit: Gate[], attempts: number) => {
-		for (let attempt = 0; attempt < attempts; attempt++) {
-			const randomInput = randomInputs[attempt].slice(0, nVariables)
-			if (cachedOutputs[attempt] === undefined) {
-				cachedOutputs.push(evalCircuit(oldCircuit, randomInput))
-			}
-			const newOutput = evalCircuit(newCircuit, randomInput)
-			if (!areBooleanArraysEqual(cachedOutputs[attempt], newOutput)) return false
-		}
-		return true
-	}
 
 	if (nVariables < 8) return undefined // no need to do this approach for less than 8 vars as we have exact way already
-	const attempts = 102//getAttemptsToBeConfident(0.995, nVariables)+100
+	//const attempts = INPUTS//getAttemptsToBeConfident(0.995, nVariables)+100
 	const mappedGates = mapCircuit(sliceGates, variableIndexMapping)
 	for (let variableIndex = 0; variableIndex < nVariables; variableIndex++) {
 		const newCircuit = removeVariable(mappedGates, variableIndex)
-		if (areCircuitsProbabilisticallyTheSame(mappedGates, newCircuit, attempts)) {
-			//console.log(`ProbDelete variable v${ variableIndexMapping[variableIndex] }`)
-			//console.log(`probabilistic vars: ${ nVariables }, attempts: ${ attempts }`)
-			//console.log(`Probabilistic replace variable v${ variableIndexMapping[variableIndex] } -> v${ replacevalue } (${ nVariables } -> ${ nVariables - 1 })`)
+		if (areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newCircuit, INPUTS, nVariables)) {
 			return reverseMapCircuit(newCircuit, variableIndexMapping)
 		}
 	}
@@ -90,14 +91,14 @@ const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: Limited
 	let uselessVarsFound = 0
 	let uselessVarsFoundProb = 0
 	const endL = Math.min(gates.length - sliceSize, maxLoopTo)
-	for (let a = 0; a <= endL; a++) {
+	for (let a = 0; a < endL; a++) {
 		const start = a
 		const end = a + sliceSize
 		const sliceGates = gates.slice(start, end)
 		const gatesHash = hashGates(sliceGates)
 		if (processedGatesCache.has(gatesHash)) continue
 
-		const variableIndexMapping = mapVariablesToIndexes(sliceGates, wires) // map variables to smaller amount of wires
+		const variableIndexMapping = mapVariablesToIndexes(sliceGates) // map variables to smaller amount of wires
 		if (sliceSize > 2) {
 			const replacement = findUselessVars(sliceGates, variableIndexMapping)
 			if (replacement !== undefined) {
@@ -153,7 +154,6 @@ function arrayOfRandomOrder(n: number): number[] {
 	return numbers
 }
 
-const VARIABLE_CREATION_GATE = -1
 const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string) => {
 	let iterations = 0
 	let optimizedVersion = originalGates.slice()
@@ -165,20 +165,21 @@ const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: numb
 	const ioIdentifierCache = new LimitedMap<string, Gate[] | null>(1000000)
 	const processedGatesCache = new LimitedMap<string, boolean>(1000000)
 	console.log('Optimizer started')
-	const bigSliceSize = 3000
+	const bigSliceSize = 10000
 	let sliceToUse = 2;
-	let complete = false
 	while (true) {
 		let slicedVersion = optimizedVersion.slice(0, bigSliceSize)
-		const dependencies = createDependencyGraph(slicedVersion, wires)
-		//fs.writeFileSync(`${ problemName }.dependency.json`, getDependencyGraphAsStringWithGates(dependencies, optimizedVersion), 'utf8')
-		const graphIterator = findConvexSubsets(dependencies, 2000, slicedVersion, wires)
+		const dependencies = createDependencyGraph(slicedVersion)
+		fs.writeFileSync(`${ problemName }.dependency.json`, getDependencyGraphAsStringWithGates(dependencies, slicedVersion), 'utf8')
+		const graphIterator = findConvexSubsets(dependencies, 500, slicedVersion)
 		//fs.writeFileSync(`${ problemName }.iter.json`, graphIterator.map((x) => x.join(',')).join('\n'), 'utf8')
+		let continueRun = true
 		for (const lines of graphIterator) {
-			let continueRun = true
 			const inGates = lines.map((x) => slicedVersion[x])
 			for (let it = 2; it < 200; it++) {
 				if (sliceToUse >= 200) sliceToUse = 2
+				fs.writeFileSync(`${ problemName }.lines.json`, JSON.stringify(lines), 'utf8')
+		
 				const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, processedGatesCache, inGates, sliceToUse, true, inGates.length, wires)
 				sliceToUse++
 				if (optimizationOutput.changed) {
@@ -188,27 +189,32 @@ const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: numb
 					break
 				}
 			}
-			if (!continueRun) break
-			complete = true
-		}
-		optimizedVersion = [...slicedVersion, ...optimizedVersion.slice(bigSliceSize, optimizedVersion.length)]
-		if (prevSavedLength !== optimizedVersion.length || complete) {
-			const endTime = performance.now()
-			const timeDiffMins = (endTime - lastSaved) / 60000
-			if (timeDiffMins >= 10 || complete) {
-				prevSavedLength = optimizedVersion.length
-				const filename = `${ problemName }.solved-${ optimizedVersion.length }.json`
-				optimizedVersion = gateSimplifier(optimizedVersion)
-				console.log(`Saving a version with ${ optimizedVersion.length } gates to ${ filename } (${ Math.floor(optimizedVersion.length/originalGates.length*100) }% of original)`)
-				console.log(`Average gate complexity: ${ optimizedVersion.flatMap((gate) => getVars(gate, wires).length).reduce((a, c) => a + c, 0) / optimizedVersion.length }`)
-				verifyCircuit(originalGates, optimizedVersion, wires, 20)
-				fs.writeFileSync(filename, convertToOriginal(wires, optimizedVersion), 'utf8')
-				lastSaved = endTime
+			optimizedVersion = [...slicedVersion, ...optimizedVersion.slice(bigSliceSize, optimizedVersion.length)]
+			verifyCircuit(originalGates, optimizedVersion, wires, 20)
+			if (prevSavedLength !== optimizedVersion.length) {
+				const endTime = performance.now()
+				const timeDiffMins = (endTime - lastSaved) / 60000
+				if (timeDiffMins >= 10) {
+					prevSavedLength = optimizedVersion.length
+					const filename = `${ problemName }.solved-${ optimizedVersion.length }.json`
+					optimizedVersion = gateSimplifier(optimizedVersion)
+					console.log(`Saving a version with ${ optimizedVersion.length } gates to ${ filename } (${ Math.floor(optimizedVersion.length/originalGates.length*100) }% of original)`)
+					console.log(`Average gate complexity: ${ optimizedVersion.flatMap((gate) => getVars(gate).length).reduce((a, c) => a + c, 0) / optimizedVersion.length }`)
+					verifyCircuit(originalGates, optimizedVersion, wires, 20)
+					fs.writeFileSync(filename, convertToOriginal(wires, optimizedVersion), 'utf8')
+					lastSaved = endTime
+				}
 			}
+			if (!continueRun) break
 		}
-		if (complete) return
+		if (continueRun) break
 		iterations++
 	}
+	const filename = `${ problemName }.FINAL-${ optimizedVersion.length }.json`
+	console.log(`Saving a version with ${ optimizedVersion.length } gates to ${ filename } (${ Math.floor(optimizedVersion.length/originalGates.length*100) }% of original)`)
+	console.log(`Average gate complexity: ${ optimizedVersion.flatMap((gate) => getVars(gate).length).reduce((a, c) => a + c, 0) / optimizedVersion.length }`)
+	verifyCircuit(originalGates, optimizedVersion, wires, 20)
+	fs.writeFileSync(filename, convertToOriginal(wires, optimizedVersion), 'utf8')
 }
 
 const run = async (pathToFileWithoutExt: string, verbose: boolean) => {

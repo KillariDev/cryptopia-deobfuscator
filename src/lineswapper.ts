@@ -21,7 +21,7 @@ export function findSwappableLines(lines: Gate[], maxGroupSize: number, wires: n
 		currentLeftSideDependencies = new Set<number>()
 	}
 	lines.forEach((line, index) => {
-		const vars = getVars(line, wires)
+		const vars = getVars(line)
 		const leftSide = vars[0]
 		const rightSide = vars
 		// the line depends on other if
@@ -56,18 +56,18 @@ export function shuffleLinesWithinGroups(lines: Gate[], groups: number[][]): Gat
 	return shuffledLines;
 }
 
-export const createDependencyGraph = (gates: Gate[], wires: number) => {
+export const createDependencyGraph = (gates: Gate[]) => {
 	const dependencyGraph: DependencyNode[] = []
 	const variableDependedLast = new Map<number, number>() // <variable, line>
 	const variableSetLast = new Map<number, number>() // <variable, line>
 	gates.forEach((line, currentLineNumber) => {
-		const vars = getVars(line, wires)
+		const vars = getVars(line)
 		const target = vars[0]
 		const rest = vars.slice(1)
 		const targetDepends = variableDependedLast.get(target)
 		const restDepends = rest.map((variable) => variableSetLast.get(variable)).filter((variableOrUndefined): variableOrUndefined is number => variableOrUndefined !== undefined)
 		const dependOnFuture = gates.slice(currentLineNumber + 1).findIndex((futureLine) => {
-			const futureVars = getVars(futureLine, wires)
+			const futureVars = getVars(futureLine)
 			const futureTarget = futureVars[0]
 			return futureVars.includes(target) || rest.includes(futureTarget)
 		})

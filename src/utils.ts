@@ -77,11 +77,10 @@ export const evalGate = (controlFunction: number, a: boolean, b: boolean, origin
 	return xor(lookupTable[controlFunction][a ? 1 : 0][b ? 1 : 0], originalOutput)
 }
 
-export const getUniqueVars = (gates: Gate[], wires: number) => Array.from(new Set(gates.flatMap((gate) => getVars(gate, wires))))
+export const getUniqueVars = (gates: Gate[]) => Array.from(new Set(gates.flatMap((gate) => getVars(gate))))
 
-export const getVars = (gate: Gate, wires: number) => {
+export const getVars = (gate: Gate) => {
 	switch(gate.gate_i) {
-		case -1: return [gate.target, ...Array.from({ length: wires }, (_, i) => i)] // special variable creation gate
 		case 0: return [gate.target] // return false 
 		case 1: return [gate.target, gate.a, gate.b] // return a && b
 		case 2: return [gate.target, gate.a, gate.b] // return a && !b
@@ -149,8 +148,8 @@ export const simplifyGate = (gate: Gate): Gate => {
 	}
 }
 
-export const mapVariablesToIndexes = (gates: Gate[], wires: number) => {
-	return [...new Set(gates.flatMap((gate) => getVars(gate, wires)))].sort()
+export const mapVariablesToIndexes = (gates: Gate[]) => {
+	return [...new Set(gates.flatMap((gate) => getVars(gate)))].sort()
 }
 export const mapCircuit = (gates: Gate[], indexMapping: number[]) => {
 	return gates.map((gate) => {
@@ -177,8 +176,8 @@ export const reverseMapCircuit = (mappedGates: Gate[], indexMapping: number[]) =
 	})
 }
 
-export const evalCircuit = (gates: Gate[], orinalInput: boolean[]) => {
-	const input = orinalInput.slice()
+export const evalCircuit = (gates: Gate[], orginalInput: boolean[]) => {
+	const input = orginalInput.slice()
 	gates.forEach((gate) => {
 		input[gate.target] = evalGate(
 			gate.gate_i,
@@ -271,13 +270,9 @@ export const toBatches = (array: Gate[], batchSize: number): Gate[][] => {
 }
 
 export function areBooleanArraysEqual(arr1: boolean[], arr2: boolean[]): boolean {
-	if (arr1.length !== arr2.length) {
-		return false
-	}
+	if (arr1.length !== arr2.length) return false
 	for (let i = 0; i < arr1.length; i++) {
-		if (arr1[i] !== arr2[i]) {
-			return false
-		}
+		if (arr1[i] !== arr2[i]) return false
 	}
 	return true
 }
@@ -420,7 +415,7 @@ class SortedArray {
 	}
 }
 
-export function* findConvexSubsets(nodes: DependencyNode[], N: number, gates: Gate[], wires: number): Generator<number[]> {
+export function* findConvexSubsets(nodes: DependencyNode[], N: number, gates: Gate[]): Generator<number[]> {
 
 	const dependantMap = new Map<number, number[]>()
 
@@ -430,17 +425,17 @@ export function* findConvexSubsets(nodes: DependencyNode[], N: number, gates: Ga
 		}
 	}
 
-	const getAllFutureDependencies = (futureDependsCache: Map<number, number[]>, currentNode: DependencyNode, maxNodeNumber: number, gates: Gate[], wires: number) => {
+	const getAllFutureDependencies = (futureDependsCache: Map<number, number[]>, currentNode: DependencyNode, maxNodeNumber: number, gates: Gate[]) => {
 		const cache = futureDependsCache.get(currentNode.lineNumber)
 		if (cache) return cache
 		if (currentNode.dependOnFutureLine === -1) return []
 		if (currentNode.dependOnFutureLine >= maxNodeNumber) return []
 		const currentGate = gates[currentNode.lineNumber]
-		const vars = getVars(currentGate,wires)
+		const vars = getVars(currentGate)
 		const target = vars[0]
 		const rest = vars.slice(1)
 		const depends = gates.slice(currentNode.dependOnFutureLine, maxNodeNumber).map((futureLine, index) => {
-			const futureVars = getVars(futureLine, wires)
+			const futureVars = getVars(futureLine)
 			const futureTarget = futureVars[0]
 			return { index, include: futureVars.includes(target) || rest.includes(futureTarget)}
 		}).filter((x) => x.include).map((x) => x.index + currentNode.dependOnFutureLine)
@@ -448,11 +443,11 @@ export function* findConvexSubsets(nodes: DependencyNode[], N: number, gates: Ga
 		return depends
 	}
 
-	function needToAddAsWell(subset: number[], node: number, maxNodeNumber: number, nodes: DependencyNode[], gates: Gate[], wires: number): { pastDepend: number[], addNode: number } {
+	function needToAddAsWell(subset: number[], node: number, maxNodeNumber: number, nodes: DependencyNode[], gates: Gate[]): { pastDepend: number[], addNode: number } {
 		const futureDependsCache = new Map<number, number[]>()
 		let currentNode = node
 		while(true) {
-			const futureDepends = getAllFutureDependencies(futureDependsCache, nodes[currentNode], maxNodeNumber, gates, wires)
+			const futureDepends = getAllFutureDependencies(futureDependsCache, nodes[currentNode], maxNodeNumber, gates)
 			const requirements = futureDepends.filter((futureDepend) => !subset.includes(futureDepend))
 			if (requirements.length === 0) {
 				const depends = dependantMap.get(currentNode) || []
@@ -475,7 +470,8 @@ export function* findConvexSubsets(nodes: DependencyNode[], N: number, gates: Ga
 		while (true) {
 			const candidate = nonExploredDepenencies.popMin()
 			if (candidate === undefined) break
-			const needToAdd = needToAddAsWell(currentSubset, candidate, node.lineNumber, nodes, gates, wires)
+			if (currentSubset.includes(candidate)) continue
+			const needToAdd = needToAddAsWell(currentSubset, candidate, node.lineNumber, nodes, gates)
 			if (needToAdd.pastDepend.length > 0) {
 				nonExploredDepenencies.add([candidate, ...needToAdd.pastDepend]) //push us pack with the new deps
 				continue
@@ -483,6 +479,7 @@ export function* findConvexSubsets(nodes: DependencyNode[], N: number, gates: Ga
 			if (needToAdd.addNode !== candidate) {
 				nonExploredDepenencies.add(candidate)
 			}
+			if (currentSubset.includes(needToAdd.addNode)) throw new Error('already added')
 			currentSubset.push(needToAdd.addNode)
 			currentSubsetSet.add(needToAdd.addNode)
 			nonExploredDepenencies.add(nodes[needToAdd.addNode].dependOnPastLines.filter((x) => !currentSubsetSet.has(x)))

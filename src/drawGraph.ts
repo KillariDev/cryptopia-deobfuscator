@@ -35,8 +35,8 @@ function scaleNodesToFit(nodes: D3Node[], width: number, height: number): void {
 	});
   }
 
-export function drawDependencyGraph(gates: Gate[], wires: number, outputFilePath: string, width: number, height: number): void {
-	const dependencyData = createDependencyGraph(gates, wires)
+export function drawDependencyGraph(gates: Gate[], outputFilePath: string, width: number, height: number): void {
+	const dependencyData = createDependencyGraph(gates)
 	const groups = groupTopologicalSort(dependencyData)
 	// Create a canvas for rendering
 	const canvas = createCanvas(width, height)

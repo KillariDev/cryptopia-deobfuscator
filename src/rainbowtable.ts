@@ -121,8 +121,8 @@ export const createRainbowTable = async (wires: number) => {
 		if (old === undefined) {
 			rainbowMap.set(replaced.ioIdentifier, replaced)
 		} else {
-			const oldUniques = getUniqueVars(old.replacerGates, wires).length
-			const newUniques = getUniqueVars(gates, wires).length
+			const oldUniques = getUniqueVars(old.replacerGates).length
+			const newUniques = getUniqueVars(gates).length
 			if (old.replacerGates.length >= gates.length && newUniques <= oldUniques) rainbowMap.set(replaced.ioIdentifier, replaced)
 		}
 	}
