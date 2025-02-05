@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import { createHash } from 'crypto'
 import { DependencyNode, Gate } from './types.js'
+import { createDependencyGraph } from './lineswapper.js'
 
 export const readJsonFile = (filePath: string): any => {
 	try {
@@ -415,17 +416,17 @@ class SortedArray {
 	}
 }
 
-export function* findConvexSubsets(nodes: DependencyNode[], N: number, gates: Gate[]): Generator<number[]> {
-
+export function* findConvexSubsets(N: number, gates: Gate[]): Generator<number[]> {
+	yield Array.from(Array(gates.length).keys()) // start with current order
+	const nodes = createDependencyGraph(gates)
 	const dependantMap = new Map<number, number[]>()
-
 	for (const node of nodes) {
 		for (const depend of node.dependOnPastLines) {
 			dependantMap.set(depend, [...dependantMap.get(depend) ?? [], node.lineNumber])
 		}
 	}
 
-	const getAllFutureDependencies = (futureDependsCache: Map<number, number[]>, currentNode: DependencyNode, maxNodeNumber: number, gates: Gate[]) => {
+	const getAllFutureDependencies = (futureDependsCache: Map<number, number[]>, currentNode: DependencyNode, subsetSet: Set<number>, maxNodeNumber: number, gates: Gate[]) => {
 		const cache = futureDependsCache.get(currentNode.lineNumber)
 		if (cache) return cache
 		if (currentNode.dependOnFutureLine === -1) return []
@@ -434,21 +435,25 @@ export function* findConvexSubsets(nodes: DependencyNode[], N: number, gates: Ga
 		const vars = getVars(currentGate)
 		const target = vars[0]
 		const rest = vars.slice(1)
-		const depends = gates.slice(currentNode.dependOnFutureLine, maxNodeNumber).map((futureLine, index) => {
+		const depends: number[] = []
+		for (let index = currentNode.dependOnFutureLine; index < maxNodeNumber; index++) {
+			if (subsetSet.has(index)) continue
+			const futureLine = gates[index]
 			const futureVars = getVars(futureLine)
 			const futureTarget = futureVars[0]
-			return { index, include: futureVars.includes(target) || rest.includes(futureTarget)}
-		}).filter((x) => x.include).map((x) => x.index + currentNode.dependOnFutureLine)
+			if (futureVars.includes(target) || rest.includes(futureTarget)) {
+				depends.push(index)
+			}
+		}
 		futureDependsCache.set(currentNode.lineNumber, depends)
 		return depends
 	}
 
-	function needToAddAsWell(subset: number[], node: number, maxNodeNumber: number, nodes: DependencyNode[], gates: Gate[]): { pastDepend: number[], addNode: number } {
+	function needToAddAsWell(subset: number[], subsetSet: Set<number>, node: number, maxNodeNumber: number, nodes: DependencyNode[], gates: Gate[]): { pastDepend: number[], addNode: number } {
 		const futureDependsCache = new Map<number, number[]>()
 		let currentNode = node
 		while(true) {
-			const futureDepends = getAllFutureDependencies(futureDependsCache, nodes[currentNode], maxNodeNumber, gates)
-			const requirements = futureDepends.filter((futureDepend) => !subset.includes(futureDepend))
+			const requirements = getAllFutureDependencies(futureDependsCache, nodes[currentNode], subsetSet, maxNodeNumber, gates)
 			if (requirements.length === 0) {
 				const depends = dependantMap.get(currentNode) || []
 				return {
@@ -460,6 +465,7 @@ export function* findConvexSubsets(nodes: DependencyNode[], N: number, gates: Ga
 			}
 		}
 	}
+
 	const revesedNodes = nodes.slice().reverse()
 	for (const node of revesedNodes) {
 		const currentSubset: number[] = []
@@ -470,8 +476,8 @@ export function* findConvexSubsets(nodes: DependencyNode[], N: number, gates: Ga
 		while (true) {
 			const candidate = nonExploredDepenencies.popMin()
 			if (candidate === undefined) break
-			if (currentSubset.includes(candidate)) continue
-			const needToAdd = needToAddAsWell(currentSubset, candidate, node.lineNumber, nodes, gates)
+			if (currentSubsetSet.has(candidate)) continue
+			const needToAdd = needToAddAsWell(currentSubset, currentSubsetSet, candidate, node.lineNumber, nodes, gates)
 			if (needToAdd.pastDepend.length > 0) {
 				nonExploredDepenencies.add([candidate, ...needToAdd.pastDepend]) //push us pack with the new deps
 				continue
@@ -479,12 +485,12 @@ export function* findConvexSubsets(nodes: DependencyNode[], N: number, gates: Ga
 			if (needToAdd.addNode !== candidate) {
 				nonExploredDepenencies.add(candidate)
 			}
-			if (currentSubset.includes(needToAdd.addNode)) throw new Error('already added')
 			currentSubset.push(needToAdd.addNode)
 			currentSubsetSet.add(needToAdd.addNode)
 			nonExploredDepenencies.add(nodes[needToAdd.addNode].dependOnPastLines.filter((x) => !currentSubsetSet.has(x)))
 			if (currentSubset.length >= N) break
 		}
 		yield currentSubset.slice().reverse()
+		return
 	}
 }

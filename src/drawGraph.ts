@@ -4,6 +4,7 @@ import * as d3 from 'd3'
 import { DependencyNode, Gate } from './types.js'
 import { createDependencyGraph } from './lineswapper.js'
 import { groupTopologicalSort } from './cycles.js'
+import { gateToText } from './utils.js'
 
 interface D3Node extends d3.SimulationNodeDatum {
 	id: number
@@ -14,7 +15,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 	target: number
 }
 
-function scaleNodesToFit(nodes: D3Node[], width: number, height: number): void {
+function scaleNodesToFit(nodes: D3Node[], width: number, height: number, padding: number): void {
 	const minX = d3.min(nodes, d => d.x!)!;
 	const minY = d3.min(nodes, d => d.y!)!;
 	nodes.forEach(node => {
@@ -25,19 +26,19 @@ function scaleNodesToFit(nodes: D3Node[], width: number, height: number): void {
 	const maxY = d3.max(nodes, d => d.y!)!;
 	
 	// Calculate scaling factors
-	const scaleFactorX = width / (maxX);
-	const scaleFactorY = height / (maxY);
+	const scaleFactorX = (width - padding * 2) / (maxX);
+	const scaleFactorY = (height - padding * 2) / (maxY);
   
 	// Apply scaling to node positions
 	nodes.forEach(node => {
-	  node.x = (node.x!) * scaleFactorX;
-	  node.y = (node.y!) * scaleFactorY;
+	  node.x = (node.x!) * scaleFactorX + padding;
+	  node.y = (node.y!) * scaleFactorY + padding;
 	});
   }
 
 export function drawDependencyGraph(gates: Gate[], outputFilePath: string, width: number, height: number): void {
+	console.log('drawDependencyGraph')
 	const dependencyData = createDependencyGraph(gates)
-	const groups = groupTopologicalSort(dependencyData)
 	// Create a canvas for rendering
 	const canvas = createCanvas(width, height)
 	const context = canvas.getContext('2d')
@@ -50,27 +51,37 @@ export function drawDependencyGraph(gates: Gate[], outputFilePath: string, width
 	const nodes: D3Node[] = dependencyData.map(node => ({
 		id: node.lineNumber,
 		x: node.lineNumber,
-		y: node.lineNumber
+		y: 0
 	}))
 
 	const links: D3Link[] = dependencyData.flatMap(node =>
-		node.dependOnPastLines.map(target => ({
+		[...node.dependOnPastLines.map(target => ({
 			source: node.lineNumber,
-			target: target
-		}))
+			target: target,
+			strength: 0.7
+		})), ...node.dependOnFutureLine !== -1 ? [{
+			source: node.dependOnFutureLine,
+			target: node.lineNumber,
+			strength: 0.1
+		}] : []]
 	)
 
-	// Initialize the force simulation
+	const padding = 20
+	const area = (height-padding*2)*(width-padding*2)
+	const preferredDist = area/(nodes.length*nodes.length)
+	// Initialize the force simulatio
 	const simulation = d3.forceSimulation<D3Node>(nodes)
-		.force('link', d3.forceLink<D3Node, D3Link>(links).id(d => d.id))
-		.force('charge', d3.forceManyBody())
+		.force('link', d3.forceLink<D3Node, D3Link>(links).id(d => d.id).distance(preferredDist))
+		.force("charge", d3.forceManyBody().distanceMax(preferredDist*40))
+		.force("charge", d3.forceCollide(preferredDist / 2))
 		.stop()
 
 	// Run the simulation to compute node positions
-	for (let i = 0; i < 500; ++i) {
-		simulation.tick()
-		nodes.forEach(node => { node.y = groups[node.id]*10 })
-		scaleNodesToFit(nodes, width, height)
+	for (let i = 0; i < 20; ++i) {
+		for (let a = 0; a < 100; ++a) {
+			simulation.tick()
+		}
+		scaleNodesToFit(nodes, width, height, padding)
 	}
 
 	// Draw links
@@ -95,7 +106,7 @@ export function drawDependencyGraph(gates: Gate[], outputFilePath: string, width
 		context.arc(node.x!, node.y!, 5, 0, 2 * Math.PI)
 		context.fill()
 		context.fillStyle = '#333' // Black text color
-		context.fillText(`Line ${node.id}`, node.x! + 8, node.y! + 3)
+		context.fillText(`${ node.id }: ${ gateToText(gates[node.id]) }`, node.x! + 8, node.y! + 3)
 	})
 
 	// Save the canvas as an image file

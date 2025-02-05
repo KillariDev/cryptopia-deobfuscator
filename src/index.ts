@@ -1,11 +1,10 @@
 import * as fs from 'fs'
 import sqlite3 from 'sqlite3'
-import { createDependencyGraph, findSwappableLines, getDependencyGraphAsString, getDependencyGraphAsStringWithGates, shuffleLinesWithinGroups } from './lineswapper.js'
-import { areBooleanArraysEqual, calculateAllOutputsArray, convertToOriginal, evalCircuit, findConvexSubsets, gatesToText, gateToText, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, ioHash, mapCircuit, mapVariablesToIndexes, readJsonFile, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
-import { CircuitData, DependencyNode, Gate } from './types.js'
+import { createDependencyGraph, getDependencyGraphAsStringWithGates } from './lineswapper.js'
+import { areBooleanArraysEqual, calculateAllOutputsArray, convertToOriginal, evalCircuit, findConvexSubsets, gatesToText, generateCombinations, generateNRandomBooleanArray, getVars, hashGates, ioHash, mapCircuit, mapVariablesToIndexes, readJsonFile, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
+import { CircuitData, Gate } from './types.js'
 import { createRainbowTable, getReplacerById } from './rainbowtable.js'
 import { LimitedMap } from './limitedMap.js'
-import { findCriticalPath } from './cycles.js'
 import { join, parse } from 'path'
 import { drawDependencyGraph } from './drawGraph.js'
 
@@ -19,7 +18,6 @@ const removeVariable = (gates: Gate[], variable: number) => {
 		return gate
 	}).filter((gate): gate is Gate => gate !== undefined)
 }
-
 
 const areCircuitsProbabilisticallyTheSame = (cachedOutputs: boolean[][], oldCircuit: Gate[], newCircuit: Gate[], attempts: number, nVariables: number) => {
 	for (let attempt = 0; attempt < attempts; attempt++) {
@@ -38,7 +36,6 @@ const findProbabilisticUselessVars = (sliceGates: Gate[], variableIndexMapping: 
 	const cachedOutputs: boolean[][] = []
 
 	if (nVariables < 8) return undefined // no need to do this approach for less than 8 vars as we have exact way already
-	//const attempts = INPUTS//getAttemptsToBeConfident(0.995, nVariables)+100
 	const mappedGates = mapCircuit(sliceGates, variableIndexMapping)
 	for (let variableIndex = 0; variableIndex < nVariables; variableIndex++) {
 		const newCircuit = removeVariable(mappedGates, variableIndex)
@@ -49,17 +46,13 @@ const findProbabilisticUselessVars = (sliceGates: Gate[], variableIndexMapping: 
 	return undefined
 }
 
-const getAttemptsToBeConfident = (confidence: number, bits: number) => {
-	//(1/2^bits)^N >= P
-	return Math.ceil(-Math.log2(1-confidence) / bits + 1)
-}
-
 const BYTE_ALL_INPUTS = new Map<number, boolean[][]>([
 	[4, generateCombinations(4)],
 	[5, generateCombinations(5)],
 	[6, generateCombinations(6)],
 	[7, generateCombinations(7)],
 ])
+
 const findUselessVars = (sliceGates: Gate[], variableIndexMapping: number[]) => {
 	const nVariables = variableIndexMapping.length
 	const allInputs = BYTE_ALL_INPUTS.get(nVariables)
@@ -69,7 +62,6 @@ const findUselessVars = (sliceGates: Gate[], variableIndexMapping: number[]) => 
 	for (let variableIndex = 0; variableIndex < nVariables; variableIndex++) {
 		const newCircuit = removeVariable(mappedGates, variableIndex)
 		if (areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(newCircuit, allInputs))) {
-			//console.log(`Delete variable v${ variableIndexMapping[variableIndex] }`)
 			return reverseMapCircuit(newCircuit, variableIndexMapping)
 		}
 	}
@@ -143,54 +135,43 @@ const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: Limited
 
 const gateSimplifier = (gates: Gate[]) => gates.map((gate) => simplifyGate(gate))
 
-function arrayOfRandomOrder(n: number): number[] {
-	const numbers = Array.from({ length: n + 1 }, (_, i) => i)
-
-	// Shuffle the array using Fisher-Yates algorithm
-	for (let i = numbers.length - 1; i > 0; i--) {
-		const randomIndex: number = Math.floor(Math.random() * (i + 1));
-		[numbers[i], numbers[randomIndex]] = [numbers[randomIndex], numbers[i]]
-	}
-	return numbers
-}
-
 const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string) => {
 	let iterations = 0
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	optimizedVersion = gateSimplifier(optimizedVersion)
-	
 	verifyCircuit(originalGates, optimizedVersion, wires, 20)
 	let lastSaved = performance.now()
 	const ioIdentifierCache = new LimitedMap<string, Gate[] | null>(1000000)
 	const processedGatesCache = new LimitedMap<string, boolean>(1000000)
 	console.log('Optimizer started')
-	const bigSliceSize = 10000
-	let sliceToUse = 2;
+	const bigSliceSize = 200000
+	let sliceStart = bigSliceSize/2
+	let sliceToUse = 2
+	const maxSlice = 100
+	let iterationsWithoutMatches = 0
 	while (true) {
 		let slicedVersion = optimizedVersion.slice(0, bigSliceSize)
-		const dependencies = createDependencyGraph(slicedVersion)
-		fs.writeFileSync(`${ problemName }.dependency.json`, getDependencyGraphAsStringWithGates(dependencies, slicedVersion), 'utf8')
-		const graphIterator = findConvexSubsets(dependencies, 500, slicedVersion)
-		//fs.writeFileSync(`${ problemName }.iter.json`, graphIterator.map((x) => x.join(',')).join('\n'), 'utf8')
+		const graphIterator = findConvexSubsets(200, slicedVersion.slice(0, sliceStart))
+		sliceStart++
+		if (sliceStart>slicedVersion.length) sliceStart = 2
 		let continueRun = true
 		for (const lines of graphIterator) {
 			const inGates = lines.map((x) => slicedVersion[x])
-			for (let it = 2; it < 200; it++) {
-				if (sliceToUse >= 200) sliceToUse = 2
-				fs.writeFileSync(`${ problemName }.lines.json`, JSON.stringify(lines), 'utf8')
-		
-				const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, processedGatesCache, inGates, sliceToUse, true, inGates.length, wires)
+			for (let it = 2; it < maxSlice; it++) {
+				if (sliceToUse >= maxSlice) sliceToUse = 2
+				const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, processedGatesCache, inGates, sliceToUse, false, inGates.length, wires)
 				sliceToUse++
 				if (optimizationOutput.changed) {
-					slicedVersion = insertArrayAtIndex(slicedVersion, optimizationOutput.gates, lines[lines.length-1]+1)
+					slicedVersion = insertArrayAtIndex(slicedVersion, optimizationOutput.gates, lines[lines.length - 1] + 1)
 					slicedVersion = replace(slicedVersion, lines.map((l) => ({ start: l, end: l, replacement: [] })))
 					continueRun = false
+					iterationsWithoutMatches = 0
+					if (sliceToUse > 6) sliceToUse = 2
 					break
 				}
 			}
 			optimizedVersion = [...slicedVersion, ...optimizedVersion.slice(bigSliceSize, optimizedVersion.length)]
-			verifyCircuit(originalGates, optimizedVersion, wires, 20)
 			if (prevSavedLength !== optimizedVersion.length) {
 				const endTime = performance.now()
 				const timeDiffMins = (endTime - lastSaved) / 60000
@@ -207,7 +188,8 @@ const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: numb
 			}
 			if (!continueRun) break
 		}
-		if (continueRun) break
+		iterationsWithoutMatches++
+		if (iterationsWithoutMatches > slicedVersion.length * 10) break
 		iterations++
 	}
 	const filename = `${ problemName }.FINAL-${ optimizedVersion.length }.json`
@@ -225,21 +207,10 @@ const run = async (pathToFileWithoutExt: string, verbose: boolean) => {
 	console.log('gate_count', inputCircuit.gates.length)
 	const gates: Gate[] = inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
 	fs.writeFileSync(`${ pathToFileWithoutExt }.commands.json`, gatesToText(gates))
-	/*writeDictionaryToFile(findSwappableLines(gates, gates.length), `${ pathToFileWithoutExt }.swappable.json`)
-	const dependencies = createDependencyGraph(gates)
-	fs.writeFileSync(`${ pathToFileWithoutExt }.dependency.json`, getDependencyGraphAsString(dependencies), 'utf8')
-	const groups = groupTopologicalSort(dependencies)
-	fs.writeFileSync(`${ pathToFileWithoutExt }.groups.json`, groups.join('\n'), 'utf8')
-	*/
-	//const depp = findGroupsThatDoNotDependFromOthers(dependencies)
-	//fs.writeFileSync(`${ pathToFileWithoutExt }.depp.json`, depp.map((c) => c.join(',')).join('\n'), 'utf8')
-	
-	//fs.writeFileSync(`${ pathToFileWithoutExt }.dependencyEdge.json`, getDependencyGraphAsEdgesString(dependencies), 'utf8')
-	
-
-
-	//drawDependencyGraph(gates, inputCircuit.wire_count, `${ pathToFileWithoutExt }.dependency-graph.png`,8048, 1024)
-	
+	const gatesToGraph = 3000
+	drawDependencyGraph(gates.slice(0, gatesToGraph), `${ pathToFileWithoutExt }.dependency-graph.SLICE.png`, 32000, 4000)
+	const dependencies = createDependencyGraph(gates.slice(0, gatesToGraph))
+	fs.writeFileSync(`${ pathToFileWithoutExt }.dependency.SLICE.json`, getDependencyGraphAsStringWithGates(dependencies, gates), 'utf8')
 	try {
 		await optimize(db, gates, inputCircuit.wire_count, pathToFileWithoutExt)
 	} catch(e: unknown) {

@@ -1,4 +1,3 @@
-import { map } from 'd3'
 import { DependencyNode } from './types.js'
 import { hashNumberArray } from './utils.js'
 
@@ -157,7 +156,6 @@ export function findGroupsThatDoNotDependFromOthers(nodes: DependencyNode[]): nu
 	return groups
 }
 
-
 export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] => {
 	const nodeMap: Map<number, DependencyNode> = new Map()
 	const memo: Map<number, number[]> = new Map()
@@ -270,82 +268,6 @@ export const findCriticalPath = (nodes: DependencyNode[]): number[] => {
 	// Return the critical path in the correct order (from start to end)
 	return criticalPath
 }
-/*
-export const findCriticalPathsForNodes = (nodes: DependencyNode[]): number[][] => {
-	const nodeMap: Map<number, DependencyNode> = new Map()
-	const inDegrees: Map<number, number> = new Map()
-	const adjList: Map<number, number[]> = new Map()
-	const pathLengths: Map<number, number> = new Map()
-
-	// Build adjacency list and track in-degrees
-	for (const node of nodes) {
-		nodeMap.set(node.lineNumber, node)
-		inDegrees.set(node.lineNumber, 0)
-		adjList.set(node.lineNumber, [])
-	}
-
-	for (const node of nodes) {
-		for (const dep of node.dependOnPastLines) {
-			adjList.get(dep)?.push(node.lineNumber)
-			inDegrees.set(node.lineNumber, (inDegrees.get(node.lineNumber) || 0) + 1)
-		}
-	}
-
-	// Perform topological sort
-	const queue: number[] = []
-	for (const [lineNumber, degree] of inDegrees.entries()) {
-		if (degree === 0) queue.push(lineNumber)
-	}
-
-	// Process nodes in topological order
-	while (queue.length > 0) {
-		const current = queue.shift() as number
-		const currentLength = pathLengths.get(current) || 0
-
-		for (const neighbor of adjList.get(current) || []) {
-			// Update the longest path length for the neighbor
-			const neighborLength = pathLengths.get(neighbor) || 0
-			pathLengths.set(neighbor, Math.max(neighborLength, currentLength + 1))
-
-			// Decrement in-degree and enqueue if it reaches 0
-			const updatedDegree = (inDegrees.get(neighbor) || 1) - 1
-			inDegrees.set(neighbor, updatedDegree)
-			if (updatedDegree === 0) {
-				queue.push(neighbor)
-			}
-		}
-	}
-
-	// Rebuild critical paths
-	const criticalPaths: number[][] = []
-	for (const node of nodes) {
-		const path: number[] = []
-		let current = node.lineNumber
-
-		while (pathLengths.has(current)) {
-			path.push(current)
-
-			let nextNode = null
-			let maxLength = -1
-
-			for (const dep of nodeMap.get(current)?.dependOnPastLines || []) {
-				const depLength = pathLengths.get(dep) || 0
-				if (depLength > maxLength) {
-					maxLength = depLength
-					nextNode = dep
-				}
-			}
-
-			if (nextNode === null) break
-			current = nextNode
-		}
-
-		path.reverse()
-		criticalPaths.push(path)
-	}
-
-	return criticalPaths
-}*/
 
 export function findLongestUniquePaths(data: number[][]): number[][] {
 	const uniquePaths: number[][] = []
