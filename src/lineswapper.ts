@@ -27,11 +27,12 @@ export const createDependencyGraph = (gates: Gate[]) => {
 	return dependencyGraph
 }
 
+
 export const getDependencyGraphAsString = (dependencyGraph: DependencyNode[]) => {
 	return dependencyGraph.map((x) => `${x.lineNumber}: [${ x.dependOnPastLines.join(',') }] -> ${ x.dependOnFutureLine }`).join('\n')
 }
 export const getDependencyGraphAsStringWithGates = (dependencyGraph: DependencyNode[], gates: Gate[]) => {
-	return dependencyGraph.map((x) => `${x.lineNumber}: [${ x.dependOnPastLines.join(',') }] -> ${ x.dependOnFutureLine } = ${gateToText(gates[x.lineNumber])}`).join('\n')
+	return dependencyGraph.map((x) => `${x.lineNumber}: [${ x.dependOnPastLines.join(',') }] -> ${ x.dependOnFutureLine } | ${gateToText(gates[x.lineNumber])}`).join('\n')
 }
 export const getDependencyGraphAsEdgesString = (dependencyGraph: DependencyNode[]) => {
 	return dependencyGraph.flatMap((x) => x.dependOnPastLines.map((l) => `a${x.lineNumber} a${ l }`)).join('\n')

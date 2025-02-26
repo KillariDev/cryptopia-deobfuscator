@@ -329,7 +329,7 @@ export const verifyCircuit = (oldGates: Gate[], newGates: Gate[], wires: number,
 }
 
 export const getRandomNumberInRange = (min: number, max: number): number => {
-	return Math.floor(Math.random() * (max - min + 1)) + min
+	return Math.floor(Math.random() * (max - min)) + min
 }
 
 export const gateToText = (gate: Gate) => {
@@ -418,6 +418,7 @@ class SortedArray {
 
 export function* findConvexSubsets(N: number, gates: Gate[]): Generator<number[]> {
 	yield Array.from(Array(gates.length).keys()) // start with current order
+	if (N === 0) return
 	const nodes = createDependencyGraph(gates)
 	const dependantMap = new Map<number, number[]>()
 	for (const node of nodes) {
@@ -472,6 +473,7 @@ export function* findConvexSubsets(N: number, gates: Gate[]): Generator<number[]
 		const currentSubsetSet = new Set<number>()
 		let nonExploredDepenencies = new SortedArray()
 		currentSubset.push(node.lineNumber)
+		currentSubsetSet.add(node.lineNumber)
 		nonExploredDepenencies.add(node.dependOnPastLines)
 		while (true) {
 			const candidate = nonExploredDepenencies.popMin()
@@ -491,6 +493,15 @@ export function* findConvexSubsets(N: number, gates: Gate[]): Generator<number[]
 			if (currentSubset.length >= N) break
 		}
 		yield currentSubset.slice().reverse()
-		return
+		//return
 	}
+}
+
+export const randomOrder = (nMax: number): number[] => {
+	const arr: number[] = Array.from({ length: nMax }, (_, i) => i)
+	for (let i = nMax - 1; i > 0; i--) {
+		const j: number = Math.floor(Math.random() * (i + 1));
+		[arr[i], arr[j]] = [arr[j], arr[i]]
+	}
+	return arr
 }
