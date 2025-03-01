@@ -277,21 +277,19 @@ export function areBooleanArraysEqual(arr1: boolean[], arr2: boolean[]): boolean
 	}
 	return true
 }
+
 export function replace(array: any[], replacements: { start: number, end: number, replacement: any[] }[]): any[] {
 	const result = [...array]
-	replacements.sort((a, b) => a.start - b.start)
+	replacements.sort((a, b) => b.start - a.start)
 	replacements.forEach(({ start, end, replacement }) => {
-		const deleteCount = end - start + 1
-		result.splice(start, deleteCount, ...replacement)
-		// Update indices to account for shifts
-		replacements.forEach(r => {
-			if (r.start > start) {
-				r.start += replacement.length - deleteCount
-				r.end += replacement.length - deleteCount
-			}
-		})
+		result.splice(start, end - start + 1, ...replacement)
 	})
 	return result
+}
+
+export function remove(array: any[], deleteIndexes: number[]): any[] {
+	const toRemove = new Set(deleteIndexes)
+	return array.filter((_, index) => !toRemove.has(index))
 }
 
 export function generateRandomBooleanArray(N: number): boolean[] {
@@ -318,6 +316,8 @@ export const verifyCircuit = (oldGates: Gate[], newGates: Gate[], wires: number,
 		if (!areBooleanArraysEqual(original, optimized)) {
 			console.log('input', input.join(','))
 			console.log('CORRUPTION!')
+			console.log('oldsize', oldGates.length)
+			console.log('newsize', newGates.length)
 			input.forEach((_,index) => {
 				if (original[index] !== optimized[index]) {
 					console.log(`v${index} differs`)
@@ -504,4 +504,25 @@ export const randomOrder = (nMax: number): number[] => {
 		[arr[i], arr[j]] = [arr[j], arr[i]]
 	}
 	return arr
+}
+
+export function logTimed(...args: any[]) {
+	const date = new Date()
+	const year = date.getFullYear()
+	const month = String(date.getMonth() + 1).padStart(2, '0')
+	const day = String(date.getDate()).padStart(2, '0')
+	const hour = String(date.getHours()).padStart(2, '0')
+	const minute = String(date.getMinutes()).padStart(2, '0')
+	const second = String(date.getSeconds()).padStart(2, '0')
+	const timestamp = `${ year }-${ month }-${ day } ${ hour }:${ minute }:${ second }`
+	console.log(`[${ timestamp }]`, ...args)
+}
+
+export function chunkArray<T>(arr: T[], numChunks: number): T[][] {
+	const chunkSize = Math.ceil(arr.length / numChunks)
+	const chunks: T[][] = []
+	for (let i = 0; i < arr.length; i += chunkSize) {
+		chunks.push(arr.slice(i, i + chunkSize))
+	}
+	return chunks
 }

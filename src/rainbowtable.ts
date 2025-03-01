@@ -1,17 +1,43 @@
 import sqlite3 from 'sqlite3'
 import { InputOutputReplacer, Gate } from './types.js'
-import { evalCircuit, generateCombinations, getUniqueVars, getVars, ioHash, toBatches } from './utils.js'
+import { evalCircuit, generateCombinations, getUniqueVars, ioHash, logTimed, toBatches } from './utils.js'
 import { LimitedMap } from './limitedMap.js'
-import { BigMap } from './big.js'
+
+const gatesToBinary = (gates: Gate[]): string => {
+	let binary = ''
+	for (const gate of gates) {
+		// Pack a and b into 2 bytes
+		binary += String.fromCharCode(gate.a)
+		binary += String.fromCharCode(gate.b)
+		// Pack target and gate_i into 1 byte, target into 4 least significant bits and gate_i into 4 most significant bits
+		binary += String.fromCharCode((gate.gate_i << 4) | (gate.target & 0x0F))
+	}
+	return binary
+}
+
+const binaryToGates = (binary: string): Gate[] => {
+	const gates: Gate[] = []
+	for (let i = 0; i < binary.length; i += 3) {
+		// Unpack a and b from 2 bytes
+		const a = binary.charCodeAt(i)
+		const b = binary.charCodeAt(i + 1)
+		// Unpack target and gate_i from 1 byte, target from 4 least significant bits and gate_i from 4 most significant bits
+		const target = binary.charCodeAt(i + 2) & 0x0F
+		const gate_i = binary.charCodeAt(i + 2) >> 4
+		gates.push({ a, b, target, gate_i })
+	}
+	return gates;
+}
 
 // Create table if not exists
 const createTable = (db: sqlite3.Database) => {
 	return new Promise<void>((resolve, reject) => {
 		db.run(`
 			CREATE TABLE IF NOT EXISTS InputOutputReplacers (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,  -- Auto-incrementing id as the primary key
-				ioIdentifier INTEGER NOT NULL UNIQUE,  -- Unique integer identifier
-				replacerGates TEXT NOT NULL
+				ioIdentifier TEXT PRIMARY KEY,
+				replacerGates TEXT NOT NULL,
+				numberOfGates INTEGER NOT NULL,
+				numberOfVariables INTEGER NOT NULL
 			);
 		`, (err: unknown) => {
 			if (err) {
@@ -23,54 +49,129 @@ const createTable = (db: sqlite3.Database) => {
 	})
 }
 
-export const storeReplacers = async (db: sqlite3.Database, replacers: BigMap<string, InputOutputReplacer>) => {
-	return new Promise<void>((resolve, reject) => {
-		db.serialize(() => {
-			db.run('BEGIN TRANSACTION')
-			const stmt = db.prepare('INSERT OR REPLACE INTO InputOutputReplacers (ioIdentifier, replacerGates) VALUES (?, ?)')
-			try {
-				for (const [ioIdentifier, replacerGates] of replacers) {
-					const replacerGatesJson = JSON.stringify(replacerGates.replacerGates)
-					stmt.run(ioIdentifier, replacerGatesJson)
+export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string, InputOutputReplacer>) => {
+    // Fetch all existing entries in a single query
+	logTimed(`getting old entries`)
+
+	const ios = Array.from(replacers.keys())
+
+	const chunkSize = 900
+	
+	const dbPromises: Promise<{ ioIdentifier: string, numberOfGates: number, numberOfVariables: number }[]>[] = []
+	for (let i = 0; i < ios.length; i += chunkSize) {
+		const chunk = ios.slice(i, Math.min(i + chunkSize, ios.length))
+		dbPromises.push(new Promise<{ ioIdentifier: string, numberOfGates: number, numberOfVariables: number }[]>((resolve, reject) => {
+			db.all('SELECT ioIdentifier, numberOfGates, numberOfVariables FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk, (err: unknown, rows: any[]) => {
+				if (err) {
+					reject(err)
+				} else {
+					const results = rows.map((row: any) => {
+						if (row === undefined) return undefined
+						return { ioIdentifier: row.ioIdentifier, numberOfGates: row.numberOfGates, numberOfVariables: row.numberOfVariables }
+					}).filter((x): x is { ioIdentifier: string, numberOfGates: number, numberOfVariables: number } => x !== undefined)
+					resolve(results)
 				}
-				stmt.finalize((err: unknown) => {
+			})
+		}))
+	}
+	const existingEntries = (await Promise.all(dbPromises)).flat()
+	const existingEntriesMap = new Map<string, { ioIdentifier: string, numberOfGates: number, numberOfVariables: number }>()
+	existingEntries.forEach((entry) => {
+		existingEntriesMap.set(entry.ioIdentifier, entry)
+	})
+
+	logTimed(`comparing...`)
+	// Iterate over the replacers to decide which ones to insert or replace
+	let insertAmount = 0
+	let insertThese: any[] = []
+	for (const [ioIdentifier, replacer] of replacers) {
+		const existingEntry = existingEntriesMap.get(ioIdentifier)
+		if (!existingEntry || 
+			(replacer.numberOfGates < existingEntry.numberOfGates) || 
+			(replacer.numberOfGates === existingEntry.numberOfGates && replacer.numberOfVariables < existingEntry.numberOfVariables)) {
+			// If the new entry is better, insert or replace it
+			const replacerGatesJson = gatesToBinary(replacer.replacerGates)
+			insertAmount++
+			insertThese.push([ioIdentifier, replacerGatesJson, replacer.numberOfGates, replacer.numberOfVariables])
+		}
+	}
+	logTimed(`inserting: ${ insertAmount }`)
+	const insertChunkSize = 1000000
+	for (let i = 0; i < insertThese.length; i += insertChunkSize) {
+		logTimed('inserting...')
+		const chunk = insertThese.slice(i, Math.min(i + insertChunkSize, insertThese.length))
+
+		try {
+			await new Promise<void>((resolve, reject) => {
+				db.run('BEGIN TRANSACTION', (err) => {
 					if (err) {
 						reject(err)
 					} else {
-						db.run('COMMIT', (err: unknown) => {
+						resolve()
+					}
+				})
+			})
+			const stmt = db.prepare('INSERT OR REPLACE INTO InputOutputReplacers (ioIdentifier, replacerGates, numberOfGates, numberOfVariables) VALUES (?, ?, ?, ?)')
+			for (const insert of chunk) {
+				await new Promise<void>((resolve, reject) => {
+					stmt.run(...insert, (err: unknown) => {
+						if (err) {
+							reject(err)
+						} else {
+							resolve()
+						}
+					})
+				})
+			}
+			// Finalize the statement and commit the transaction
+			await new Promise<void>((resolve, reject) => {
+				stmt.finalize((err) => {
+					if (err) {
+						reject(err)
+					} else {
+						db.run('COMMIT', (err) => {
 							if (err) {
 								reject(err)
 							} else {
-								console.log(`Replacers stored successfully.`)
+								logTimed(`Replacers stored successfully.`)
 								resolve()
 							}
 						})
 					}
 				})
-			} catch (err) {
-				db.run('ROLLBACK', () => {
-					reject(err)
+			})
+		} catch (err) {
+			console.error(err)
+			await new Promise<void>((_resolve, reject) => {
+				db.run('ROLLBACK', (err) => {
+					if (err) {
+						reject(err)
+					} else {
+						reject(err)
+					}
 				})
-			}
-		})
-	})
+			})
+			throw err
+		}
+	}
+	logTimed(`finalized`)
 }
 
 export const getReplacerById = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, ioIdentifier: string) => {
 	const cacheHit = ioIdentifierCache.get(ioIdentifier)
 	if (cacheHit !== undefined) {
 		if (cacheHit === null) return null
-		return { ioIdentifier: ioIdentifier, replacerGates: cacheHit }
+		return cacheHit
 	}
-	return new Promise<InputOutputReplacer | null>((resolve, reject) => {
+	return new Promise<Gate[] | null>((resolve, reject) => {
 		db.get('SELECT * FROM InputOutputReplacers WHERE ioIdentifier = ?', [ioIdentifier], (err: unknown, row: any) => {
 			if (err) {
 				reject(err)
 			} else {
 				if (row) {
-					const replacerGates = JSON.parse(row.replacerGates) as Gate[]
+					const replacerGates = binaryToGates(row.replacerGates)
 					ioIdentifierCache.set(row.ioIdentifier, replacerGates)
-					resolve({ ioIdentifier: row.ioIdentifier, replacerGates })
+					resolve(replacerGates)
 				} else {
 					ioIdentifierCache.set(ioIdentifier, null)
 					resolve(null)
@@ -78,6 +179,57 @@ export const getReplacerById = async (db: sqlite3.Database, ioIdentifierCache: L
 			}
 		})
 	})
+}
+
+export const getReplacersByIds = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, ioIdentifiers: string[]) => {
+    const cacheHits: { ioIdentifier: string, gates: Gate[] }[] = []
+    const missingIdentifiers: string[] = []
+    // Check cache first
+    for (const ioIdentifier of ioIdentifiers) {
+        const cacheHit = ioIdentifierCache.get(ioIdentifier)
+        if (cacheHit !== undefined) {
+            if (cacheHit !== null) {
+                cacheHits.push({ ioIdentifier, gates: cacheHit })
+            }
+        } else {
+            missingIdentifiers.push(ioIdentifier)
+        }
+    }
+    // If there are no missing identifiers, return the cache hits
+    if (missingIdentifiers.length === 0) return cacheHits
+
+    const chunkSize = 900
+    const dbPromises: Promise<{ ioIdentifier: string, gates: Gate[] }[]>[] = []
+
+    // Query the database for the missing identifiers in chunks
+    for (let i = 0; i < missingIdentifiers.length; i += chunkSize) {
+        const chunk = missingIdentifiers.slice(i, Math.min(i + chunkSize, missingIdentifiers.length))
+        dbPromises.push(new Promise<{ ioIdentifier: string, gates: Gate[] }[]>((resolve, reject) => {
+            db.all('SELECT * FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk, (err: unknown, rows: any[]) => {
+                if (err) {
+                    reject(err)
+                } else {
+                    const results = rows.map((row: any) => {
+                        if (row === undefined) {
+                            ioIdentifierCache.set(row.ioIdentifier, null)
+                            return undefined
+                        }
+                        const gates = binaryToGates(row.replacerGates)
+                        ioIdentifierCache.set(row.ioIdentifier, gates)
+                        return { ioIdentifier: row.ioIdentifier as string, gates }
+                    }).filter((x): x is { ioIdentifier: string, gates: Gate[] } => x !== undefined)
+                    resolve(results)
+                }
+            })
+        }))
+    }
+
+    // Wait for all database queries to complete
+    const dbResults = (await Promise.all(dbPromises)).flat()
+
+    // Add cache hits to dbResults
+    const allResults = [...cacheHits, ...dbResults]
+    return allResults
 }
 
 const isEmpty = async (db: sqlite3.Database) => {
@@ -146,45 +298,64 @@ const containsAllNumbers = (arr: number[], N: number): boolean => {
 	return true
 }
 
+const FLUSH_SIZE = 15_000_000
+
+const flushIfNeeded = async (db: sqlite3.Database, rainbowMap: Map<string, InputOutputReplacer>) => {
+	if (rainbowMap.size < FLUSH_SIZE) {
+		logTimed(`not flushing yet! entries:${ rainbowMap.size }`)
+		return
+	}
+	logTimed(`FLUSHING! entries:${ rainbowMap.size }`)
+	await storeReplacers(db, rainbowMap)
+
+	rainbowMap.clear()
+	logTimed('FLUSHING DONE')
+}
+
+export const getRainbowTable = (wires: number, maxGates: number) => {
+	const filename = `bin2rainbowtable_${ wires }_${ maxGates }.db`
+	const db = new sqlite3.Database(filename)
+	return db
+}
+
 export const createRainbowTable = async (wires: number, maxGates: number) => {
-	const filename = `rainbowtable_${ wires }_${ maxGates }.db`
 	if (maxGates > 4) throw new Error('that many gates not supported')
+	const filename = `bin2rainbowtable_${ wires }_${ maxGates }.db`
 	const db = new sqlite3.Database(filename)
 	await createTable(db)
 	if (!await isEmpty(db)) {
-		console.log(`using rainbowtable ${ filename }`)
+		logTimed(`using rainbowtable ${ filename }`)
 		return db
 	}
-	console.log(`creating rainbow table. Wires: ${ wires } Gates: ${ maxGates }`)
-	let rainbowMap = new BigMap<string, InputOutputReplacer>()
+	logTimed(`creating rainbow table. Wires: ${ wires } Gates: ${ maxGates }`)
+	let rainbowMap = new Map<string, InputOutputReplacer>()
 	const combinations = generateCombinations(wires)
 	const addgates = (gates: Gate[]) => {
 		const uniqueVars = getUniqueVars(gates)
 		const newUniques = uniqueVars.length
 		if (!containsAllNumbers(uniqueVars, newUniques)) return
-		const mapping = combinations.flatMap((input) => (evalCircuit(gates, input) ))
-		const replaced = { ioIdentifier: ioHash(mapping), replacerGates: gates }
-		const old = rainbowMap.get(replaced.ioIdentifier)
+		const ioId = ioHash(combinations.flatMap((input) => evalCircuit(gates, input)))
+		const old = rainbowMap.get(ioId)
+		const newEntry = { ioIdentifier: ioId, replacerGates: gates, numberOfVariables: newUniques, numberOfGates: gates.length }
 		if (old === undefined) {
-			rainbowMap.set(replaced.ioIdentifier, replaced)
+			rainbowMap.set(ioId, newEntry)
 		} else {
-			if (old.replacerGates.length === gates.length) {
-				const oldUniques = getUniqueVars(old.replacerGates).length
-				if (newUniques < oldUniques) rainbowMap.set(replaced.ioIdentifier, replaced)
+			if (old.numberOfGates === newEntry.numberOfGates) {
+				if (newUniques < old.numberOfVariables) rainbowMap.set(ioId, newEntry)
 				return
 			}
-			if (old.replacerGates.length > gates.length) {
-				rainbowMap.set(replaced.ioIdentifier, replaced)
+			if (old.numberOfGates > newEntry.numberOfGates) {
+				rainbowMap.set(ioId, newEntry)
 			}
 		}
 	}
 	const allGates = Array.from(generateAllGates(wires))
-	console.log(`different gates: ${ allGates.length }`)
+	logTimed(`different gates: ${ allGates.length }`)
 	const batches = toBatches(allGates, 10)
 	if (maxGates >= 4) {
-		console.log('4 gates')
+		logTimed('4 gates')
 		for (const [i, gate0Batch] of batches.entries()) {
-			console.log(`iteration: ${i}/${batches.length}(${Math.floor(i/batches.length*100)}%)`)
+			logTimed(`iteration: ${i}/${batches.length}(${Math.floor(i/batches.length*100)}%)`)
 			const start = performance.now()
 			for (const gate0 of gate0Batch) {
 				for (const gate1 of allGates) {
@@ -193,17 +364,19 @@ export const createRainbowTable = async (wires: number, maxGates: number) => {
 							addgates([gate0, gate1, gate2, gate3])
 						}
 					}
+					await flushIfNeeded(db, rainbowMap)
 				}
 			}
-			console.log(`rainbowsize: ${rainbowMap.size}`)
+			logTimed(`rainbowsize: ${rainbowMap.size}`)
 			const end = performance.now()
-			console.log(`Execution time: ${end - start} ms`)
+			logTimed(`Execution time: ${end - start} ms`)
 		}
+		await flushIfNeeded(db, rainbowMap)
 	}
 	if (maxGates >= 3) {
-		console.log('3 gates')
+		logTimed('3 gates')
 		for (const [i, gate0Batch] of batches.entries()) {
-			console.log(`iteration: ${i}/${batches.length}(${Math.floor(i/batches.length*100)}%)`)
+			logTimed(`iteration: ${i}/${batches.length}(${Math.floor(i/batches.length*100)}%)`)
 			const start = performance.now()
 			for (const gate0 of gate0Batch) {
 				for (const gate1 of allGates) {
@@ -211,32 +384,36 @@ export const createRainbowTable = async (wires: number, maxGates: number) => {
 						addgates([gate0, gate1, gate2])
 					}
 				}
+				await flushIfNeeded(db, rainbowMap)
 			}
-			console.log(`rainbowsize: ${ rainbowMap.size }`)
+			logTimed(`rainbowsize: ${ rainbowMap.size }`)
 			const end = performance.now()
-			console.log(`Execution time: ${end - start} ms`)
+			logTimed(`Execution time: ${end - start} ms`)
 		}
+		await flushIfNeeded(db, rainbowMap)
 	}
 
 	if (maxGates >= 2) {
-		console.log('2 gates')
+		logTimed('2 gates')
 		for (const gate0 of allGates) {
 			for (const gate1 of allGates) {
 				addgates([gate0, gate1])
 			}
 		}
+		await flushIfNeeded(db, rainbowMap)
 	}
 
 	if (maxGates >= 1) {
-		console.log('1 gates')
+		logTimed('1 gates')
 		for (const gate0 of allGates) {
 			addgates([gate0])
 		}
+		await flushIfNeeded(db, rainbowMap)
 	}
-	console.log('0 gates')
+	logTimed('0 gates')
 	addgates([])
-	console.log(`created rainbowtable of size: ${ rainbowMap.size }, inserting...`)
+	logTimed(`created rainbowtable of size: ${ rainbowMap.size }, inserting...`)
 	await storeReplacers(db, rainbowMap)
-	console.log(`Done`)
+	logTimed(`Done`)
 	return db
 }

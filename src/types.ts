@@ -14,6 +14,8 @@ export type Gate = {
 export type InputOutputReplacer = {
 	ioIdentifier: string
 	replacerGates: Gate[]
+	numberOfVariables: number
+	numberOfGates: number
 }
 
 export type DependencyNode = {

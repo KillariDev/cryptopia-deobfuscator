@@ -11,12 +11,18 @@ export class LimitedMap<K, V> {
 	}
 
 	set(key: K, value: V): void {
-		if (this.map.size >= this.limit) {
-			// Remove the oldest entry (first added key)
-			const oldestKey = this.map.keys().next().value
-			if (oldestKey !== undefined) this.map.delete(oldestKey)
+		try {
+			if (this.map.size >= this.limit) {
+				// Remove the oldest entry (first added key)
+				const oldestKey = this.map.keys().next().value
+				if (oldestKey !== undefined) this.map.delete(oldestKey)
+			}
+			this.map.set(key, value)
+		} catch(e) {
+			console.log(`mapsize: ${this.map.size}/${this.limit}`)
+			console.error(e)
+			this.map = new Map<K, V>()
 		}
-		this.map.set(key, value)
 	}
 
 	get(key: K): V | undefined {
