@@ -44,9 +44,6 @@ const replaceVar = (gate: Gate, variableToReplace: number, variableToReplaceWith
 	}
 }
 
-export const RAINBOW_TABLE_WIRES = 6
-export const RAINBOW_TABLE_GATES = 3
-const RAINBOW_TABLE_ALL_INPUTS = generateCombinations(RAINBOW_TABLE_WIRES)
 const MAX_DETERMINISTIC_USELESS_VARS = 8
 const BYTE_ALL_INPUTS = new Map<number, boolean[][]>()
 for (let wires = 2; wires < MAX_DETERMINISTIC_USELESS_VARS; wires++) {
@@ -108,7 +105,7 @@ const insertArrayAtIndex = (originalArray: Gate[], newArray: Gate[], index: numb
 	return [...before, ...newArray, ...after]
 }
 
-const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean): { gates: Gate[], changed: boolean } => {
+const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, rainbowTableWires: number): { gates: Gate[], changed: boolean } => {
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
 	
 	let uselessVarsFound = 0
@@ -138,7 +135,7 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 				continue
 			}
 		}
-		if (variableIndexMapping.length <= RAINBOW_TABLE_WIRES) continue
+		if (variableIndexMapping.length <= rainbowTableWires) continue
 		processedGatesCache.set(gatesHash, true)
 	}
 	if (replacements.length === 0) return { gates, changed: false }
@@ -148,8 +145,8 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 	return { gates: newCircuit, changed: true }
 }
 
-const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean): Promise<{ gates: Gate[], changed: boolean }> => {
-	const changes = optimizeVariables(processedGatesCache, originalGates, sliceSize, useProbabilistically, findUselessVarsSetting)
+const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, rainbowTableWires: number, RAINBOW_TABLE_ALL_INPUTS: boolean[][]): Promise<{ gates: Gate[], changed: boolean }> => {
+	const changes = optimizeVariables(processedGatesCache, originalGates, sliceSize, useProbabilistically, findUselessVarsSetting, rainbowTableWires)
 	const gates = changes.gates
 	const queries: { gatesHash: string, ioIdentifier: string, start: number, end: number, variableIndexMapping: number[] }[] = []
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
@@ -161,7 +158,7 @@ const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: Limited
 		if (processedGatesCache.has(gatesHash)) continue
 
 		const variableIndexMapping = mapVariablesToIndexes(sliceGates) // map variables to smaller amount of wires
-		if (variableIndexMapping.length <= RAINBOW_TABLE_WIRES) {
+		if (variableIndexMapping.length <= rainbowTableWires) {
 			const mappedGates = mapCircuit(sliceGates, variableIndexMapping)
 			const allOutputs = calculateAllOutputsArray(mappedGates, RAINBOW_TABLE_ALL_INPUTS)
 			const ioIdentifier = ioHash(allOutputs)
@@ -223,9 +220,9 @@ export function shuffleRows(gates: Gate[], times: number) {
 	}
 }
 
-const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'fast' | 'heavy'): Promise<Gate[]> => {
-	const graphIterator = findConvexSubsets(subsetSize, slicedVersion)
-	let continueRun = true
+const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'fast' | 'heavy', timeToEndWorker: () => boolean, rainbowTableWires: number, rainbowTableAllInputs: boolean[][]): Promise<Gate[]> => {
+	let graphIterator = findConvexSubsets(subsetSize, slicedVersion)
+	let regenerateGraph = false
 	for (let lines of graphIterator) {
 		let sliceToUse = 1
 		while(true) {
@@ -237,26 +234,29 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 				sliceToUse++
 				if (sliceToUse > maxSlice) sliceToUse = 2
 				if (sliceToUse > linesN) continue
-				const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, processedGatesCache, inGates, sliceToUse, phase === 'heavy', phase === 'heavy')
+				if (timeToEndWorker()) return slicedVersion
+				const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, processedGatesCache, inGates, sliceToUse, phase === 'heavy', phase === 'heavy', rainbowTableWires, rainbowTableAllInputs)
 				if (optimizationOutput.changed) {
 					slicedVersion = insertArrayAtIndex(slicedVersion, optimizationOutput.gates, lines[lines.length - 1] + 1)
 					slicedVersion = remove(slicedVersion, lines)
 					const offset = lines[lines.length - 1] + 1 - lines.length
 					lines = Array.from(Array(optimizationOutput.gates.length).keys()).map((x) => x + offset)
-					continueRun = false
+					regenerateGraph = true
 					sliceToUse = 1
-					return slicedVersion
-					//break
+					break
 				}
 			}
 			if (it === maxSlice) break
 		}
-		if (!continueRun) break
+		if (regenerateGraph) {
+			graphIterator = findConvexSubsets(subsetSize, slicedVersion)
+			regenerateGraph = false
+		}
 	}
 	return slicedVersion
 }
 
-export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean) => {
+export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, rainbowTableWires: number) => {
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	optimizedVersion = gateSimplifier(optimizedVersion)
@@ -264,10 +264,17 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	let lastSaved = performance.now()
 	const ioIdentifierCache = new LimitedMap<string, Gate[] | null>(1000000)
 	const processedGatesCache = new LimitedMap<string, boolean>(1000000)
+	
+	const rainbowTableAllInputs = generateCombinations(rainbowTableWires)
 	logTimed('Optimizer started')
-	let subsetSize = 300
-	let maxSlice = 15
+	let subsetSize = 6
+	let maxSlice = 6
 	let phase: 'simplest' | 'fast' | 'heavy' = 'heavy'
+	const timeToEndWorker = () => {
+		const endTime = performance.now()
+		const timeDiffMins = (endTime - lastSaved) / 60000
+		return timeDiffMins >= 20
+	}
 	while (true) {
 		shuffleRows(optimizedVersion, 3)
 		const sliceStart = Math.min(optimizedVersion.length -1, Math.max(0, getRandomNumberInRange(Math.floor(-optimizedVersion.length / 5), optimizedVersion.length)))
@@ -280,15 +287,13 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 		logTimed(`Data selection: ${ Math.floor(sliceStart / optimizedVersion.length * 100) }% - ${ Math.floor(sliceEnd / optimizedVersion.length * 100) }%: ${ slicedVersion.length } gates`)
 		
 		const chunked = chunkArray(slicedVersion, nChunks)
-		slicedVersion = (await Promise.all(chunked.flatMap(async (data) => optimizeSubset(db, data, ioIdentifierCache, processedGatesCache, subsetSize, maxSlice, phase)))).flat()
+		slicedVersion = (await Promise.all(chunked.flatMap(async (data) => optimizeSubset(db, data, ioIdentifierCache, processedGatesCache, subsetSize, maxSlice, phase, timeToEndWorker, rainbowTableWires, rainbowTableAllInputs)))).flat()
 		
 		optimizedVersion = [...optimizedVersion.slice(0, sliceStart), ...slicedVersion, ...optimizedVersion.slice(sliceEnd, optimizedVersion.length)]
 		
 		const gatesRemoved = prevSavedLength - optimizedVersion.length
 		if (workerMode) {
-			const endTime = performance.now()
-			const timeDiffMins = (endTime - lastSaved) / 60000
-			if (timeDiffMins >= 20) {
+			if (timeToEndWorker()) {
 				logTimed(`Total Removed Gates Since Terminating: ${ gatesRemoved }`)
 				save(problemName, optimizedVersion, wires, originalGates)
 				return

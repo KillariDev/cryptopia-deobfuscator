@@ -5,10 +5,12 @@ import { CircuitData, Gate } from './types.js'
 import { createRainbowTable } from './rainbowtable.js'
 import { join, parse } from 'path'
 import { drawDependencyGraph } from './drawGraph.js'
-import { RAINBOW_TABLE_GATES, RAINBOW_TABLE_WIRES, splitTaskAndRun } from './processing.js'
+import { splitTaskAndRun } from './processing.js'
 
 const run = async (pathToFileWithoutExt: string) => {
 	logTimed(`Started to run job ${ pathToFileWithoutExt }`)
+	const RAINBOW_TABLE_WIRES = 6
+	const RAINBOW_TABLE_GATES = 3
 	const db = await createRainbowTable(RAINBOW_TABLE_WIRES, RAINBOW_TABLE_GATES)
 	const inputCircuit = readJsonFile(`${ pathToFileWithoutExt }.json`) as CircuitData
 	logTimed('wire_count', inputCircuit.wire_count)

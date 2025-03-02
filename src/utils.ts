@@ -417,7 +417,7 @@ class SortedArray {
 }
 
 export function* findConvexSubsets(N: number, gates: Gate[]): Generator<number[]> {
-	yield Array.from(Array(gates.length).keys()) // start with current order
+	yield Array.from(Array(gates.length).keys()).slice(0, N) // start with current order
 	if (N === 0) return
 	const nodes = createDependencyGraph(gates)
 	const dependantMap = new Map<number, number[]>()
@@ -488,9 +488,9 @@ export function* findConvexSubsets(N: number, gates: Gate[]): Generator<number[]
 				nonExploredDepenencies.add(candidate)
 			}
 			currentSubset.push(needToAdd.addNode)
+			if (currentSubset.length >= N) break
 			currentSubsetSet.add(needToAdd.addNode)
 			nonExploredDepenencies.add(nodes[needToAdd.addNode].dependOnPastLines.filter((x) => !currentSubsetSet.has(x)))
-			if (currentSubset.length >= N) break
 		}
 		yield currentSubset.slice().reverse()
 		//return
