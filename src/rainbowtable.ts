@@ -244,7 +244,7 @@ const isEmpty = async (db: sqlite3.Database) => {
 	})
 }
 
-function* generateAllGates(wires: number) {
+export function* generateAllGates(wires: number): Generator<Gate, undefined, unknown> {
 	for (let gate_i = 0; gate_i < 16; gate_i++) {
 		for (let target = 0; target < wires; target++) {
 			switch (gate_i) {
@@ -261,7 +261,7 @@ function* generateAllGates(wires: number) {
 				case 14: { //return !(a && b)
 					for (let a = 0; a < wires; a++) {
 						for (let b = a + 1; b < wires; b++) {
-							yield { a, b, target, gate_i }
+							if (a !== target && b !== target) yield { a, b, target, gate_i }
 						}
 					}
 					break
@@ -269,14 +269,14 @@ function* generateAllGates(wires: number) {
 				case 10: //return !b
 				case 5: { //return b
 					for (let b = 0; b < wires; b++) {
-						yield { a: 0, b, target, gate_i }
+						if (b !== target) yield { a: 0, b, target, gate_i }
 					}
 					break
 				}
 				case 12: //return !a
 				case 3: { //return a
 					for (let a = 0; a < wires; a++) {
-						yield { a, b: 0, target, gate_i }
+						if (a !== target) yield { a, b: 0, target, gate_i }
 					}
 					break
 				}
