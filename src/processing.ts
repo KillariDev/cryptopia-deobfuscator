@@ -554,6 +554,11 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 		slicedVersion = (await Promise.all(chunked.flatMap(async (data) => optimizeSubset(db, data, ioIdentifierCache, processedGatesCache, subsetSize, maxSlice, phase, timeToEndWorker, rainbowTableWires, rainbowTableAllInputs)))).flat()
 		optimizedVersion = [...optimizedVersion.slice(0, sliceStart), ...slicedVersion, ...optimizedVersion.slice(sliceEnd, optimizedVersion.length)]
 		subsetSize = 40
+		if (phase === 'heavy') {
+			shuffleRowsWithDependentGateSwap(optimizedVersion, 1)
+			subsetSize++
+			if (subsetSize > optimizedVersion.length) return
+		}
 		phase = 'heavy'
 		
 		const gatesRemoved = prevSavedLength - optimizedVersion.length
