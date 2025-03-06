@@ -13,7 +13,6 @@ const task = async (filename: string) => {
 	logTimed(`Worker Finished ${ filename }`)
 	return new Promise<void>((resolve, _reject) => {
 		db.close((err) => {
-			console.log(err)
 			parentPort?.postMessage('finished working')
 			resolve()
 		})

@@ -472,9 +472,9 @@ function appendMissingNumbers(arr: number[], n: number): number[] {
 	return [...Array.from(allNumbers), ...arr]
 }
 
-const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'fast' | 'heavy', timeToEndWorker: () => boolean, rainbowTableWires: number, rainbowTableAllInputs: boolean[][]): Promise<Gate[]> => {
+const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, rainbowTableWires: number, rainbowTableAllInputs: boolean[][]): Promise<Gate[]> => {
 	const useProbabilistically = phase === 'heavy'
-	const findUselessVarsSetting = true //phase === 'heavy'
+	const findUselessVarsSetting = true
 	let regenerateGraph = false
 	do {
 		let graphIterator = findConvexSubsets(subsetSize, slicedVersion)
@@ -537,12 +537,12 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	const rainbowTableAllInputs = generateCombinations(rainbowTableWires)
 	let subsetSize = 300
 	let maxSlice = 10
-	let phase: 'simplest' | 'fast' | 'heavy' = 'fast'
+	let phase: 'simplest' | 'heavy' = 'simplest'
 	logTimed(`optimizer started with subset ${subsetSize}`)
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
 		const timeDiffMins = (endTime - lastSaved) / 60000
-		return timeDiffMins >= 5
+		return timeDiffMins >= 1
 	}
 	while (true) {
 		shuffleRows(optimizedVersion, 20)
@@ -567,7 +567,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 			if (gatesRemoved > 0) {
 				const endTime = performance.now()
 				const timeDiffMins = (endTime - lastSaved) / 60000
-				if (timeDiffMins >= 3) {
+				if (timeDiffMins >= 1) {
 					logTimed(`Total Removed Gates Since last save: ${ gatesRemoved }`)
 					const filename = `${ problemName }.solved-${ optimizedVersion.length }.json`
 					save(filename, optimizedVersion, wires, originalGates)
@@ -605,13 +605,16 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		return result
 	}
 
-	const originlCircuit = readJsonFile(`${ original }.json`) as CircuitData
-	const originalGates: Gate[] = originlCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
-	const inputCircuit = readJsonFile(`${ pathToFileWithoutExt }.json`) as CircuitData
+	const originalCircuit = readJsonFile(`${ original }.json`) as CircuitData
+	const originalGates: Gate[] = originalCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
+	const inputCircuit = fs.existsSync(`${ pathToFileWithoutExt }.json`) ? readJsonFile(`${ pathToFileWithoutExt }.json`) as CircuitData : originalCircuit
 	const gates: Gate[] = inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
-
+	logTimed('current wire_count', inputCircuit.wire_count)
+	logTimed('current gate_count', inputCircuit.gates.length)
+	logTimed('original wire_count', originalCircuit.wire_count)
+	logTimed('original gate_count', originalCircuit.gates.length)
 	if (originalGates.length < gates.length) throw new Error('Original circuit is bigger than working. Do you have arguments the right way?')
-	verifyCircuit(originalGates, gates, originlCircuit.wire_count, 20)
+	verifyCircuit(originalGates, gates, originalCircuit.wire_count, 20)
 	const nMaxWorkers = 12
 	let currentGates = gates.slice()
 	while(true) {
@@ -625,7 +628,6 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			fs.writeFileSync(workerFile, convertToOriginal(inputCircuit.wire_count, dataChunk), 'utf8')
 			await runWorker(workerFile)
 		}))
-		console.log('main thread')
 		currentGates = approxGates.flatMap((_, index) => {
 			const inputCircuit = readJsonFile(`${ pathToFileWithoutExt}_worker${index}.json`) as CircuitData
 			return inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))

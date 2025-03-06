@@ -1,5 +1,4 @@
-import { logTimed, readJsonFile } from './utils.js'
-import { CircuitData, Gate } from './types.js'
+import { logTimed } from './utils.js'
 import { createRainbowTable, RAINBOW_TABLE_GATES, RAINBOW_TABLE_WIRES } from './rainbowtable.js'
 import { join, parse } from 'path'
 import { splitTaskAndRun } from './processing.js'
@@ -7,10 +6,6 @@ import { splitTaskAndRun } from './processing.js'
 const run = async (pathToFileWithoutExt: string, original: string) => {
 	logTimed(`Started to run job ${ pathToFileWithoutExt }`)
 	await createRainbowTable(RAINBOW_TABLE_WIRES, RAINBOW_TABLE_GATES)
-	//return
-	const inputCircuit = readJsonFile(`${ pathToFileWithoutExt }.json`) as CircuitData
-	logTimed('wire_count', inputCircuit.wire_count)
-	logTimed('gate_count', inputCircuit.gates.length)
 	try {
 		await splitTaskAndRun(pathToFileWithoutExt, original)
 	} catch(e: unknown) {
