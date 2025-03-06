@@ -1,5 +1,5 @@
-import { DependencyNode, Gate } from "./types.js"
-import { gateToText, getVars } from "./utils.js"
+import { DependencyNode, Gate } from './types.js'
+import { gateToText, getVars } from './utils.js'
 
 export const createDependencyGraph = (gates: Gate[]) => {
 	const dependencyGraph: DependencyNode[] = []

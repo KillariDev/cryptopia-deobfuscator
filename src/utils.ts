@@ -2,7 +2,6 @@ import * as fs from 'fs'
 import { createHash } from 'crypto'
 import { DependencyNode, Gate } from './types.js'
 import { createDependencyGraph } from './lineswapper.js'
-import { shuffleRows } from './processing.js'
 
 export const readJsonFile = (filePath: string): any => {
 	try {
@@ -166,7 +165,7 @@ export const mapCircuit = (gates: Gate[], indexMapping: number[]) => {
 		return newGate
 	})
 }
-export const reverseMapCircuit = (mappedGates: Gate[], indexMapping: number[]) =>{
+export const reverseMapCircuit = (mappedGates: Gate[], indexMapping: number[]): Gate[] =>{
 	return mappedGates.map((gate) => {
 		const newGate = {
 			a: indexMapping[gate.a] || 0, // if a variable is missing, its not a mandatory variable
@@ -218,6 +217,9 @@ export function generateCombinations(arrayLength: number): boolean[][] {
 
 export function calculateAllOutputsArray(gates: Gate[], combinations: boolean[][]) {
 	return combinations.flatMap((input) => (evalCircuit(gates, input)))
+}
+export function calculateAllOutputsArrayNonFlat(gates: Gate[], combinations: boolean[][]) {
+	return combinations.map((input) => (evalCircuit(gates, input)))
 }
 
 export const hashBooleanArrays = (array: boolean[]): string => {
@@ -567,4 +569,12 @@ export function chunkArray<T>(arr: T[], numChunks: number): T[][] {
 		chunks.push(arr.slice(i, i + chunkSize))
 	}
 	return chunks
+}
+
+export const isReplacementSimpler = (replacement: Gate[], oldGates: Gate[]) => {
+	if (replacement.length !== oldGates.length) return replacement.length < oldGates.length
+	const uniqueR = getUniqueVars(replacement).length
+	const uniqueO = getUniqueVars(oldGates).length
+	if (uniqueR !== uniqueO) return uniqueR < uniqueO
+	return replacement.flatMap(x => getVars(x)).length < oldGates.flatMap(x => getVars(x)).length
 }
