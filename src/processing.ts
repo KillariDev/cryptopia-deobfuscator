@@ -542,7 +542,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
 		const timeDiffMins = (endTime - lastSaved) / 60000
-		return timeDiffMins >= 1
+		return timeDiffMins >= 30
 	}
 	while (true) {
 		shuffleRows(optimizedVersion, 20)
