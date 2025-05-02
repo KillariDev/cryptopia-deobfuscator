@@ -21,6 +21,6 @@ Run the deobfuscator with the following command:
 npm run optimize data/latest.json data/obfuscated.json
 ```
 
-This will read circuit `data/latest.json` circuit in. If the file does not exist, it copies the `data\obfuscated.json` to its place and starts to operate.
+This will read circuit `data/latest.json` in. If the file does not exist, it copies the `data\obfuscated.json` to its place and starts to operate.
 
-The process creates checkpoint file in periodical intervals and also saves the most recent version to the `data/latest.json`. S you can exit from the program and run the command again to restart.
+The process creates a checkpoint file periodically and also saves the most recent version to the `data/latest.json`. You can exit from the program and run the command again to restart. The optimizer runs forever, so you need to exit from program with "ctrl c".

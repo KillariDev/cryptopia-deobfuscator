@@ -329,7 +329,7 @@ const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: Limited
 	if (replacements.length === 0) return changes
 	const newCircuit = replace(gates, replacements)
 	const diff = gates.length - newCircuit.length
-	logTimed(`Rainbow: Removed ${ diff } gates with slice ${ sliceSize }`)
+	if (diff > 0) logTimed(`Rainbow: Removed ${ diff } gates with slice ${ sliceSize }`)
 	return { gates: newCircuit, changed: true }
 }
 
@@ -439,7 +439,6 @@ export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number) {
 		}
 		shuffleCache.set(gateKey, mappedGates)
 	}
-	console.log('shuffleRowsWithDependentGateSwap')
 	for (let time = 0; time < times; time++) {
 		for (let gateI = 1; gateI < gates.length; gateI++) {
 			if (Math.random() < 0.5) continue
@@ -476,10 +475,10 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 	const useProbabilistically = phase === 'heavy'
 	const findUselessVarsSetting = true
 	let regenerateGraph = false
+	let linesLooped = 0
 	do {
 		let graphIterator = findConvexSubsets(subsetSize, slicedVersion)
 		regenerateGraph = false
-		let linesLooped = 0
 		for (let lines of graphIterator) {
 			let sliceToUse = 1
 			linesLooped++
@@ -488,7 +487,6 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 				if (linesN === 0) break
 				const inGates = lines.map((x) => slicedVersion[x])
 				let it = 0
-				let gotMatch = false
 				for (;it < maxSlice; it++) {
 					sliceToUse++
 					if (sliceToUse > maxSlice) sliceToUse = 2
@@ -497,7 +495,7 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 						console.log(`did not finish iteration loop: ${linesLooped}/${slicedVersion.length} sub${subsetSize} slice:${maxSlice}`)
 						return slicedVersion
 					}
-					const slice = phase === 'heavy' && !gotMatch ? getRandomNumberInRange(6, subsetSize) : (sliceToUse <= 6 ? sliceToUse : getRandomNumberInRange(sliceToUse, subsetSize))
+					const slice = sliceToUse
 					const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, rainbowTableWires, rainbowTableAllInputs)
 					if (optimizationOutput.changed) {
 						const nodes = createDependencyGraph(optimizationOutput.gates)
@@ -510,7 +508,6 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 						regenerateGraph = true
 						sliceToUse = 1
 						it = 0
-						gotMatch = true
 						break
 					}
 				}
@@ -521,7 +518,7 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 			}
 		}
 	} while(regenerateGraph)
-	console.log(`completed iteration loop: ${slicedVersion.length} sub${subsetSize} slice:${maxSlice}`)
+	console.log(`completed iteration loop: ${slicedVersion.length} sub${subsetSize} slice:${maxSlice}. Loops: ${linesLooped}`)
 	return slicedVersion
 }
 
@@ -535,31 +532,36 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	const processedGatesCache = new LimitedMap<string, boolean>(1000000)
 	
 	const rainbowTableAllInputs = generateCombinations(rainbowTableWires)
-	let subsetSize = 300
+	let subsetSize = 10
 	let maxSlice = 10
-	let phase: 'simplest' | 'heavy' = 'simplest'
+	let phase: 'simplest' | 'heavy' = 'heavy'
 	logTimed(`optimizer started with subset ${subsetSize}`)
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
 		const timeDiffMins = (endTime - lastSaved) / 60000
-		return timeDiffMins >= 30
+		return timeDiffMins >= 90
 	}
 	while (true) {
 		shuffleRows(optimizedVersion, 20)
-		const sliceStart = 0
-		const sliceEnd = optimizedVersion.length
-		let slicedVersion = optimizedVersion.slice(sliceStart, sliceEnd)
-		const nChunks = Math.max(1, Math.min(5, Math.floor(slicedVersion.length / 4000)))
-		const chunked = chunkArray(slicedVersion, nChunks)
-		slicedVersion = (await Promise.all(chunked.flatMap(async (data) => optimizeSubset(db, data, ioIdentifierCache, processedGatesCache, subsetSize, maxSlice, phase, timeToEndWorker, rainbowTableWires, rainbowTableAllInputs)))).flat()
-		optimizedVersion = [...optimizedVersion.slice(0, sliceStart), ...slicedVersion, ...optimizedVersion.slice(sliceEnd, optimizedVersion.length)]
-		subsetSize = 40
-		if (phase === 'heavy') {
+		const startLength = optimizedVersion.length
+		const nChunks = Math.max(1, Math.min(5, Math.floor(optimizedVersion.length / 1500)))
+		const chunked = chunkArray(optimizedVersion, nChunks)
+		optimizedVersion = (await Promise.all(chunked.flatMap(async (data) => optimizeSubset(db, data, ioIdentifierCache, processedGatesCache, subsetSize, maxSlice, phase, timeToEndWorker, rainbowTableWires, rainbowTableAllInputs)))).flat()
+		/*if (phase === 'heavy') {
 			shuffleRowsWithDependentGateSwap(optimizedVersion, 1)
-			subsetSize++
-			if (subsetSize > optimizedVersion.length) return
-		}
-		phase = 'heavy'
+			maxSlice++
+			if (maxSlice > subsetSize) subsetSize++
+			if (maxSlice > optimizedVersion.length) return
+		}*/
+		//else if (optimizedVersion.length < startLength) {
+			shuffleRowsWithDependentGateSwap(optimizedVersion, 200)
+			maxSlice+=3
+			subsetSize+=3
+		/*} else {
+			phase = 'heavy'
+			subsetSize = 40
+			maxSlice = 11
+		}*/
 		
 		const gatesRemoved = prevSavedLength - optimizedVersion.length
 		if (workerMode) {
@@ -626,7 +628,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		currentGates = gateSimplifier(currentGates)
 		let lastIterationTime = performance.now()
 		const nPrevGates = currentGates.length
-		const nWorkers = Math.min(currentGates.length / 4000, nMaxWorkers)
+		const nWorkers = Math.min(currentGates.length / 2000, nMaxWorkers)
 		const approxGates = splitArrayIntoApproximatelyChunks(currentGates, nWorkers)
 		await Promise.all(approxGates.map(async (dataChunk, index) => {
 			const workerFile = `${ pathToFileWithoutExt}_worker${index}.json`
@@ -648,7 +650,6 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		logTimed(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
 		logTimed('')
 		logTimed('')
-		shuffleRowsWithDependentGateSwap(currentGates, 1)
-		shuffleRows(currentGates, 20)
+		shuffleRowsWithDependentGateSwap(currentGates, 40)
 	}
 }

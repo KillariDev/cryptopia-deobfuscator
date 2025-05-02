@@ -508,9 +508,7 @@ export function* findConvexSubsets(N: number, gates: Gate[]): Generator<number[]
 	const revesedNodes = shuffle(nodes.slice())
 	for (const node of revesedNodes) {
 		const currentSubset = dependencySort(dependantMap, node, N, nodes, gates)
-		if (currentSubset.length >= N) {
-			yield currentSubset
-		}
+		if (currentSubset.length >= N) yield currentSubset
 	}
 }
 
