@@ -539,12 +539,12 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
 		const timeDiffMins = (endTime - lastSaved) / 60000
-		return timeDiffMins >= 90
+		return timeDiffMins >= 10
 	}
 	while (true) {
-		shuffleRows(optimizedVersion, 20)
+		//shuffleRows(optimizedVersion, 20)
 		const startLength = optimizedVersion.length
-		const nChunks = Math.max(1, Math.min(5, Math.floor(optimizedVersion.length / 1500)))
+		const nChunks = Math.max(1, Math.min(5, Math.floor(optimizedVersion.length / 2000)))
 		const chunked = chunkArray(optimizedVersion, nChunks)
 		optimizedVersion = (await Promise.all(chunked.flatMap(async (data) => optimizeSubset(db, data, ioIdentifierCache, processedGatesCache, subsetSize, maxSlice, phase, timeToEndWorker, rainbowTableWires, rainbowTableAllInputs)))).flat()
 		/*if (phase === 'heavy') {
@@ -555,8 +555,8 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 		}*/
 		//else if (optimizedVersion.length < startLength) {
 			shuffleRowsWithDependentGateSwap(optimizedVersion, 200)
-			maxSlice+=3
-			subsetSize+=3
+			maxSlice+=50
+			subsetSize+=50
 		/*} else {
 			phase = 'heavy'
 			subsetSize = 40
@@ -628,7 +628,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		currentGates = gateSimplifier(currentGates)
 		let lastIterationTime = performance.now()
 		const nPrevGates = currentGates.length
-		const nWorkers = Math.min(currentGates.length / 2000, nMaxWorkers)
+		const nWorkers = Math.min(currentGates.length / 1000, nMaxWorkers)
 		const approxGates = splitArrayIntoApproximatelyChunks(currentGates, nWorkers)
 		await Promise.all(approxGates.map(async (dataChunk, index) => {
 			const workerFile = `${ pathToFileWithoutExt}_worker${index}.json`
@@ -650,6 +650,6 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		logTimed(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
 		logTimed('')
 		logTimed('')
-		shuffleRowsWithDependentGateSwap(currentGates, 40)
+		shuffleRowsWithDependentGateSwap(currentGates, 2000)
 	}
 }
