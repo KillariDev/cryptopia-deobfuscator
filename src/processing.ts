@@ -4,7 +4,7 @@ import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, convertToO
 import { CircuitData, Gate } from './types.js'
 import { getReplacersByIds } from './rainbowtable.js'
 import { LimitedMap } from './limitedMap.js'
-import { runWorker } from './threads.js'
+import { WorkerPool, configuredWorkerCount } from './threads.js'
 import { createDependencyGraph } from './lineswapper.js'
 
 const removeVariableFromGate = (gate: Gate, isA: boolean) => {
@@ -166,7 +166,7 @@ const findProbabilisticUselessVars = (sliceGates: Gate[], variableIndexMapping: 
 		}
 		const hasVariableIndexAsNontarget = mappedGates.find((x) => {
 			const vars = getVars(x)
-			return vars[1] === variableIndex || vars[1] === variableIndex
+			return vars.slice(1).includes(variableIndex)
 		}) !== undefined
 		if (hasVariableIndexAsNontarget) {
 			const newRemovedCircuitNontarget = removeNonTargetVariable(mappedGates, variableIndex)
@@ -207,11 +207,11 @@ const findUselessVars = (sliceGates: Gate[], variableIndexMapping: number[]) => 
 		}
 		const hasVariableIndexAsNontarget = mappedGates.find((x) => {
 			const vars = getVars(x)
-			return vars[1] === variableIndex || vars[1] === variableIndex
+			return vars.slice(1).includes(variableIndex)
 		}) !== undefined
 		if (hasVariableIndexAsNontarget) {
 			const newRemovedCircuitNontarget = removeNonTargetVariable(mappedGates, variableIndex)
-			if (areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(variableRemovedGates, allInputs))) {
+			if (areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(newRemovedCircuitNontarget, allInputs))) {
 				return reverseMapCircuit(newRemovedCircuitNontarget, variableIndexMapping)
 			}
 		}
@@ -421,17 +421,21 @@ export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number) {
 		const mappedGates = mapCircuit(sliceGates, variableIndexMapping)
 		const gateKey = hashGates(mappedGates)
 		const cache = shuffleCache.get(gateKey)
-		if (cache) return reverseMapCircuit(cache, variableIndexMapping)
+		if (cache) {
+			const restored = reverseMapCircuit(cache, variableIndexMapping)
+			gates[previous] = restored[0]
+			gates[current] = restored[1]
+			return
+		}
 		const expectedOutput = calculateAllOutputsArray(mappedGates, allInputs)
 		const swappedGates = [mappedGates[1], mappedGates[0]]
 		const target1Gates = !thisDependsOnPrevious ? [swappedGates[0]] : Array.from(allGatesWithTarget(swappedGates[0].target, nVariables))
 		const target2Gates = !previousDependsOnThis ? [swappedGates[1]] : Array.from(allGatesWithTarget(swappedGates[1].target, nVariables))
-		const allSwappedPairs = target1Gates.flatMap((one) => target2Gates.map((two) => [one, two]))
-
-		for (const pair of allSwappedPairs) {
+		for (const one of target1Gates) for (const two of target2Gates) {
+			const pair = [one, two]
 			if (areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(pair, allInputs))) {
 				const correctVars = gateSimplifier(reverseMapCircuit(pair, variableIndexMapping))
-				shuffleCache.set(gateKey, correctVars)
+				shuffleCache.set(gateKey, pair)
 				gates[previous] = correctVars[0]
 				gates[current] = correctVars[1]
 				return
@@ -500,7 +504,7 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 					if (optimizationOutput.changed) {
 						const nodes = createDependencyGraph(optimizationOutput.gates)
 						const dependantMap = dependencyGraphToMap(nodes)
-						const newGates = appendMissingNumbers(dependencySort(dependantMap, nodes[nodes.length - 1], nodes.length, nodes, optimizationOutput.gates), nodes.length).map((x) => optimizationOutput.gates[x])
+						const newGates = (nodes.length === 0 ? [] : appendMissingNumbers(dependencySort(dependantMap, nodes[nodes.length - 1], nodes.length, nodes, optimizationOutput.gates), nodes.length)).map((x) => optimizationOutput.gates[x])
 						slicedVersion = insertArrayAtIndex(slicedVersion, newGates, lines[lines.length - 1] + 1)
 						slicedVersion = remove(slicedVersion, lines)
 						const offset = lines[lines.length - 1] + 1 - lines.length
@@ -522,14 +526,18 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 	return slicedVersion
 }
 
-export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, rainbowTableWires: number) => {
+export const createOptimizerCaches = () => ({
+	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(1000000),
+	processedGatesCache: new LimitedMap<string, boolean>(1000000),
+})
+
+export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, rainbowTableWires: number, caches = createOptimizerCaches(), roundDurationMs = 25 * 60_000) => {
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	optimizedVersion = gateSimplifier(optimizedVersion)
 	verifyCircuit(originalGates, optimizedVersion, wires, 20)
 	let lastSaved = performance.now()
-	const ioIdentifierCache = new LimitedMap<string, Gate[] | null>(1000000)
-	const processedGatesCache = new LimitedMap<string, boolean>(1000000)
+	const { ioIdentifierCache, processedGatesCache } = caches
 	
 	const rainbowTableAllInputs = generateCombinations(rainbowTableWires)
 	let subsetSize = getRandomNumberInRange(2, 200)
@@ -538,10 +546,10 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	//logTimed(`optimizer started with subset ${subsetSize}`)
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
-		const timeDiffMins = (endTime - lastSaved) / 60000
-		return timeDiffMins >= 25
+		return endTime - lastSaved >= roundDurationMs
 	}
 	while (true) {
+		if (workerMode && optimizedVersion.length === 0) return optimizedVersion
 		//shuffleRows(optimizedVersion, 20)
 		const startLength = optimizedVersion.length
 		const nChunks = Math.max(1, Math.min(5, Math.floor(optimizedVersion.length / 200)))
@@ -567,8 +575,8 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 		if (workerMode) {
 			if (timeToEndWorker()) {
 				logTimed(`Total Removed Gates Since Terminating: ${ gatesRemoved }`)
-				save(problemName, optimizedVersion, wires, originalGates)
-				return
+				verifyCircuit(originalGates, optimizedVersion, wires, 20)
+				return optimizedVersion
 			}
 		} else {
 			if (gatesRemoved > 0) {
@@ -622,35 +630,32 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	logTimed('original gate_count', originalCircuit.gates.length)
 	if (originalGates.length < gates.length) throw new Error('Original circuit is bigger than working. Do you have arguments the right way?')
 	verifyCircuit(originalGates, gates, originalCircuit.wire_count, 20)
-	const nMaxWorkers = 24
+	const nMaxWorkers = configuredWorkerCount()
+	const pool = new WorkerPool(nMaxWorkers)
 	let currentGates = gates.slice()
-	while(true) {
-		currentGates = gateSimplifier(currentGates)
-		let lastIterationTime = performance.now()
-		const nPrevGates = currentGates.length
-		const workersSize = getRandomNumberInRange(100, currentGates.length/2)
-		const nWorkers = Math.min(currentGates.length / workersSize, nMaxWorkers)
-		const approxGates = splitArrayIntoApproximatelyChunks(currentGates, nWorkers)
-		await Promise.all(approxGates.map(async (dataChunk, index) => {
-			const workerFile = `${ pathToFileWithoutExt}_worker${index}.json`
-			fs.writeFileSync(workerFile, convertToOriginal(inputCircuit.wire_count, dataChunk), 'utf8')
-			await runWorker(workerFile)
-		}))
-		currentGates = approxGates.flatMap((_, index) => {
-			const inputCircuit = readJsonFile(`${ pathToFileWithoutExt}_worker${index}.json`) as CircuitData
-			return inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
-		})
-		const filename = `${ pathToFileWithoutExt }.solved-${ currentGates.length }.json`
-		save(filename, currentGates, inputCircuit.wire_count, originalGates)
-		save('data/latest.json', currentGates, inputCircuit.wire_count, originalGates)
-		const gatesRemoved = nPrevGates - currentGates.length
-		const endTime = performance.now()
-		const timeDiffMins = (endTime - lastIterationTime) / 60000
-		logTimed('')
-		logTimed('')
-		logTimed(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
-		logTimed('')
-		logTimed('')
-		shuffleRowsWithDependentGateSwap(currentGates, 2000)
+	try {
+		while(currentGates.length > 0) {
+			currentGates = gateSimplifier(currentGates)
+			let lastIterationTime = performance.now()
+			const nPrevGates = currentGates.length
+			const workersSize = getRandomNumberInRange(100, currentGates.length/2)
+			const nWorkers = Math.max(1, Math.min(Math.floor(currentGates.length / workersSize), nMaxWorkers, currentGates.length || 1))
+			const approxGates = splitArrayIntoApproximatelyChunks(currentGates, nWorkers)
+			currentGates = (await Promise.all(approxGates.map(dataChunk => pool.run(dataChunk, inputCircuit.wire_count)))).flat()
+			const filename = `${ pathToFileWithoutExt }.solved-${ currentGates.length }.json`
+			save(filename, currentGates, inputCircuit.wire_count, originalGates)
+			save('data/latest.json', currentGates, inputCircuit.wire_count, originalGates)
+			const gatesRemoved = nPrevGates - currentGates.length
+			const endTime = performance.now()
+			const timeDiffMins = (endTime - lastIterationTime) / 60000
+			logTimed('')
+			logTimed('')
+			logTimed(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
+			logTimed('')
+			logTimed('')
+			shuffleRowsWithDependentGateSwap(currentGates, 2000)
+		}
+	} finally {
+		await pool.close()
 	}
 }

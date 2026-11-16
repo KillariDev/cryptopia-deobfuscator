@@ -5,7 +5,8 @@ import { splitTaskAndRun } from './processing.js'
 
 const run = async (pathToFileWithoutExt: string, original: string) => {
 	logTimed(`Started to run job ${ pathToFileWithoutExt }`)
-	await createRainbowTable(RAINBOW_TABLE_WIRES, RAINBOW_TABLE_GATES)
+	const db = await createRainbowTable(RAINBOW_TABLE_WIRES, RAINBOW_TABLE_GATES)
+	await new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
 	try {
 		await splitTaskAndRun(pathToFileWithoutExt, original)
 	} catch(e: unknown) {

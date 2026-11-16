@@ -216,7 +216,35 @@ export function generateCombinations(arrayLength: number): boolean[][] {
 }
 
 export function calculateAllOutputsArray(gates: Gate[], combinations: boolean[][]) {
-	return combinations.flatMap((input) => (evalCircuit(gates, input)))
+	if (combinations.length === 0) return []
+	const wires = combinations[0].length
+	const outputs: boolean[] = []
+	// One bit per input, up to 32 inputs at once. Preserve input-major order
+	// and the existing byte-array hashing format used by the SQLite table.
+	for (let offset = 0; offset < combinations.length; offset += 32) {
+		const count = Math.min(32, combinations.length - offset)
+		const values = new Int32Array(wires)
+		for (let bit = 0; bit < count; bit++) {
+			for (let wire = 0; wire < wires; wire++) {
+				if (combinations[offset + bit][wire]) values[wire] |= 1 << bit
+			}
+		}
+		for (const gate of gates) {
+			const a = values[gate.a], b = values[gate.b]
+			const f = gate.gate_i
+			if (f < 0 || f > 15) throw new Error(`invalid control function: ${f}`)
+			// Function codes encode their four truth-table entries in reverse order.
+			const control = ((f & 8) ? ~a & ~b : 0)
+				| ((f & 4) ? ~a & b : 0)
+				| ((f & 2) ? a & ~b : 0)
+				| ((f & 1) ? a & b : 0)
+			values[gate.target] ^= control
+		}
+		for (let bit = 0; bit < count; bit++) {
+			for (let wire = 0; wire < wires; wire++) outputs.push(((values[wire] >>> bit) & 1) !== 0)
+		}
+	}
+	return outputs
 }
 export function calculateAllOutputsArrayNonFlat(gates: Gate[], combinations: boolean[][]) {
 	return combinations.map((input) => (evalCircuit(gates, input)))
@@ -236,14 +264,8 @@ export const hashBooleanArrays = (array: boolean[]): string => {
 }
 
 export const hashGates = (gates: Gate[]): string => {
-	let hash = 0
-	for (const { a, b, target, gate_i } of gates) {
-		hash = (hash * 31 + a) & 0xffffffff
-		hash = (hash * 31 + b) & 0xffffffff
-		hash = (hash * 31 + target) & 0xffffffff
-		hash = (hash * 31 + gate_i) & 0xffffffff
-	}
-	return hash.toString(16)
+	// Exact structural key: shuffle-cache hits authorize a circuit rewrite.
+	return gates.map(({ a, b, target, gate_i }) => `${a},${b},${target},${gate_i}`).join(';')
 }
 
 export const hashGatesRange = (gates: Gate[], start: number, end:number): string => {

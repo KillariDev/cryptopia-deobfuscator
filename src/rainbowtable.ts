@@ -182,7 +182,7 @@ export const getReplacerById = async (db: sqlite3.Database, ioIdentifierCache: L
 
 export const getReplacersByIds = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, ioIdentifiers: string[]) => {
     const cacheHits: { ioIdentifier: string, gates: Gate[] }[] = []
-    const missingIdentifiers: string[] = []
+    const missingIdentifiers = new Set<string>()
     // Check cache first
     for (const ioIdentifier of ioIdentifiers) {
         const cacheHit = ioIdentifierCache.get(ioIdentifier)
@@ -191,28 +191,29 @@ export const getReplacersByIds = async (db: sqlite3.Database, ioIdentifierCache:
                 cacheHits.push({ ioIdentifier, gates: cacheHit })
             }
         } else {
-            missingIdentifiers.push(ioIdentifier)
+            missingIdentifiers.add(ioIdentifier)
         }
     }
     // If there are no missing identifiers, return the cache hits
-    if (missingIdentifiers.length === 0) return cacheHits
+    if (missingIdentifiers.size === 0) return cacheHits
 
+    const identifiers = [...missingIdentifiers]
     const chunkSize = 900
     const dbPromises: Promise<{ ioIdentifier: string, gates: Gate[] }[]>[] = []
 
     // Query the database for the missing identifiers in chunks
-    for (let i = 0; i < missingIdentifiers.length; i += chunkSize) {
-        const chunk = missingIdentifiers.slice(i, Math.min(i + chunkSize, missingIdentifiers.length))
+    for (let i = 0; i < identifiers.length; i += chunkSize) {
+        const chunk = identifiers.slice(i, i + chunkSize)
         dbPromises.push(new Promise<{ ioIdentifier: string, gates: Gate[] }[]>((resolve, reject) => {
             db.all('SELECT ioIdentifier, replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk, (err: unknown, rows: any[]) => {
                 if (err) {
                     reject(err)
                 } else {
+                    const found = new Set(rows.map((row: any) => row.ioIdentifier))
+                    for (const id of chunk) {
+                        if (!found.has(id)) ioIdentifierCache.set(id, null)
+                    }
                     const results = rows.map((row: any) => {
-                        if (row === undefined) {
-                            ioIdentifierCache.set(row.ioIdentifier, null)
-                            return undefined
-                        }
                         const gates = binaryToGates(row.replacerGates)
                         ioIdentifierCache.set(row.ioIdentifier, gates)
                         return { ioIdentifier: row.ioIdentifier, gates }
@@ -231,15 +232,14 @@ export const getReplacersByIds = async (db: sqlite3.Database, ioIdentifierCache:
     return allResults
 }
 
-const isEmpty = async (db: sqlite3.Database) => {
+export const isEmpty = async (db: sqlite3.Database) => {
 	return new Promise<boolean>((resolve, reject) => {
-		db.get('SELECT count(*) AS count FROM InputOutputReplacers', (err: unknown, row: any) => {
+		db.get('SELECT 1 FROM InputOutputReplacers LIMIT 1', (err: unknown, row: any) => {
 			if (err) {
 				reject(err)
 				return
 			}
-			console.log(`db contains ${ row.count } rows`)
-			resolve(row.count === 0)
+			resolve(row === undefined)
 		})
 	})
 }
