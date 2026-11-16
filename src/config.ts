@@ -10,8 +10,8 @@ export const defaults = {
 	timing: { roundMinutes: 25, improvedRoundMinutes: 5, summarySeconds: 30, workerReportSeconds: 5, databaseLogSeconds: 60, standaloneSaveSeconds: 60 },
 	logging: { verbose: false },
 	validation: { checkpointInputs: 20, probabilisticInputs: 202, maximumWires: 64 },
-	search: { probabilistic: true, variableElimination: true, exactMaximumWires: 7, subsetMinimum: 2, subsetMaximum: 199, sliceMinimum: 2, sliceMaximum: 199, maximumInnerChunks: 5, minimumInnerChunkGates: 200, workerShufflePasses: 200, roundShufflePasses: 2000 },
-	cache: { lookupEntries: 1000000, processedEntries: 1000000, shuffleEntries: 100000 },
+	search: { probabilistic: true, variableElimination: true, exactMaximumWires: 7, subsetMinimum: 2, subsetMaximum: 199, sliceMinimum: 2, sliceMaximum: 199, maximumInnerChunks: 5, minimumInnerChunkGates: 200, workerShufflePasses: 200, roundShufflePasses: 2000, adaptive: true, explorationEvery: 5, searchArms: 16, prioritizeChangedWires: true, incrementalEvaluation: true, prefixCacheBytes: 8388608, prefixStride: 16, normalizedCacheEntries: 10000, balancedWorkers: true },
+	cache: { lookupEntries: 1000000, processedEntries: 1000000, shuffleEntries: 100000, subsetEntries: 100000 },
 	database: { wires: 4, gates: 5, queryBatchSize: 900, insertBatchSize: 1000000, flushEntries: 15000000, flushCheckEntries: 1000 },
 }
 export type SolverConfig = typeof defaults

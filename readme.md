@@ -117,3 +117,20 @@ Algorithm constants such as 32-bit packing and gate truth tables remain fixed.
 worker cap with an exact worker limit, and `OPTIMIZER_VERBOSE=1`/`0` overrides
 verbose logging. These environment variables remain optional. Workers receive
 the coordinator's parsed configuration, so all workers use the same settings.
+
+## Adaptive search and incremental evaluation
+
+The `search` settings also control the following optimizations:
+
+- `adaptive`, `explorationEvery`, `searchArms`: learn gates removed per millisecond for subset/slice sizes and variable/rainbow/combined methods. Every Nth choice explores another option. Statistics remain in each persistent worker; method-specific failure caches are separate.
+- `prioritizeChangedWires`: search changed wires and their dependencies first after a rewrite. Fully searched, unchanged subsets are remembered in a bounded cache; changed subsets get new keys. Other regions remain eligible for search. `cache.subsetEntries` limits remembered subsets; each method-specific failure cache uses `cache.processedEntries`.
+- `incrementalEvaluation`, `prefixCacheBytes`, `prefixStride`: retain bounded packed states along a reference circuit and resume candidate evaluation at a checkpoint before its first changed gate. The byte budget covers retained prefix states per reference evaluator; reference/input buffers are additional. A candidate's unchanged suffix is still evaluated.
+- `normalizedCacheEntries`: bounded exact-rewrite cache shared across first-use wire renamings. Gate order, control orientation and wire aliases are preserved. Only exhaustively checked rewrites are shared this way; probabilistic results are not transferred between wire permutations.
+- `balancedWorkers`: keep chunks contiguous but choose boundaries using wire count, adjacent dependencies and previous execution time per gate for each wire. Dense/expensive regions receive fewer gates per chunk. History is an estimate and does not guarantee equal finishing times.
+
+Probabilistic checks retain their scalar first-input rejection and existing test
+inputs. Remaining outputs are compared directly as packed words; Boolean output
+conversion is only needed when populating the reference cache. Candidate edits
+that cannot improve the existing gate-count/wire-count/read-count ordering are
+rejected before equivalence evaluation. These heuristics change search order;
+full-scale gains depend on the circuit and database workload.

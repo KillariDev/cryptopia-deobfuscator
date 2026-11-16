@@ -41,12 +41,22 @@
     "maximumInnerChunks": 5,
     "minimumInnerChunkGates": 200,
     "workerShufflePasses": 200,
-    "roundShufflePasses": 2000
+    "roundShufflePasses": 2000,
+    "adaptive": true,
+    "explorationEvery": 5,
+    "searchArms": 16,
+    "prioritizeChangedWires": true,
+    "incrementalEvaluation": true,
+    "prefixCacheBytes": 8388608,
+    "prefixStride": 16,
+    "normalizedCacheEntries": 10000,
+    "balancedWorkers": true
   },
   "cache": {
     "lookupEntries": 1000000,
     "processedEntries": 1000000,
-    "shuffleEntries": 100000
+    "shuffleEntries": 100000,
+    "subsetEntries": 100000
   },
   "database": {
     "wires": 4,

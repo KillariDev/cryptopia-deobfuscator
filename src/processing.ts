@@ -1,3 +1,5 @@
+import { IncrementalEvaluator } from './packed.js'
+import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm } from './search.js'
 import { config } from './config.js'
 import sqlite3 from 'sqlite3'
 import { formatProgress, formatWorkerActivity, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
@@ -102,21 +104,16 @@ export const areCircuitsProbabilisticallyTheSame = (cachedOutputs: boolean[][], 
 	// Reject most bad candidates with one scalar evaluation before batching.
 	if (cachedOutputs[0] === undefined) cachedOutputs[0] = evalCircuit(oldCircuit, inputs[0])
 	if (!areBooleanArraysEqual(cachedOutputs[0], evalCircuit(newCircuit, inputs[0]))) return false
-	for (let start = 1; start < attempts; start += 32) {
-		const end = Math.min(start + 32, attempts)
-		const batch = inputs.slice(start, end)
-		if (cachedOutputs.slice(start, end).length !== end - start || batch.some((_, i) => cachedOutputs[start + i] === undefined)) {
-			const expected = calculateAllOutputsArray(oldCircuit, batch)
-			for (let i = start; i < end; i++) cachedOutputs[i] = expected.slice((i - start) * nVariables, (i - start + 1) * nVariables)
-		}
-		const actual = calculateAllOutputsArray(newCircuit, batch)
-		for (let i = start; i < end; i++) {
-			for (let wire = 0; wire < nVariables; wire++) {
-				if (cachedOutputs[i][wire] !== actual[(i - start) * nVariables + wire]) return false
-			}
-		}
+	if (attempts === 1) return true
+	const signature = hashGates(oldCircuit)
+	let context = packedReferences.get(cachedOutputs)
+	if (!context || context.signature !== signature || context.attempts !== attempts || context.wires !== nVariables) {
+		const evaluator = new IncrementalEvaluator(oldCircuit, inputs.slice(1, attempts), config.search.incrementalEvaluation ? config.search.prefixCacheBytes : 0, config.search.prefixStride)
+		context = { evaluator, signature, attempts, wires: nVariables }
+		packedReferences.set(cachedOutputs, context)
+		evaluator.unpack().forEach((output, i) => { cachedOutputs[i + 1] = output })
 	}
-	return true
+	return context.evaluator.equivalent(newCircuit)
 }
 
 const replaceVar = (gate: Gate, variableToReplace: number, variableToReplaceWith: number) => {
@@ -145,22 +142,25 @@ for (let wires = 2; wires < MAX_DETERMINISTIC_USELESS_VARS; wires++) {
 const INPUTS = config.validation.probabilisticInputs
 const randomInputs = generateNRandomBooleanArray(INPUTS, config.validation.maximumWires)
 const randomInputSets = new Map<number, boolean[][]>()
+const packedReferences = new WeakMap<boolean[][], { evaluator: IncrementalEvaluator, signature: string, attempts: number, wires: number }>()
+const normalizedRewrites = new RewriteCache(config.search.normalizedCacheEntries)
 const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGates: Gate[]) => {
 	const nVariables = variableIndexMapping.length
 	const cachedOutputs: boolean[][] = []
+	const canImprove = improving(mappedGates)
 	if (nVariables < MAX_DETERMINISTIC_USELESS_VARS) return undefined // no need to do this approach for less than 8 vars as we have exact way already
 	if (areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, [], INPUTS, nVariables)) return []
 	
 	const combined = combineGates(mappedGates)
 	if (combined.combined) {
-		if (areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, combined.gates, INPUTS, nVariables)) {
+		if (canImprove(combined.gates) && areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, combined.gates, INPUTS, nVariables)) {
 			return reverseMapCircuit(combined.gates, variableIndexMapping)
 		}
 	}
 	
 	for (let variableIndex = 0; variableIndex < nVariables; variableIndex++) {
 		const newRemovedCircuit = removeVariable(mappedGates, variableIndex)
-		if (areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newRemovedCircuit, INPUTS, nVariables)) {
+		if (canImprove(newRemovedCircuit) && areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newRemovedCircuit, INPUTS, nVariables)) {
 			return reverseMapCircuit(newRemovedCircuit, variableIndexMapping)
 		}
 		const hasVariableIndexAsNontarget = mappedGates.find((x) => {
@@ -169,20 +169,20 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 		}) !== undefined
 		if (hasVariableIndexAsNontarget) {
 			const newRemovedCircuitNontarget = removeNonTargetVariable(mappedGates, variableIndex)
-			if (areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newRemovedCircuitNontarget, INPUTS, nVariables)) {
+			if (canImprove(newRemovedCircuitNontarget) && areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newRemovedCircuitNontarget, INPUTS, nVariables)) {
 				return reverseMapCircuit(newRemovedCircuitNontarget, variableIndexMapping)
 			}
 		}
 		for (let newVar = 0; newVar < nVariables; newVar++) {
 			if (variableIndexMapping[variableIndex] <= variableIndexMapping[newVar]) continue
 			const newCircuit = mappedGates.map((gate) => replaceVar(gate, variableIndex, newVar))
-			if (areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newCircuit, INPUTS, nVariables)) {
+			if (canImprove(newCircuit) && areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newCircuit, INPUTS, nVariables)) {
 				return reverseMapCircuit(newCircuit, variableIndexMapping)
 			}
 			
 			if (hasVariableIndexAsNontarget) {
 				const newCircuit2 = mappedGates.map((gate) => replaceNonTargetVar(gate, variableIndex, newVar))
-				if (areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newCircuit2, INPUTS, nVariables)) {
+				if (canImprove(newCircuit2) && areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newCircuit2, INPUTS, nVariables)) {
 					return reverseMapCircuit(newCircuit2, variableIndexMapping)
 				}
 			}
@@ -191,16 +191,17 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 	return undefined
 }
 
-const findUselessVars = (variableIndexMapping: number[], mappedGates: Gate[]) => {
+const findExactReplacement = (variableIndexMapping: number[], mappedGates: Gate[]) => {
 	const nVariables = variableIndexMapping.length
 	const allInputs = BYTE_ALL_INPUTS.get(nVariables)
 	if (allInputs === undefined) return undefined
 	const newVars = randomOrder(nVariables)
+	const canImprove = improving(mappedGates)
 	const expectedOutput = calculateAllOutputsArray(mappedGates, allInputs)
 	if (areBooleanArraysEqual(expectedOutput, allInputs.flat())) return []
 	for (let variableIndex = 0; variableIndex < nVariables; variableIndex++) {
 		const variableRemovedGates = removeVariable(mappedGates, variableIndex)
-		if (areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(variableRemovedGates, allInputs))) {
+		if (canImprove(variableRemovedGates) && areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(variableRemovedGates, allInputs))) {
 			return reverseMapCircuit(variableRemovedGates, variableIndexMapping)
 		}
 		const hasVariableIndexAsNontarget = mappedGates.find((x) => {
@@ -209,20 +210,20 @@ const findUselessVars = (variableIndexMapping: number[], mappedGates: Gate[]) =>
 		}) !== undefined
 		if (hasVariableIndexAsNontarget) {
 			const newRemovedCircuitNontarget = removeNonTargetVariable(mappedGates, variableIndex)
-			if (areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(newRemovedCircuitNontarget, allInputs))) {
+			if (canImprove(newRemovedCircuitNontarget) && areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(newRemovedCircuitNontarget, allInputs))) {
 				return reverseMapCircuit(newRemovedCircuitNontarget, variableIndexMapping)
 			}
 		}
 		for (const newVar of newVars) {
 			if (variableIndexMapping[variableIndex] <= variableIndexMapping[newVar]) continue
 			const newCircuit = mappedGates.map((gate) => replaceVar(gate, variableIndex, newVar))
-			if (areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(newCircuit, allInputs))) {
+			if (canImprove(newCircuit) && areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(newCircuit, allInputs))) {
 				return reverseMapCircuit(newCircuit, variableIndexMapping)
 			}
 			
 			if (hasVariableIndexAsNontarget) {
 				const newCircuit2 = mappedGates.map((gate) => replaceNonTargetVar(gate, variableIndex, newVar))
-				if (areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(newCircuit2, allInputs))) {
+				if (canImprove(newCircuit2) && areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(newCircuit2, allInputs))) {
 					return reverseMapCircuit(newCircuit2, variableIndexMapping)
 				}
 			}
@@ -230,6 +231,12 @@ const findUselessVars = (variableIndexMapping: number[], mappedGates: Gate[]) =>
 		
 	}
 	return undefined
+}
+
+const findUselessVars = (mapping: number[], gates: Gate[]) => {
+	if (mapping.length > config.search.exactMaximumWires) return undefined
+	const result = normalizedRewrites.resolve(gates, canonical => findExactReplacement(Array.from({ length: mapping.length }, (_, i) => i), canonical))
+	return result === undefined ? undefined : reverseMapCircuit(result, mapping)
 }
 
 const insertArrayAtIndex = (originalArray: Gate[], newArray: Gate[], index: number): Gate[] => {
@@ -283,9 +290,10 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 	return { gates: newCircuit, changed: true }
 }
 
-const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, rainbowTableWires: number, RAINBOW_TABLE_ALL_INPUTS: boolean[][]): Promise<{ gates: Gate[], changed: boolean }> => {
+export const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, rainbowTableWires: number, RAINBOW_TABLE_ALL_INPUTS: boolean[][], lookup = true): Promise<{ gates: Gate[], changed: boolean }> => {
 	const prepared = new Map<number, PreparedWindow>()
-	const changes = optimizeVariables(processedGatesCache, originalGates, sliceSize, useProbabilistically, findUselessVarsSetting, rainbowTableWires, prepared)
+	const changes = optimizeVariables(processedGatesCache, originalGates, sliceSize, useProbabilistically, findUselessVarsSetting, lookup ? rainbowTableWires : 0, prepared)
+	if (!lookup) return changes
 	const gates = changes.gates
 	const queries: { gatesHash: string, ioIdentifier: string, start: number, end: number, variableIndexMapping: number[], mappedGates: Gate[] }[] = []
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
@@ -479,15 +487,19 @@ function appendMissingNumbers(arr: number[], n: number): number[] {
 	return [...Array.from(allNumbers), ...arr]
 }
 
-const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, rainbowTableWires: number, rainbowTableAllInputs: boolean[][], activity: WorkerActivity, onCandidate: (gates: Gate[]) => void): Promise<Gate[]> => {
-	const useProbabilistically = phase === 'heavy' && config.search.probabilistic
-	const findUselessVarsSetting = config.search.variableElimination
+export const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, rainbowTableWires: number, rainbowTableAllInputs: boolean[][], activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method']): Promise<Gate[]> => {
+	const useProbabilistically = method !== 'rainbow' && phase === 'heavy' && config.search.probabilistic
+	const findUselessVarsSetting = method !== 'rainbow' && config.search.variableElimination
 	let regenerateGraph = false
 	let linesLooped = 0
+	let changedWires = new Set<number>()
 	do {
-		let graphIterator = findConvexSubsets(subsetSize, slicedVersion)
+		let graphIterator = findConvexSubsets(subsetSize, slicedVersion, config.search.prioritizeChangedWires ? changedWires : undefined)
 		regenerateGraph = false
 		for (let lines of graphIterator) {
+			const subsetKey = `${maxSlice}:${method}:${hashGates(lines.map(line => slicedVersion[line]))}`
+			if (testedSubsets.has(subsetKey)) continue
+			let subsetChanged = false
 			let sliceToUse = config.search.sliceMinimum - 1
 			linesLooped++
 			activity.subsets++
@@ -506,9 +518,11 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 					}
 					const slice = sliceToUse
 					activity.checks++
-					const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, rainbowTableWires, rainbowTableAllInputs)
+					const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, rainbowTableWires, rainbowTableAllInputs, method !== 'variables')
 					if (optimizationOutput.changed) {
+						subsetChanged = true
 						activity.improvements++
+						changedWires = new Set([...inGates, ...optimizationOutput.gates].flatMap(getVars))
 						const nodes = createDependencyGraph(optimizationOutput.gates)
 						const dependantMap = dependencyGraphToMap(nodes)
 						const newGates = (nodes.length === 0 ? [] : appendMissingNumbers(dependencySort(dependantMap, nodes[nodes.length - 1], nodes.length, nodes, optimizationOutput.gates), nodes.length)).map((x) => optimizationOutput.gates[x])
@@ -525,6 +539,7 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 				}
 				if (it === maxSlice) break
 			}
+			if (!subsetChanged) testedSubsets.set(subsetKey, true)
 			if (regenerateGraph) {
 				break
 			}
@@ -537,6 +552,9 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 export const createOptimizerCaches = () => ({
 	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(config.cache.lookupEntries),
 	processedGatesCache: new LimitedMap<string, boolean>(config.cache.processedEntries),
+	scheduler: new SearchScheduler(config.search.explorationEvery),
+	testedSubsets: new LimitedMap<string, boolean>(config.cache.subsetEntries),
+	methodCaches: new Map<string, LimitedMap<string, boolean>>(),
 })
 
 export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, rainbowTableWires: number, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot: Gate[]) => void, shouldFinish?: () => boolean) => {
@@ -551,6 +569,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	let subsetSize = getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1)
 	let maxSlice = getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1)
 	let phase: 'simplest' | 'heavy' = 'heavy'
+	const arms: SearchArm[] = Array.from({ length: config.search.searchArms }, (_, index) => ({ method: (['all', 'variables', 'rainbow'] as const)[index % 3], subset: getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1), slice: getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1) }))
 	//logTimed(`optimizer started with subset ${subsetSize}`)
 	const activity: WorkerActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
 	let lastProgress = performance.now()
@@ -567,6 +586,21 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	while (true) {
 		if (workerMode && optimizedVersion.length === 0) return optimizedVersion
 		//shuffleRows(optimizedVersion, 20)
+		let method: SearchArm['method'] = 'all'
+		if (config.search.adaptive) {
+			const selected = caches.scheduler.choose(arms)
+			subsetSize = selected.subset
+			maxSlice = selected.slice
+			method = selected.method
+		}
+		const selection = { subset: subsetSize, slice: maxSlice, method }
+		let methodCache = caches.methodCaches.get(method ?? 'all')
+		if (!methodCache) {
+			methodCache = method === 'all' ? processedGatesCache : new LimitedMap<string, boolean>(config.cache.processedEntries)
+			caches.methodCaches.set(method ?? 'all', methodCache)
+		}
+		logVerbose(`Search: ${method}, subset ${subsetSize}, slice ${maxSlice}`)
+		const searchStarted = performance.now()
 		activity.passes++
 		activity.stage = 'searching'
 		const startLength = optimizedVersion.length
@@ -574,16 +608,17 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 		const chunked = chunkArray(optimizedVersion, nChunks)
 		const chunkVersions = chunked.slice()
 		optimizedVersion = (await Promise.all(chunked.map(async (data, index) => {
-			const result = await optimizeSubset(db, data, ioIdentifierCache, processedGatesCache, subsetSize, maxSlice, phase, timeToEndWorker, rainbowTableWires, rainbowTableAllInputs, activity, gates => {
+			const result = await optimizeSubset(db, data, ioIdentifierCache, methodCache!, subsetSize, maxSlice, phase, timeToEndWorker, rainbowTableWires, rainbowTableAllInputs, activity, gates => {
 				chunkVersions[index] = gates
 				candidateSnapshot = chunkVersions.flat()
 				timeToEndWorker()
-			})
+			}, caches.testedSubsets, method)
 			chunkVersions[index] = result
 			candidateSnapshot = chunkVersions.flat()
 			return result
 		}))).flat()
 		candidateSnapshot = optimizedVersion
+		caches.scheduler.record(selection, performance.now() - searchStarted, startLength - optimizedVersion.length)
 		/*if (phase === 'heavy' && config.search.probabilistic) {
 			shuffleRowsWithDependentGateSwap(optimizedVersion, 1)
 			maxSlice++
@@ -662,6 +697,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	const paths = outputPaths(pathToFileWithoutExt)
 	prepareOutputDirectories()
 	let currentGates = gates.slice()
+	const wireCosts = new Map<number, number>()
 	try {
 		while(currentGates.length > 0) {
 			currentGates = gateSimplifier(currentGates)
@@ -669,7 +705,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const nPrevGates = currentGates.length
 			const workersSize = getRandomNumberInRange(Math.min(config.workers.minimumChunkGates, currentGates.length), Math.max(1, currentGates.length * config.workers.maximumChunkFraction))
 			const nWorkers = Math.max(1, Math.min(Math.floor(currentGates.length / workersSize), nMaxWorkers, currentGates.length || 1))
-			const approxGates = splitArrayIntoApproximatelyChunks(currentGates, nWorkers)
+			const approxGates = config.search.balancedWorkers ? balancedChunks(currentGates, nWorkers, wireCosts) : splitArrayIntoApproximatelyChunks(currentGates, nWorkers)
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
 			const stopSignal = new Int32Array(new SharedArrayBuffer(4))
@@ -698,11 +734,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				currentGates = (await Promise.race([checkpointFailed, Promise.all(approxGates.map(async (dataChunk, index) => {
 					const workerFile = paths.worker(index)
 					writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
+					const jobStarted = performance.now()
 					const result = await pool.run(dataChunk, inputCircuit.wire_count, (count, activity, snapshot) => {
 							if (snapshot) snapshots[index] = snapshot
 							candidateCounts[index] = count
 							statuses[index] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false }
 						}, stopSignal.buffer as SharedArrayBuffer)
+					const cost = (performance.now() - jobStarted) / Math.max(1, dataChunk.length)
+					for (const wire of new Set(dataChunk.flatMap(getVars))) wireCosts.set(wire, ((wireCosts.get(wire) ?? cost) + cost) / 2)
 					candidateCounts[index] = result.length
 					snapshots[index] = result
 					completed++
