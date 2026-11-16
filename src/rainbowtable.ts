@@ -4,7 +4,7 @@ import { evalCircuit, generateCombinations, getVars, ioHash, isReplacementSimple
 import { LimitedMap } from './limitedMap.js'
 
 export const RAINBOW_TABLE_WIRES = 4
-export const RAINBOW_TABLE_GATES = 4
+export const RAINBOW_TABLE_GATES = 5
 
 const gatesToBinary = (gates: Gate[]): string => {
 	let binary = ''
@@ -330,7 +330,6 @@ export function collectVariables(gates: Gate[]) {
 }
 
 export const createRainbowTable = async (wires: number, maxGates: number) => {
-	if (maxGates !== 4) throw new Error('only four gates supported')
 	const filename = `canonHashrainbowtable_${ wires }_${ maxGates }.db`
 	const db = new sqlite3.Database(filename)
 	await createTable(db)
@@ -354,37 +353,38 @@ export const createRainbowTable = async (wires: number, maxGates: number) => {
 	const allGates = Array.from(generateAllGates(wires))
 	logTimed(`different gates: ${ allGates.length }`)
 	addgates([])
+	// Iterative stack-based DFS to avoid nested loops
+	type StackEntry = {
+		sequence: Gate[],
+		depth: number
+	}
+	const stack: StackEntry[] = [{ sequence: [], depth: 0 }]
 	let lastSaved = performance.now()
-	const batches = toBatches(allGates, 10)
-	for (const [i, gate0Batch] of batches.entries()) {
-		for (const gate0 of gate0Batch) {
-			const newGates = [gate0]
-			const uniqueVars = collectVariables(newGates)
-			if (!containsAllNumbersInOrder(uniqueVars)) continue
-			addgates(newGates)
-			for (const gate1 of allGates) {
-				const newGates = [gate0, gate1]
-				const uniqueVars = collectVariables(newGates)
-				if (!containsAllNumbersInOrder(uniqueVars)) continue
-				addgates(newGates)
-				for (const gate2 of allGates) {
-					const newGates = [gate0, gate1, gate2]
-					const uniqueVars = collectVariables(newGates)
-					if (!containsAllNumbersInOrder(uniqueVars)) continue
-					addgates(newGates)
-					for (const gate3 of allGates) {
-						addgates([gate0, gate1, gate2, gate3])
-					}
-				}
-				await flushIfNeeded(db, rainbowMap)
-				const endTime = performance.now()
-				const timeDiffMins = (endTime - lastSaved) / 60000
-				if (timeDiffMins >= 1) {
-					logTimed(`rainbowsize: ${rainbowMap.size}`)
-					lastSaved = performance.now()
-					logTimed(`iteration: ${i}/${batches.length}(${Math.floor(i/batches.length*100)}%)`)
-				}
-			}
+
+	while (stack.length > 0) {
+		const { sequence, depth } = stack.pop()!
+
+		// Only add sequences that are complete (i.e., depth <= maxGates)
+		if (depth <= maxGates) {
+			addgates(sequence)
+		}
+
+		// Stop if we've reached maxGates
+		if (depth >= maxGates) continue
+
+		for (const gate of allGates) {
+			const newSequence = [...sequence, gate]
+			stack.push({ sequence: newSequence, depth: depth + 1 })
+		}
+
+		if (rainbowMap.size % 1000 === 0) {
+			await flushIfNeeded(db, rainbowMap)
+		}
+
+		const now = performance.now()
+		if ((now - lastSaved) / 60000 >= 1) {
+			logTimed(`rainbowsize: ${rainbowMap.size}`)
+			lastSaved = now
 		}
 	}
 	await flushIfNeeded(db, rainbowMap)

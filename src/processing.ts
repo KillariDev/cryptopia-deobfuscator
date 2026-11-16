@@ -518,7 +518,7 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 			}
 		}
 	} while(regenerateGraph)
-	console.log(`completed iteration loop: ${slicedVersion.length} sub${subsetSize} slice:${maxSlice}. Loops: ${linesLooped}`)
+	//console.log(`completed iteration loop: ${slicedVersion.length} sub${subsetSize} slice:${maxSlice}. Loops: ${linesLooped}`)
 	return slicedVersion
 }
 
@@ -532,19 +532,19 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	const processedGatesCache = new LimitedMap<string, boolean>(1000000)
 	
 	const rainbowTableAllInputs = generateCombinations(rainbowTableWires)
-	let subsetSize = 10
-	let maxSlice = 10
+	let subsetSize = getRandomNumberInRange(2, 200)
+	let maxSlice = getRandomNumberInRange(2, 200)
 	let phase: 'simplest' | 'heavy' = 'heavy'
-	logTimed(`optimizer started with subset ${subsetSize}`)
+	//logTimed(`optimizer started with subset ${subsetSize}`)
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
 		const timeDiffMins = (endTime - lastSaved) / 60000
-		return timeDiffMins >= 10
+		return timeDiffMins >= 25
 	}
 	while (true) {
 		//shuffleRows(optimizedVersion, 20)
 		const startLength = optimizedVersion.length
-		const nChunks = Math.max(1, Math.min(5, Math.floor(optimizedVersion.length / 2000)))
+		const nChunks = Math.max(1, Math.min(5, Math.floor(optimizedVersion.length / 200)))
 		const chunked = chunkArray(optimizedVersion, nChunks)
 		optimizedVersion = (await Promise.all(chunked.flatMap(async (data) => optimizeSubset(db, data, ioIdentifierCache, processedGatesCache, subsetSize, maxSlice, phase, timeToEndWorker, rainbowTableWires, rainbowTableAllInputs)))).flat()
 		/*if (phase === 'heavy') {
@@ -555,8 +555,8 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 		}*/
 		//else if (optimizedVersion.length < startLength) {
 			shuffleRowsWithDependentGateSwap(optimizedVersion, 200)
-			maxSlice+=50
-			subsetSize+=50
+			subsetSize = getRandomNumberInRange(2, 200)
+			maxSlice = getRandomNumberInRange(2, 200)
 		/*} else {
 			phase = 'heavy'
 			subsetSize = 40
@@ -622,13 +622,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	logTimed('original gate_count', originalCircuit.gates.length)
 	if (originalGates.length < gates.length) throw new Error('Original circuit is bigger than working. Do you have arguments the right way?')
 	verifyCircuit(originalGates, gates, originalCircuit.wire_count, 20)
-	const nMaxWorkers = 12
+	const nMaxWorkers = 24
 	let currentGates = gates.slice()
 	while(true) {
 		currentGates = gateSimplifier(currentGates)
 		let lastIterationTime = performance.now()
 		const nPrevGates = currentGates.length
-		const nWorkers = Math.min(currentGates.length / 1000, nMaxWorkers)
+		const workersSize = getRandomNumberInRange(100, currentGates.length/2)
+		const nWorkers = Math.min(currentGates.length / workersSize, nMaxWorkers)
 		const approxGates = splitArrayIntoApproximatelyChunks(currentGates, nWorkers)
 		await Promise.all(approxGates.map(async (dataChunk, index) => {
 			const workerFile = `${ pathToFileWithoutExt}_worker${index}.json`
