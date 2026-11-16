@@ -86,7 +86,10 @@
     "etaWindowSamples": 5,
     "etaWarmupSamples": 3,
     "etaSmoothing": 0.2,
-    "lookupBatchMilliseconds": 0
+    "lookupBatchMilliseconds": 0,
+    "generationWorkers": 4,
+    "generationQueueBatches": 2,
+    "generationMinimumWork": 100000
   },
   "synthesis": {
     "templates": true,

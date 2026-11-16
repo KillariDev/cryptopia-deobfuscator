@@ -887,3 +887,4 @@ console.log('Rainbow portfolio routing, fallback, cache isolation, contribution 
 	}
 }
 console.log('Multi-table generation, reuse and connection lifecycle regressions passed')
+await import('./generation-test.js')

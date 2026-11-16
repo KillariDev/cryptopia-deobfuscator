@@ -1,3 +1,4 @@
+export type GenerationProfile = { elapsedMs: number, expansionMs: number, writeMs: number, readMs: number, waitMs: number, candidates: number, emitted: number, batches: number, workersUsed: number, peakPending: number }
 export type SemanticProgress = { depth: number, processed: number, total: number, states: number, processedThisRun?: number, disk?: boolean }
 export function progressPercent(done: bigint, total: bigint) {
 	if (total <= 0n) return '0.00%'

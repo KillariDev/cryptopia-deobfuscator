@@ -171,7 +171,7 @@ Database inserts use multi-row statements, not a JavaScript await for every row.
 Generation settings:
 
 - `database.queryBatchSize`: maximum frontier rows read per batch and the SQL parameter budget (at most 900).
-- `database.generationBatchRows`: maximum candidate rows staged in JavaScript before a bulk SQL write.
+- `database.generationBatchRows`: maximum raw candidate expansions per CPU task and maximum rows staged in JavaScript before a bulk SQL write. The gate catalog is split too if it exceeds this limit.
 - `database.generationStates`: optional distinct-function limit; `0` means unlimited disk-backed generation. Hitting a limit rolls back the current batch; increase the limit or set it to `0`, then restart to resume.
 - `database.keepGenerationState`: retain working tables after completion for inspection. By default they are dropped; SQLite may retain freed pages in the database file.
 - `database.memoryMapBytes`: mmap setting per connection; `0` disables mapping. SQLite can cap or disable mmap depending on its build.
@@ -182,6 +182,44 @@ layers and partially processed layers are resumable without recomputing their
 committed work. A smaller `gates` limit in a table entry builds a smaller library; enable
 bounded on-demand synthesis for uncommon windows instead of precomputing every
 larger replacement. Changing wire/gate limits selects a different table filename.
+
+### Parallel generation and profiling
+
+The generator uses precomputed gate-transition arrays and packed transferable
+buffers. CPU tasks deduplicate equal `(state, used-wire mask)` candidates locally,
+retaining the cheapest read cost and parent/gate references. Full gate sequences
+are assembled by the writer only for local survivors. Function keys are packed
+directly from states without constructing intermediate boolean arrays.
+
+A persistent CPU pool expands chunks while one SQLite writer stages results.
+Results are consumed in submission order. SQLite deduplicates the complete read
+batch before updating the global visited set and frontier, rather than updating
+both for each small staging flush. The result rows, frontier changes and resume
+position still commit in one transaction. Worker errors, write failures, and
+state-limit errors roll back the active batch; earlier commits remain resumable.
+No table-format change or regeneration is required for this optimization.
+
+Settings under `database`:
+
+- `generationWorkers: 4`: maximum CPU slots, capped at available CPUs minus one (minimum one). A value of `1` runs the same optimized expansion in the writer process without worker threads. Threads start lazily and persist for the table build.
+- `generationQueueBatches: 2`: maximum outstanding tasks per CPU slot, including running tasks and completed results awaiting consumption. Together with `generationBatchRows`, this bounds expansion buffering; the writer can additionally retain one staging buffer and the current `queryBatchSize` frontier rows.
+- `generationMinimumWork: 100000`: batches below this many raw candidate expansions run inline. This avoids worker startup and message overhead for small tables and small layers. Lower it to exercise parallel expansion on smaller batches.
+
+A task contains at most `generationBatchRows` raw expansions. SQLite's temporary
+candidate table uses `temp_store=FILE` so staging can spill to disk (subject to
+the SQLite build). It can hold up to `queryBatchSize × gate catalog size` distinct
+candidates for a committed read batch; increasing frontier batch size can increase
+temporary database space and time between checkpoints. State-limit enforcement
+occurs after staging this batch, before commit. Different table files are not
+built concurrently.
+
+With verbose logging enabled, generation completion reports expanded/emitted
+candidate counts, aggregate expansion worker-seconds, database work time, writer
+wait for expansion, thread count, and peak pending tasks. Timings can overlap;
+worker-seconds are not job wall time. These measurements help identify whether
+CPU expansion or database work limits a build. Extra CPU workers cannot eliminate
+a database bottleneck, and the defaults are conservative rather than a promise
+of linear speedup. Full 4-wire/5-gate build throughput has not been benchmarked.
 
 ### Multiple tables
 
@@ -213,8 +251,9 @@ are remembered only after all fitting tables have been tried.
 
 Workers retain one connection per table. `cache.lookupEntries` remains a shared
 entry limit across their table lookups; `database.memoryMapBytes` applies per
-connection, so adding tables increases possible mapping usage. Generation remains
-sequential to bound resource contention; search lookups use all configured tables.
+connection, so adding tables increases possible mapping usage. Different table files are built sequentially to bound resource contention;
+candidate expansion within a large table can use multiple CPU workers. Search
+lookups use all configured tables.
 
 Verbose summaries show each table's applied gate reductions, rewrite count,
 improving-match percentage, and accumulated lookup worker-seconds (including
