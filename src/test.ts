@@ -1,3 +1,4 @@
+import type { Database } from 'sqlite3'
 import { areCircuitsProbabilisticallyTheSame, combineGates } from './processing.js'
 import { Gate } from './types.js'
 import { gatesToText, generateNRandomBooleanArray } from './utils.js'
@@ -84,13 +85,13 @@ for (let trial = 0; trial < 40; trial++) {
 }
 const db = new sqlite3.Database(':memory:')
 const sql = (query: string) => new Promise<void>((resolve, reject) => db.run(query, error => error ? reject(error) : resolve()))
-await sql('CREATE TABLE InputOutputReplacers (ioIdentifier TEXT PRIMARY KEY, replacerGates TEXT NOT NULL)')
+await sql('CREATE TABLE InputOutputReplacers (ioIdentifier BLOB PRIMARY KEY, replacerGates BLOB NOT NULL)')
 assert.equal(await isEmpty(db), true)
-await sql("INSERT INTO InputOutputReplacers VALUES ('identity', '')")
+await sql("INSERT INTO InputOutputReplacers VALUES (X'ff', X'')")
 assert.equal(await isEmpty(db), false)
 const cache = new LimitedMap<string, Gate[] | null>(100)
-assert.deepEqual(await getReplacersByIds(db, cache, ['missing', 'missing', 'identity']), [{ ioIdentifier: 'identity', gates: [] }])
-assert.equal(cache.get('missing'), null)
+assert.deepEqual(await getReplacersByIds(db, cache, ['00', '00', 'ff']), [{ ioIdentifier: 'ff', gates: [] }])
+assert.equal(cache.get('00'), null)
 const optimizerCaches = createOptimizerCaches()
 const singleGate = [{ a: 0, b: 0, target: 1, gate_i: 3 }]
 for (let round = 0; round < 2; round++) {
@@ -100,7 +101,7 @@ for (let round = 0; round < 2; round++) {
 assert.deepEqual(await optimize(db, [], 4, 'test', true, 4, optimizerCaches, 1), [])
 await new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
 // A cached miss and hit must work even after the database is closed.
-assert.deepEqual(await getReplacersByIds(db, cache, ['missing', 'identity']), [{ ioIdentifier: 'identity', gates: [] }])
+assert.deepEqual(await getReplacersByIds(db, cache, ['00', 'ff']), [{ ioIdentifier: 'ff', gates: [] }])
 const oldWorkerSetting = process.env.OPTIMIZER_WORKERS
 try {
 	for (const setting of ['0', '-1', '1.5', 'NaN']) {
@@ -439,9 +440,9 @@ const { ioHash } = await import('./utils.js')
 const integrationDb = new sqlite3.Database(':memory:')
 const runSql = (sql: string, params: unknown[] = []) => new Promise<void>((resolve, reject) => integrationDb.run(sql, params, error => error ? reject(error) : resolve()))
 try {
-	await runSql('CREATE TABLE InputOutputReplacers (ioIdentifier TEXT PRIMARY KEY, replacerGates TEXT NOT NULL)')
+	await runSql('CREATE TABLE InputOutputReplacers (ioIdentifier BLOB PRIMARY KEY, replacerGates BLOB NOT NULL)')
 	const inputs = generateCombinations(4)
-	await runSql('INSERT INTO InputOutputReplacers VALUES (?, ?)', [ioHash(inputs.flat()), ''])
+	await runSql('INSERT INTO InputOutputReplacers VALUES (?, ?)', [Buffer.from(ioHash(inputs.flat()), 'hex'), Buffer.alloc(0)])
 	const cnot = { a: 1, b: 0, target: 0, gate_i: 3 }
 	const circuit = Array.from({ length: 8 }, () => ({ ...cnot }))
 	const result = await massOptimizeStep(integrationDb, new LimitedMap(100), new LimitedMap(100), circuit, 2, false, false, 4, inputs)
@@ -459,8 +460,9 @@ try {
 	const lookups = new LimitedMap<string, Gate[] | null>(1000)
 	const counters = () => ({ passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const })
 	const first = counters(), second = counters()
-	await optimizeSubset(integrationDb, circuit, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, first, () => {}, tested, 'rainbow')
-	await optimizeSubset(integrationDb, circuit, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, second, () => {}, tested, 'rainbow')
+	const unchanged = circuit.map((gate, i) => ({ ...gate, a: i % 2, target: 1 - i % 2 }))
+	await optimizeSubset(integrationDb, unchanged, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, first, () => {}, tested, 'rainbow')
+	await optimizeSubset(integrationDb, unchanged, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, second, () => {}, tested, 'rainbow')
 	assert.ok(first.checks > 0)
 	assert.equal(second.checks, 0)
 } finally { await new Promise<void>((resolve, reject) => integrationDb.close(error => error ? reject(error) : resolve())) }
@@ -483,3 +485,159 @@ const lateStatus = formatStatus({ original: 100, roundStart: 100, candidate: 100
 assert.match(lateStatus, /Warning: 1 worker update delayed/)
 assert.match(lateStatus, /6% elapsed/)
 assert.ok(!formatStatus({ original: 0, roundStart: 0, candidate: 0, statuses: [], elapsedMs: 0 }).includes('NaN'))
+
+const { TemplateLibrary } = await import('./templates.js')
+const { functionKey, circuitState, semanticCircuits, meetInMiddle, encodeGates, decodeGates, truthKey } = await import('./semantic.js')
+const { saturateCircuit, CircuitEqualityGraph } = await import('./equality.js')
+const library = new TemplateLibrary(100, 4)
+for (let f = 0; f < 16; f++) for (let h = 0; h < 16; h++) {
+	const gates = [{ a: 0, b: 1, target: 2, gate_i: f }, { a: 1, b: 0, target: 2, gate_i: h }]
+	const rewritten = library.rewrite(gates)
+	assert.equal(functionKey(gates, 3), functionKey(rewritten, 3))
+	assert.ok(rewritten.length < gates.length)
+	assert.deepEqual(decodeGates(encodeGates(gates)), gates)
+}
+const unsafe = [{ a: 0, b: 1, target: 0, gate_i: 3 }, { a: 0, b: 1, target: 0, gate_i: 3 }]
+assert.equal(functionKey(library.rewrite(unsafe), 2), functionKey(unsafe, 2))
+assert.equal(library.learn(singleGate, []), false)
+const not0 = { a: 0, b: 0, target: 0, gate_i: 15 }, not1 = { a: 0, b: 0, target: 1, gate_i: 15 }
+const separated = [not0, not1, not0]
+const saturated = saturateCircuit(separated, 2, library, 100, 500)
+assert.ok(saturated && saturated.length < separated.length)
+assert.equal(functionKey(saturated!, 2), functionKey(separated, 2))
+const egraph = new CircuitEqualityGraph()
+assert.equal(egraph.add([not0, not0], 2), egraph.add([], 2))
+const catalog = [not0, not1, { a: 1, b: 0, target: 0, gate_i: 3 }]
+const semantic = [...semanticCircuits(2, 3, catalog, 10000)]
+let brute: Gate[][] = [[]]
+for (let depth = 1, layer: Gate[][] = [[]]; depth <= 3; depth++) { layer = layer.flatMap(sequence => catalog.map(gate => [...sequence, gate])); brute.push(...layer) }
+const cheapest = (circuits: Gate[][]) => {
+	const map = new Map<string, Gate[]>()
+	for (const gates of circuits) { const key = functionKey(gates, 2), old = map.get(key); if (!old || isReplacementSimpler(gates, old)) map.set(key, gates) }
+	return map
+}
+const exhaustive = cheapest(brute), deduplicated = cheapest(semantic)
+assert.equal(exhaustive.size, deduplicated.size)
+for (const [key, gates] of exhaustive) {
+	assert.equal(deduplicated.get(key)!.length, gates.length)
+	assert.equal(isReplacementSimpler(gates, deduplicated.get(key)!), false)
+}
+assert.throws(() => [...semanticCircuits(2, 3, catalog, 1)], /limit/)
+const middle = meetInMiddle([not0, not0, not0], 2, catalog, 2, 100, 500)
+assert.ok(middle && middle.length === 1)
+assert.equal(functionKey(middle!, 2), functionKey([not0], 2))
+assert.equal(meetInMiddle(unsafe, 2, catalog, 2, 100, 500), undefined)
+assert.equal(truthKey(generateCombinations(4).flat()).length, 8)
+const { synthesizeSMT } = await import('./smt.js')
+const smtResult = await synthesizeSMT([singleGate[0], singleGate[0], singleGate[0]], 2, 1, 5000)
+assert.ok(smtResult && smtResult.length <= 1)
+assert.equal(functionKey(smtResult!, 2), functionKey(singleGate, 2))
+console.log('Template, semantic generation, meet-in-the-middle, equality graph and SMT regressions passed')
+
+assert.equal(parseConfig({ database: { memoryMapBytes: 0 } }).database.memoryMapBytes, 0)
+assert.throws(() => parseConfig({ database: { format: 'unknown' } }))
+assert.throws(() => parseConfig({ synthesis: { maximumWires: 5 } }))
+
+const { generateOnDisk } = await import('./disk-generation.js')
+const { runSQL, allSQL } = await import('./sql.js')
+const { storeReplacers } = await import('./rainbowtable.js')
+const diskDirectory = await mkdtemp(join(tmpdir(), 'deobfuscator-frontier-'))
+const options = { readRows: 2, stageRows: 3, parameterLimit: 20, stateLimit: 0, keepState: false }
+const expectedEntries = new Map<string, Gate[]>()
+for (const sequence of brute) {
+	const key = ioHash(generateCombinations(2).flatMap(input => evalCircuit(sequence, input)))
+	const old = expectedEntries.get(key)
+	if (!old || isReplacementSimpler(sequence, old)) expectedEntries.set(key, sequence)
+}
+const openBuild = async (filename: string) => {
+	const db = new sqlite3.Database(filename)
+	await runSQL(db, 'CREATE TABLE IF NOT EXISTS InputOutputReplacers (ioIdentifier BLOB PRIMARY KEY, replacerGates BLOB NOT NULL)')
+	return db
+}
+const closeBuild = (db: Database) => new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
+const checkBuild = async (db: Database) => {
+	const rows = await allSQL<{ ioIdentifier: Buffer, replacerGates: Buffer }>(db, 'SELECT * FROM InputOutputReplacers')
+	assert.equal(rows.length, expectedEntries.size)
+	for (const row of rows) {
+		const gates = decodeGates(row.replacerGates), expected = expectedEntries.get(row.ioIdentifier.toString('hex'))!
+		assert.ok(expected)
+		assert.equal(functionKey(gates, 2), functionKey(expected, 2))
+		assert.equal(isReplacementSimpler(expected, gates), false)
+	}
+}
+try {
+	const path = join(diskDirectory, 'resume.db')
+	let db = await openBuild(path)
+	let polls = 0
+	assert.equal(await generateOnDisk(db, 2, 3, catalog, options, entries => storeReplacers(db, entries, true), undefined, () => ++polls > 3), false)
+	const checkpoint = (await allSQL<{ depth: number, processed: number }>(db, 'SELECT depth,processed FROM BuildMeta'))[0]
+	assert.equal(checkpoint.depth, 1)
+	assert.ok(checkpoint.processed > 0)
+	await closeBuild(db)
+	db = await openBuild(path)
+	assert.equal(await generateOnDisk(db, 2, 3, catalog, options, entries => storeReplacers(db, entries, true)), true)
+	await checkBuild(db)
+	assert.equal((await allSQL(db, "SELECT name FROM sqlite_master WHERE name IN ('BuildSeen','BuildFrontier')")).length, 0)
+	await closeBuild(db)
+	const failure = await openBuild(join(diskDirectory, 'rollback.db'))
+	await assert.rejects(generateOnDisk(failure, 2, 3, catalog, options, async entries => {
+		await storeReplacers(failure, entries, true)
+		throw new Error('injected write failure')
+	}), /injected write failure/)
+	assert.equal((await allSQL(failure, 'SELECT * FROM InputOutputReplacers')).length, 0)
+	assert.equal((await allSQL<{ processed: number }>(failure, 'SELECT processed FROM BuildMeta'))[0].processed, 0)
+	await generateOnDisk(failure, 2, 3, catalog, options, entries => storeReplacers(failure, entries, true))
+	await checkBuild(failure)
+	await closeBuild(failure)
+	const limited = await openBuild(join(diskDirectory, 'limited.db'))
+	await assert.rejects(generateOnDisk(limited, 2, 3, catalog, { ...options, stateLimit: 1 }, entries => storeReplacers(limited, entries, true)), /state limit/)
+	await generateOnDisk(limited, 2, 3, catalog, options, entries => storeReplacers(limited, entries, true))
+	await checkBuild(limited)
+	await closeBuild(limited)
+
+} finally { await rm(diskDirectory, { recursive: true, force: true }) }
+assert.deepEqual(mapVariablesToIndexes([{ a: 10, b: 2, target: 0, gate_i: 1 }]), [0, 2, 10])
+console.log('Disk frontier resume, rollback, optimal-cost coverage, batching and fixed-label normalization regressions passed')
+
+const { GenerationEstimator, formatGenerationProgress } = await import('./generation-progress.js')
+const estimator = new GenerationEstimator(5, 3, .2)
+const layer = (processed: number, depth = 2) => ({ depth, processed, total: 10000, states: processed })
+assert.match(estimator.update(layer(100), 0), /learning/)
+assert.match(estimator.update(layer(200), 60000), /learning/)
+assert.match(estimator.update(layer(300), 120000), /learning/)
+const steady = estimator.update(layer(400), 180000)
+assert.ok(steady.startsWith('~'))
+const spike = estimator.update(layer(401), 240000)
+assert.equal(spike, steady) // one slow interval cannot multiply the ETA
+assert.match(estimator.update(layer(0, 3), 300000), /learning/) // reset at new layer
+const paused = new GenerationEstimator(5, 3, .2)
+for (let i = 0; i < 5; i++) paused.update(layer(10), i * 60000)
+assert.match(paused.update(layer(10), 300000), /waiting for progress/)
+const resumedETA = new GenerationEstimator(5, 3, .2)
+assert.match(resumedETA.update(layer(9000), 0), /learning/)
+assert.match(resumedETA.update(layer(9010), 60000), /learning/)
+assert.match(formatGenerationProgress(layer(5000), 1000, '~5m'), /50.00%.*layer ETA ~5m.*overall ETA unavailable/)
+assert.throws(() => parseConfig({ database: { etaSmoothing: 2 } }))
+assert.throws(() => parseConfig({ database: { etaWarmupSamples: 10, etaWindowSamples: 5 } }))
+assert.throws(() => parseConfig({ database: { format: 'legacy' } }))
+assert.throws(() => parseConfig({ database: { semanticGeneration: false } }))
+const newTableDirectory = await mkdtemp(join(tmpdir(), 'deobfuscator-single-table-'))
+try {
+	process.chdir(newTableDirectory)
+	const { createRainbowTable, databaseFilename, getReplacersByIds } = await import('./rainbowtable.js')
+	const generated = await createRainbowTable(2, 2)
+	const cnRight = { a: 0, b: 0, target: 1, gate_i: 3 }
+	const key = ioHash(generateCombinations(2).flatMap(input => evalCircuit([cnRight], input)))
+	const matches = await getReplacersByIds(generated, new LimitedMap(10), [key])
+	assert.equal(matches.length, 1)
+	assert.equal(matches[0].gates.length, 1)
+	assert.equal(functionKey(matches[0].gates, 2), functionKey([cnRight], 2))
+	await closeBuild(generated)
+	const snapshot = readFileSync(databaseFilename(2, 2))
+	await closeBuild(await createRainbowTable(2, 2))
+	assert.deepEqual(readFileSync(databaseFilename(2, 2)), snapshot)
+} finally {
+	process.chdir(originalCwd)
+	await rm(newTableDirectory, { recursive: true, force: true })
+}
+console.log('Stable layer ETA and single-format generation regressions passed')

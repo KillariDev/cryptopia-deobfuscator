@@ -63,7 +63,25 @@
     "gates": 5,
     "queryBatchSize": 900,
     "insertBatchSize": 1000000,
-    "flushEntries": 15000000,
-    "flushCheckEntries": 1000
+    "memoryMapBytes": 268435456,
+    "generationStates": 0,
+    "generationBatchRows": 3000,
+    "keepGenerationState": false,
+    "etaWindowSamples": 5,
+    "etaWarmupSamples": 3,
+    "etaSmoothing": 0.2
+  },
+  "synthesis": {
+    "templates": true,
+    "templateEntries": 10000,
+    "maximumWires": 3,
+    "maximumWindowGates": 8,
+    "maximumReplacementGates": 3,
+    "attemptEvery": 100,
+    "timeoutMs": 100,
+    "states": 2000,
+    "smt": false,
+    "meetInMiddle": false,
+    "equalitySaturation": false
   }
 }

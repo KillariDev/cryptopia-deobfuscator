@@ -1,0 +1,48 @@
+import { Gate } from './types.js'
+import { circuitState, applyState, stateKey, functionKey } from './semantic.js'
+import { hashGates, isReplacementSimpler } from './utils.js'
+import { TemplateLibrary } from './templates.js'
+
+/** Prefix nodes are interned by (parent equivalence class, gate). Classes use exact semantics. */
+export class CircuitEqualityGraph {
+	readonly classes = new Map<string, Set<string>>()
+	add(gates: Gate[], wires: number) {
+		let state = circuitState([], wires), parent = stateKey(state)
+		for (const gate of gates) {
+			state = applyState(state, gate)
+			const key = stateKey(state)
+			const members = this.classes.get(key) ?? new Set<string>()
+			members.add(`${parent}|${hashGates([gate])}`)
+			this.classes.set(key, members)
+			parent = key
+		}
+		return parent
+	}
+}
+export function saturateCircuit(original: Gate[], wires: number, templates: TemplateLibrary, nodes: number, timeoutMs: number) {
+	const graph = new CircuitEqualityGraph()
+	const target = graph.add(original, wires)
+	const seen = new Set<string>([hashGates(original)])
+	const queue = [original]
+	let best = original
+	const end = performance.now() + timeoutMs
+	for (let head = 0; head < queue.length && performance.now() < end && seen.size < nodes; head++) {
+		const current = queue[head]
+		const alternatives: Gate[][] = [templates.rewrite(current)]
+		for (let i = 0; i < current.length - 1; i++) {
+			const pair = current.slice(i, i + 2)
+			if (functionKey(pair, wires) !== functionKey(pair.slice().reverse(), wires)) continue
+			alternatives.push([...current.slice(0, i), ...pair.reverse(), ...current.slice(i + 2)])
+		}
+		for (const candidate of alternatives) {
+			if (performance.now() >= end || seen.size >= nodes) break
+			const key = hashGates(candidate)
+			if (seen.has(key)) continue
+			seen.add(key)
+			if (graph.add(candidate, wires) !== target) throw new Error('Equality rewrite changed circuit semantics')
+			queue.push(candidate)
+			if (isReplacementSimpler(candidate, best)) best = candidate
+		}
+	}
+	return isReplacementSimpler(best, original) ? best : undefined
+}

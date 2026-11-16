@@ -107,7 +107,7 @@ on the next run, not during a run.
 - `validation`: checkpoint test inputs, probabilistic test inputs, and maximum supported circuit wires. Fewer inputs reduce verification confidence.
 - `search`: probabilistic/variable elimination switches, maximum wires for exhaustive checks, inclusive subset/slice ranges, internal chunk sizing, and shuffle passes.
 - `cache`: per-worker lookup/processed cache capacities and shuffle cache capacity.
-- `database`: rainbow circuit wire/gate limits, query/insert batch sizes, and generation flush settings. Changing wire/gate limits selects a different database and may require building it.
+- `database`: rainbow circuit wire/gate limits, query/insert batch sizes, disk generation bounds, and ETA smoothing settings. Changing wire/gate limits selects a different database and may require building it.
 
 Settings omitted from a section use the defaults. Unknown keys, invalid types,
 and unsupported ranges fail at startup. The checked-in file lists all options.
@@ -144,3 +144,71 @@ Improved rounds use the five-minute target by default; otherwise the default is
 25 minutes. Finished rounds say “All workers finished” rather than showing a
 partial time-budget percentage. Routine report age and internal search counters
 are shown only in verbose mode. Delayed worker updates produce a warning.
+
+## Rainbow table generation
+
+There is one table format and one generator. Tables are named
+`rainbow_<wires>_<gates>.db` under `files.databaseDirectory`. If the selected table
+does not exist, the solver generates it; a completed table is used as-is.
+Interrupted builds resume automatically. There is no migration, rebuild command,
+format selector, or compatibility mode for older hash tables.
+
+The table uses exact packed truth-table BLOB keys, binary gate payloads and
+`WITHOUT ROWID`. For four wires a key holds the complete mapping. Generation
+and lookup use the same fixed wire labels, with input wires numbered in numeric
+order. All functions reachable within the configured gate catalog/depth remain
+eligible; generation does not discard functions based on a sequence's first-use
+wire order. Lookup does not borrow wires absent from the candidate window.
+
+Generation expands truth tables incrementally, breadth-first by function.
+Equal-depth alternatives retain used-wire/read-cost metadata needed to choose
+shorter continuations correctly. Frontiers, visited functions and committed
+progress live in SQLite. Each bounded batch writes its results and advances
+its frontier in the same transaction, so a failed/interrupted batch can be retried.
+Database inserts use multi-row statements, not a JavaScript await for every row.
+
+Generation settings:
+
+- `database.queryBatchSize`: maximum frontier rows read per batch and the SQL parameter budget (at most 900).
+- `database.generationBatchRows`: maximum candidate rows staged in JavaScript before a bulk SQL write.
+- `database.generationStates`: optional distinct-function limit; `0` means unlimited disk-backed generation. Hitting a limit rolls back the current batch; increase the limit or set it to `0`, then restart to resume.
+- `database.keepGenerationState`: retain working tables after completion for inspection. By default they are dropped; SQLite may retain freed pages in the database file.
+- `database.memoryMapBytes`: mmap setting per connection; `0` disables mapping. SQLite can cap or disable mmap depending on its build.
+
+Only build one copy of a particular table at a time. Disk requirements can still
+be substantial; bounded RAM does not make the search space small. Completed
+layers and partially processed layers are resumable without recomputing their
+committed work. A smaller `database.gates` value builds a smaller library; enable
+bounded on-demand synthesis for uncommon windows instead of precomputing every
+larger replacement. Changing wire/gate limits selects a different table filename.
+
+### Stable generation progress
+
+Updates follow `timing.databaseLogSeconds`. They show depth, the current layer's
+completion percentage, functions indexed on disk and elapsed time for this run.
+The layer ETA warms up for `database.etaWarmupSamples` reports, uses a rolling
+median over `database.etaWindowSamples` rates, then smooths that rate with
+`database.etaSmoothing` (lower values react more slowly). Layer changes reset the
+estimate. Work committed before a restart contributes to percentage completion
+but is not treated as work performed during the new timing sample.
+
+An ETA is still approximate. Future layer sizes depend on deduplication, so an
+overall ETA is explicitly unavailable rather than extrapolated from unstable
+sequence-space coverage. Stalls are labeled as waiting for progress after the
+sampling window fills with zero rates. Completion is logged after final writes.
+
+## Bounded local synthesis
+
+The `synthesis` section controls additional local optimizers:
+
+- `templates` enables target/control-safe structural identities and pair merging before lookup. Exact rewrites are learned as normalized templates only after exhaustive verification; `templateEntries` bounds the cache.
+- `smt` enables Z3 counterexample-guided synthesis. Candidate gate fields are symbolic; counterexamples refine them until local equivalence is proven. `timeoutMs` bounds search after WASM startup, and helper threads are cleaned up after every attempt.
+- `meetInMiddle` searches small bijective functions bidirectionally using self-inverse gates with targets separate from controls.
+- `equalitySaturation` explores bounded equivalent circuit sequences through commuting alternatives and templates, then selects the cheapest discovered circuit.
+
+SMT, meet-in-the-middle and equality saturation remain opt-in. Scope is limited
+by `maximumWires`, `maximumWindowGates`, `maximumReplacementGates`, `attemptEvery`,
+`states` and `timeoutMs`. Optional synthesis runs after ordinary local search
+fails and is serialized per worker. Returned replacements are exhaustively
+checked. Timeouts are heuristic failed attempts, not proofs of impossibility.
+Global checkpoint verification remains probabilistic.

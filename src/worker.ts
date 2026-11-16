@@ -1,14 +1,11 @@
 import { parentPort } from 'worker_threads'
 import { createOptimizerCaches, optimize } from './processing.js'
-import { getRainbowTable, RAINBOW_TABLE_GATES, RAINBOW_TABLE_WIRES } from './rainbowtable.js'
+import { getRainbowTable, databaseReady, RAINBOW_TABLE_GATES, RAINBOW_TABLE_WIRES } from './rainbowtable.js'
 import { Gate } from './types.js'
 import { WORKER_ROUND_MS } from './job.js'
 
 const db = getRainbowTable(RAINBOW_TABLE_WIRES, RAINBOW_TABLE_GATES)
-const ready = new Promise<void>((resolve, reject) => {
-	db.once('open', resolve)
-	db.once('error', reject)
-})
+const ready = databaseReady(db)
 const caches = createOptimizerCaches()
 parentPort!.on('message', async ({ gates, wires, stopSignal }: { gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer }) => {
 	try {
