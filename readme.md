@@ -89,11 +89,17 @@ is written to both the progress file and `data/latest.json`. Randomized verifica
 ## JSON settings
 
 Edit `solver.config.json` in the repository root, then restart the solver.
-Run `npm run optimize` to use its configured input paths, or supply the two
-input filenames as before to override them. Startup prints the configuration
-file and effective settings. Changes apply on the next run, not during a run.
+Provide the working and original circuit filenames for each job:
 
-- `files`: working/original input paths, output root, latest filename, worker/progress subdirectories, and rainbow database directory. Relative paths use the current working directory.
+```bash
+npm run optimize -- data/latest.json data/obfuscated.json
+```
+
+These job-specific inputs are command-line arguments, not JSON settings.
+Startup prints the configuration file and effective settings. Changes apply
+on the next run, not during a run.
+
+- `files`: output root, latest filename, worker/progress subdirectories, and rainbow database directory. Relative paths use the current working directory.
 - `runtime.heapMegabytes`: Node heap limit used by `optimize` and `optimize-prof`.
 - `workers`: CPU-based concurrency cap, minimum chunk size, and maximum chunk fraction.
 - `timing`: round budget and improved-round target in minutes; summary/checkpoint, worker-report, database-log and standalone-save intervals in seconds. The summary interval also controls checking the improved-round target.

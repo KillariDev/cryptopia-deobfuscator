@@ -5,7 +5,7 @@ import { isMainThread, workerData } from 'worker_threads'
 
 export const defaults = {
 	runtime: { heapMegabytes: 16384 },
-	files: { working: 'data/latest.json', original: 'data/obfuscated.json', dataDirectory: 'data', latestName: 'latest.json', workerDirectory: 'worker', progressDirectory: 'progress', databaseDirectory: '.' },
+	files: { dataDirectory: 'data', latestName: 'latest.json', workerDirectory: 'worker', progressDirectory: 'progress', databaseDirectory: '.' },
 	workers: { maximum: 24, minimumChunkGates: 100, maximumChunkFraction: 0.5 },
 	timing: { roundMinutes: 25, improvedRoundMinutes: 5, summarySeconds: 30, workerReportSeconds: 5, databaseLogSeconds: 60, standaloneSaveSeconds: 60 },
 	logging: { verbose: false },

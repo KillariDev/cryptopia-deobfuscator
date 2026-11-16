@@ -3,8 +3,6 @@
     "heapMegabytes": 16384
   },
   "files": {
-    "working": "data/latest.json",
-    "original": "data/obfuscated.json",
     "dataDirectory": "data",
     "latestName": "latest.json",
     "workerDirectory": "worker",

@@ -320,7 +320,7 @@ assert.equal(custom.timing.summarySeconds, 10)
 assert.equal(custom.workers.maximum, 3)
 assert.equal(custom.database.wires, 4)
 assert.equal(defaults.timing.summarySeconds, 30)
-for (const invalid of [null, [], { typo: {} }, { timing: { typo: 5 } }, { workers: { maximum: 0 } }, { workers: { maximum: 1.5 } }, { timing: { summarySeconds: '30' } }, { search: { subsetMinimum: 100, subsetMaximum: 2 } }, { timing: { improvedRoundMinutes: 30 } }, { files: { workerDirectory: '../elsewhere' } }, JSON.parse('{"__proto__":{}}')]) {
+for (const invalid of [{ files: { working: 'job.json' } }, { files: { original: 'source.json' } }, null, [], { typo: {} }, { timing: { typo: 5 } }, { workers: { maximum: 0 } }, { workers: { maximum: 1.5 } }, { timing: { summarySeconds: '30' } }, { search: { subsetMinimum: 100, subsetMaximum: 2 } }, { timing: { improvedRoundMinutes: 30 } }, { files: { workerDirectory: '../elsewhere' } }, JSON.parse('{"__proto__":{}}')]) {
 	assert.throws(() => parseConfig(invalid))
 }
 // Worker configuration is carried in workerData, independent of its cwd.
@@ -353,4 +353,7 @@ try {
 	const launch = spawnSync(process.execPath, [fileURLToPath(new URL('./launch.js', import.meta.url)), 'only-one-argument'], { encoding: 'utf8' })
 	assert.equal(launch.status, 1)
 	assert.match(launch.stderr, /Usage:/)
+	const missingInputs = spawnSync(process.execPath, [fileURLToPath(new URL('./launch.js', import.meta.url))], { encoding: 'utf8' })
+	assert.equal(missingInputs.status, 1)
+	assert.match(missingInputs.stderr, /Usage:/)
 } finally { await rm(configDir, { recursive: true, force: true }) }
