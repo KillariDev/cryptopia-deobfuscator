@@ -118,11 +118,14 @@ import { parentPort } from 'node:worker_threads';
 let calls = 0;
 parentPort.on('message', ({gates}) => {
  if (gates[0]?.gate_i === -1) process.exit(1);
+ parentPort.postMessage({progress: gates.length});
  parentPort.postMessage({gates: [...gates, {a: ++calls, b: 0, target: 0, gate_i: 0}]});
 });`))
 const pool = new WorkerPool(1, fixture)
 try {
-	const results = await Promise.all([pool.run([], 1), pool.run([], 1), pool.run([], 1)])
+	const progress: number[] = []
+	const results = await Promise.all([pool.run([], 1, count => progress.push(count)), pool.run([], 1), pool.run([], 1)])
+	assert.deepEqual(progress, [0])
 	assert.deepEqual(results.map(gates => gates[0].a), [1, 2, 3])
 	const failures = await Promise.allSettled([
 		pool.run([{ a: 0, b: 0, target: 0, gate_i: -1 }], 1),
@@ -170,5 +173,24 @@ try {
 	await realPool.close()
 	process.chdir(originalCwd)
 	await rm(temporaryDirectory, { recursive: true, force: true })
+}
+const { formatProgress, logVerbose } = await import('./logging.js')
+assert.match(formatProgress(1000, 900, 1, 4, 60_000), /1\/4 chunks completed; 900 candidate gates \(100 removed, 100\/min\)/)
+assert.ok(!formatProgress(0, 0, 0, 0, 0).includes('NaN'))
+const previousVerbose = process.env.OPTIMIZER_VERBOSE
+const originalLog = console.log
+const messages: unknown[][] = []
+try {
+	console.log = (...args: unknown[]) => { messages.push(args) }
+	delete process.env.OPTIMIZER_VERBOSE
+	for (let i = 0; i < 100; i++) logVerbose('per-replacement detail')
+	assert.equal(messages.length, 0)
+	process.env.OPTIMIZER_VERBOSE = '1'
+	logVerbose('per-replacement detail')
+	assert.equal(messages.length, 1)
+} finally {
+	console.log = originalLog
+	if (previousVerbose === undefined) delete process.env.OPTIMIZER_VERBOSE
+	else process.env.OPTIMIZER_VERBOSE = previousVerbose
 }
 console.log('Performance and correctness regressions passed')

@@ -1,4 +1,5 @@
 import sqlite3 from 'sqlite3'
+import { logVerbose } from './logging.js'
 import { InputOutputReplacer, Gate } from './types.js'
 import { evalCircuit, generateCombinations, getVars, ioHash, isReplacementSimpler, logTimed, toBatches } from './utils.js'
 import { LimitedMap } from './limitedMap.js'
@@ -52,7 +53,7 @@ const createTable = (db: sqlite3.Database) => {
 
 export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string, InputOutputReplacer>) => {
     // Fetch all existing entries in a single query
-	logTimed(`getting old entries`)
+	logVerbose(`getting old entries`)
 
 	const ios = Array.from(replacers.keys())
 
@@ -81,7 +82,7 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string
 		existingEntriesMap.set(entry.ioIdentifier, entry)
 	})
 
-	logTimed(`comparing...`)
+	logVerbose(`comparing...`)
 	// Iterate over the replacers to decide which ones to insert or replace
 	let insertAmount = 0
 	let insertThese: [string,string][] = []
@@ -94,10 +95,10 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string
 			insertThese.push([ioIdentifier, replacerGatesJson])
 		}
 	}
-	logTimed(`inserting: ${ insertAmount }`)
+	logVerbose(`inserting: ${ insertAmount }`)
 	const insertChunkSize = 1000000
 	for (let i = 0; i < insertThese.length; i += insertChunkSize) {
-		logTimed('inserting...')
+		logVerbose('inserting...')
 		const chunk = insertThese.slice(i, Math.min(i + insertChunkSize, insertThese.length))
 
 		try {
@@ -132,7 +133,7 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string
 							if (err) {
 								reject(err)
 							} else {
-								logTimed(`Replacers stored successfully.`)
+								logVerbose(`Replacers stored successfully.`)
 								resolve()
 							}
 						})
@@ -153,7 +154,7 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string
 			throw err
 		}
 	}
-	logTimed(`finalized`)
+	logVerbose(`finalized`)
 }
 
 export const getReplacerById = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, ioIdentifier: string) => {
@@ -301,11 +302,11 @@ const FLUSH_SIZE = 15_000_000
 
 const flushIfNeeded = async (db: sqlite3.Database, rainbowMap: Map<string, InputOutputReplacer>) => {
 	if (rainbowMap.size < FLUSH_SIZE) return
-	logTimed(`FLUSHING! entries:${ rainbowMap.size }`)
+	logVerbose(`FLUSHING! entries:${ rainbowMap.size }`)
 	await storeReplacers(db, rainbowMap)
 
 	rainbowMap.clear()
-	logTimed('FLUSHING DONE')
+	logVerbose('FLUSHING DONE')
 }
 
 export const getRainbowTable = (wires: number, maxGates: number) => {

@@ -1,4 +1,5 @@
 import sqlite3 from 'sqlite3'
+import { formatProgress, logVerbose } from './logging.js'
 import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, hashGatesRange, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, remove, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
 import { Gate } from './types.js'
 import { getReplacersByIds } from './rainbowtable.js'
@@ -278,7 +279,7 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 	if (replacements.length === 0) return { gates, changed: false }
 	const newCircuit = replace(gates, replacements)
 	const diff = gates.length - newCircuit.length
-	logTimed(`VAR: Removed ${ diff } gates, exact simplified ${ uselessVarsFound } vars, probabilistically simplified ${ uselessVarsFoundProb } vars. With slice ${ sliceSize }`)
+	logVerbose(`VAR: Removed ${ diff } gates, exact simplified ${ uselessVarsFound } vars, probabilistically simplified ${ uselessVarsFoundProb } vars. With slice ${ sliceSize }`)
 	return { gates: newCircuit, changed: true }
 }
 
@@ -330,7 +331,7 @@ const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: Limited
 	if (replacements.length === 0) return changes
 	const newCircuit = replace(gates, replacements)
 	const diff = gates.length - newCircuit.length
-	if (diff > 0) logTimed(`Rainbow: Removed ${ diff } gates with slice ${ sliceSize }`)
+	if (diff > 0) logVerbose(`Rainbow: Removed ${ diff } gates with slice ${ sliceSize }`)
 	return { gates: newCircuit, changed: true }
 }
 
@@ -339,7 +340,7 @@ const gateSimplifier = (gates: Gate[]) => gates.map((gate) => simplifyGate(gate)
 const save = (filename: string, gates: Gate[], wires: number, originalGates: Gate[]) => {
 	gates = gateSimplifier(gates)
 	logTimed(`Saving a version with ${ gates.length } gates to ${ filename } (${ Math.floor(gates.length/originalGates.length*100) }% of original)`)
-	logTimed(`Average gate complexity: ${ gates.flatMap((gate) => getVars(gate).length).reduce((a, c) => a + c, 0) / gates.length }`)
+	logVerbose(`Average gate complexity: ${ gates.flatMap((gate) => getVars(gate).length).reduce((a, c) => a + c, 0) / gates.length }`)
 	verifyCircuit(originalGates, gates, wires, 20)
 	writeCircuit(filename, wires, gates)
 }
@@ -497,7 +498,7 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 					if (sliceToUse > maxSlice) sliceToUse = 2
 					if (sliceToUse > linesN) continue
 					if (timeToEndWorker()) {
-						console.log(`did not finish iteration loop: ${linesLooped}/${slicedVersion.length} sub${subsetSize} slice:${maxSlice}`)
+						logVerbose(`did not finish iteration loop: ${linesLooped}/${slicedVersion.length} sub${subsetSize} slice:${maxSlice}`)
 						return slicedVersion
 					}
 					const slice = sliceToUse
@@ -532,7 +533,7 @@ export const createOptimizerCaches = () => ({
 	processedGatesCache: new LimitedMap<string, boolean>(1000000),
 })
 
-export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, rainbowTableWires: number, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS) => {
+export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, rainbowTableWires: number, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number) => void) => {
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	optimizedVersion = gateSimplifier(optimizedVersion)
@@ -545,8 +546,13 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	let maxSlice = getRandomNumberInRange(2, 200)
 	let phase: 'simplest' | 'heavy' = 'heavy'
 	//logTimed(`optimizer started with subset ${subsetSize}`)
+	let lastProgress = performance.now()
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
+		if (onProgress && endTime - lastProgress >= 5_000) {
+			onProgress(optimizedVersion.length)
+			lastProgress = endTime
+		}
 		return endTime - lastSaved >= roundDurationMs
 	}
 	while (true) {
@@ -575,7 +581,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 		const gatesRemoved = prevSavedLength - optimizedVersion.length
 		if (workerMode) {
 			if (timeToEndWorker()) {
-				logTimed(`Total Removed Gates Since Terminating: ${ gatesRemoved }`)
+				logVerbose(`Total Removed Gates Since Terminating: ${ gatesRemoved }`)
 				verifyCircuit(originalGates, optimizedVersion, wires, 20)
 				return optimizedVersion
 			}
@@ -584,7 +590,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 				const endTime = performance.now()
 				const timeDiffMins = (endTime - lastSaved) / 60000
 				if (timeDiffMins >= 1) {
-					logTimed(`Total Removed Gates Since last save: ${ gatesRemoved }`)
+					logVerbose(`Total Removed Gates Since last save: ${ gatesRemoved }`)
 					const filename = outputPaths(problemName).progress(optimizedVersion.length)
 					save(filename, optimizedVersion, wires, originalGates)
 					save(outputPaths(problemName).latest, optimizedVersion, wires, originalGates)
@@ -625,10 +631,6 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	const { originalCircuit, inputCircuit } = circuits
 	const originalGates: Gate[] = originalCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
 	const gates: Gate[] = inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
-	logTimed('current wire_count', inputCircuit.wire_count)
-	logTimed('current gate_count', inputCircuit.gates.length)
-	logTimed('original wire_count', originalCircuit.wire_count)
-	logTimed('original gate_count', originalCircuit.gates.length)
 	if (originalGates.length < gates.length) throw new Error('Original circuit is bigger than working. Do you have arguments the right way?')
 	verifyCircuit(originalGates, gates, originalCircuit.wire_count, 20)
 	const nMaxWorkers = configuredWorkerCount()
@@ -644,24 +646,32 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const workersSize = getRandomNumberInRange(100, currentGates.length/2)
 			const nWorkers = Math.max(1, Math.min(Math.floor(currentGates.length / workersSize), nMaxWorkers, currentGates.length || 1))
 			const approxGates = splitArrayIntoApproximatelyChunks(currentGates, nWorkers)
-			currentGates = (await Promise.all(approxGates.map(async (dataChunk, index) => {
-				const workerFile = paths.worker(index)
-				writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
-				const result = await pool.run(dataChunk, inputCircuit.wire_count)
-				writeCircuit(workerFile, inputCircuit.wire_count, result)
-				return result
-			}))).flat()
+			const candidateCounts = approxGates.map(chunk => chunk.length)
+			let completed = 0
+			const report = () => logTimed(formatProgress(nPrevGates, candidateCounts.reduce((sum, count) => sum + count, 0), completed, nWorkers, performance.now() - lastIterationTime))
+			logTimed(`Round started: ${nPrevGates} gates across ${nWorkers} worker chunks; summaries every 30 seconds`)
+			const summaryTimer = setInterval(report, 30_000)
+			try {
+				currentGates = (await Promise.all(approxGates.map(async (dataChunk, index) => {
+					const workerFile = paths.worker(index)
+					writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
+					const result = await pool.run(dataChunk, inputCircuit.wire_count, count => { candidateCounts[index] = count })
+					candidateCounts[index] = result.length
+					completed++
+					writeCircuit(workerFile, inputCircuit.wire_count, result)
+					return result
+				}))).flat()
+			} finally {
+				clearInterval(summaryTimer)
+			}
+			report()
 			const filename = paths.progress(currentGates.length)
 			save(filename, currentGates, inputCircuit.wire_count, originalGates)
 			save(paths.latest, currentGates, inputCircuit.wire_count, originalGates)
 			const gatesRemoved = nPrevGates - currentGates.length
 			const endTime = performance.now()
 			const timeDiffMins = (endTime - lastIterationTime) / 60000
-			logTimed('')
-			logTimed('')
 			logTimed(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
-			logTimed('')
-			logTimed('')
 			shuffleRowsWithDependentGateSwap(currentGates, 2000)
 		}
 	} finally {

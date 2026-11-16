@@ -50,3 +50,21 @@ graphs, shuffle equivalence, SQLite lookup caching, and worker reuse/failure han
 Verification of large circuits still uses random inputs; these improvements do
 not make checkpoint verification a formal equivalence proof or repair an
 already-invalid checkpoint.
+
+## Progress logging
+
+The default output summarizes each round every 30 seconds: completed worker
+chunks, candidate gate count, gates removed, removal rate, and elapsed time.
+Workers report their most recent completed optimization step; candidate counts
+are provisional until the completed round passes checkpoint verification.
+Startup details, checkpoint saves, and errors remain visible. Individual
+replacement, shuffle timeout, and database insertion details are suppressed.
+
+For detailed diagnostics, enable verbose logging before starting:
+
+```powershell
+$env:OPTIMIZER_VERBOSE = "1"
+npm run optimize -- data/latest.json data/obfuscated.json
+```
+
+On bash, use `OPTIMIZER_VERBOSE=1 npm run optimize -- data/latest.json data/obfuscated.json`.

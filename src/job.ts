@@ -1,4 +1,5 @@
 import { existsSync } from 'fs'
+import { verboseLogging } from './logging.js'
 import { basename, dirname, resolve } from 'path'
 import { CircuitData } from './types.js'
 import { logTimed, readJsonFile } from './utils.js'
@@ -33,6 +34,7 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 		`Worker limit: ${configuredWorkerCount()} (${process.env.OPTIMIZER_WORKERS === undefined ? 'automatic CPU-based limit' : 'OPTIMIZER_WORKERS override'}); actual count depends on circuit size`,
 		`Worker round budget: ${WORKER_ROUND_MS / 60_000} minutes (checked between optimization steps)`,
 		`Rainbow table: ${resolve(`canonHashrainbowtable_${RAINBOW_TABLE_WIRES}_${RAINBOW_TABLE_GATES}.db`)} (${RAINBOW_TABLE_WIRES} wires, up to ${RAINBOW_TABLE_GATES} gates)`,
+		`Logging: ${verboseLogging() ? 'verbose' : 'summaries every 30 seconds (OPTIMIZER_VERBOSE=1 enables details)'}`,
 		'Optimization: heavy phase; randomized subset and slice sizes from 2 to 199',
 		'Validation: 20 random inputs at startup/checkpoints; probabilistic replacements use 202 inputs',
 		'Folders are created automatically. Completed rounds are saved; Ctrl+C stops the job.',
