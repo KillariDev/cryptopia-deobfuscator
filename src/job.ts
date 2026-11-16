@@ -28,7 +28,7 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 		`Original: ${resolve(original + '.json')} (${originalCircuit.gates.length} gates, ${originalCircuit.wire_count} wires)`,
 		`Input: ${resolve((resuming ? working : original) + '.json')} (${inputCircuit.gates.length} gates, ${inputCircuit.wire_count} wires)`,
 		`Requested working file: ${resolve(working + '.json')}`,
-		`Latest completed circuit: ${resolve(paths.latest)}`,
+		`Latest verified circuit: ${resolve(paths.latest)}`,
 		`Progress checkpoints: ${resolve(dirname(paths.progress(inputCircuit.gates.length)))}`,
 		`Worker snapshots: ${resolve(dirname(paths.worker(0)))}`,
 		`Worker limit: ${configuredWorkerCount()} (${process.env.OPTIMIZER_WORKERS === undefined ? 'automatic CPU-based limit' : 'OPTIMIZER_WORKERS override'}); actual count depends on circuit size`,
@@ -37,7 +37,7 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 		`Logging: ${verboseLogging() ? 'verbose' : 'summaries every 30 seconds (OPTIMIZER_VERBOSE=1 enables details)'}`,
 		'Optimization: heavy phase; randomized subset and slice sizes from 2 to 199',
 		'Validation: 20 random inputs at startup/checkpoints; probabilistic replacements use 202 inputs',
-		'Folders are created automatically. Completed rounds are saved; Ctrl+C stops the job.',
+		'Checkpoints: every 30 seconds when gates decrease; rounds finish after 5 minutes with reductions, otherwise use the 25-minute budget. Stop requests are checked between steps. Ctrl+C stops the job.',
 	].join('\n')
 }
 

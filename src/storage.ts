@@ -28,3 +28,17 @@ export const writeCircuitCopies = (filenames: string[], wires: number, gates: Ga
 		writeFileSync(filename, payload, 'utf8')
 	}
 }
+
+// Advance the saved count only after verification and both writes succeed.
+export class ReductionCheckpoint {
+	private savedCount: number
+	hasSaved = false
+	constructor(initialCount: number, private persist: (gates: Gate[]) => void) { this.savedCount = initialCount }
+	saveIfReduced(gates: Gate[]) {
+		if (gates.length >= this.savedCount) return false
+		this.persist(gates)
+		this.savedCount = gates.length
+		this.hasSaved = true
+		return true
+	}
+}

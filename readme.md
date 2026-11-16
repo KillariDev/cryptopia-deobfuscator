@@ -25,6 +25,8 @@ This will read circuit `data/latest.json` in. If the file does not exist, it cop
 
 At startup, the tool prints the task, original and resume inputs, gate and wire counts, output locations, worker limit, round budget, rainbow-table settings, and validation settings before initializing the database.
 
+Every 30 seconds, if worker snapshots contain fewer gates than the last saved circuit, the coordinator verifies the combined circuit and saves it. After five minutes, rounds with gate reductions ask all workers to finish between optimization steps; rounds without reductions retain the 25-minute budget.
+
 The process saves progress checkpoints to `data/progress/<name>.solved-<gate-count>.json` and the most recent completed circuit to `data/latest.json`. Worker snapshots are stored in `data/worker/<name>_worker<index>.json`, updated before and after each worker job. Output folders are created automatically. You can exit from the program and run the command again to restart. The optimizer runs forever, so you need to exit from program with "ctrl c".
 ## Worker configuration
 
@@ -32,7 +34,7 @@ Use Node.js 22 or newer. The optimizer keeps a pool of workers alive across
 rounds, retaining their bounded lookup caches and SQLite connections. Circuit
 chunks are exchanged through worker messages; the files in `data/worker/` are
 snapshots for inspection, not the worker communication mechanism. Completed
-rounds still save verified checkpoints.
+rounds also save verified checkpoints.
 
 By default, the pool uses up to 24 workers, capped by Node's available CPU count.
 Each worker has its own caches, so reduce concurrency if memory or database I/O
@@ -55,8 +57,12 @@ already-invalid checkpoint.
 
 The default output summarizes each round every 30 seconds: completed worker
 chunks, candidate gate count, gates removed, removal rate, and elapsed time.
-Workers report their most recent completed optimization step; candidate counts
-are provisional until the completed round passes checkpoint verification.
+Workers report search passes, subsets visited, optimization checks, improving
+rewrites, and their current stage. Each summary includes aggregate activity,
+time-budget usage, and the age of the oldest active report. Time-budget usage
+is not a percentage of the search space explored. Reduced circuit snapshots
+are sent from completed optimization steps; counts remain provisional until
+the coordinator verifies and saves the combined checkpoint.
 Startup details, checkpoint saves, and errors remain visible. Individual
 replacement, shuffle timeout, and database insertion details are suppressed.
 
@@ -78,5 +84,4 @@ Probabilistic checks keep the same 202 inputs: the first input is tested
 individually for quick rejection, and the remaining inputs use packed batches.
 Subset selection uses per-wire access indexes shared for the current graph.
 Completed checkpoints are verified and serialized once, then the same payload
-is written to both the progress file and `data/latest.json`. Save frequency and
-randomized verification guarantees are unchanged.
+is written to both the progress file and `data/latest.json`. Randomized verification guarantees are unchanged.

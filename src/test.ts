@@ -268,3 +268,46 @@ try {
 	process.chdir(originalCwd)
 	await rm(workerDir, { recursive: true, force: true })
 }
+
+const { formatWorkerActivity, shouldFinishReducedRound } = await import('./logging.js')
+const status = { activity: { passes: 3, subsets: 120, checks: 900, improvements: 4, stage: 'searching' as const }, updatedAtMs: 5_000, done: false }
+const detail = formatWorkerActivity([status, { updatedAtMs: 0, done: true }], 10_000, 25 * 60_000)
+assert.match(detail, /3 passes, 120 subsets visited, 900 optimization checks, 4 improving rewrites/)
+assert.match(detail, /1 searching/)
+assert.match(detail, /1 completed/)
+assert.match(detail, /5s ago/)
+assert.equal(shouldFinishReducedRound(299_999, 100, 99), false)
+assert.equal(shouldFinishReducedRound(300_000, 100, 99), true)
+assert.equal(shouldFinishReducedRound(600_000, 100, 100), false)
+const { ReductionCheckpoint } = await import('./storage.js')
+const writes: number[] = []
+const checkpoint = new ReductionCheckpoint(3, gates => { writes.push(gates.length) })
+const candidate = [singleGate[0], singleGate[0], singleGate[0]]
+assert.equal(checkpoint.saveIfReduced(candidate), false)
+assert.equal(checkpoint.saveIfReduced(candidate.slice(0, 2)), true)
+assert.equal(checkpoint.saveIfReduced(candidate.slice(0, 2)), false)
+assert.equal(checkpoint.saveIfReduced(candidate.slice(0, 1)), true)
+assert.deepEqual(writes, [2, 1])
+let fail = true
+const retryCheckpoint = new ReductionCheckpoint(3, () => { if (fail) throw new Error('verification failed') })
+assert.throws(() => retryCheckpoint.saveIfReduced([]), /verification failed/)
+assert.equal(retryCheckpoint.hasSaved, false)
+fail = false
+assert.equal(retryCheckpoint.saveIfReduced([]), true)
+const stopDirectory = await mkdtemp(join(tmpdir(), 'deobfuscator-stop-'))
+const stoppedPool = new WorkerPool(1)
+try {
+	process.chdir(stopDirectory)
+	const signal = new Int32Array(new SharedArrayBuffer(4))
+	Atomics.store(signal, 0, 1)
+	const activities: string[] = []
+	const result = await stoppedPool.run(singleGate, 4, (_, activity) => { if (activity) activities.push(activity.stage) }, signal.buffer as SharedArrayBuffer)
+	assert.deepEqual(result, singleGate)
+	assert.ok(activities.includes('searching'))
+	assert.ok(activities.includes('verifying'))
+} finally {
+	await stoppedPool.close()
+	process.chdir(originalCwd)
+	await rm(stopDirectory, { recursive: true, force: true })
+}
+console.log('Detailed progress, reduction checkpoints and round-stop regressions passed')
