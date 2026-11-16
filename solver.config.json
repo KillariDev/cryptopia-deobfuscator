@@ -1,0 +1,61 @@
+{
+  "runtime": {
+    "heapMegabytes": 16384
+  },
+  "files": {
+    "working": "data/latest.json",
+    "original": "data/obfuscated.json",
+    "dataDirectory": "data",
+    "latestName": "latest.json",
+    "workerDirectory": "worker",
+    "progressDirectory": "progress",
+    "databaseDirectory": "."
+  },
+  "workers": {
+    "maximum": 24,
+    "minimumChunkGates": 100,
+    "maximumChunkFraction": 0.5
+  },
+  "timing": {
+    "roundMinutes": 25,
+    "improvedRoundMinutes": 5,
+    "summarySeconds": 30,
+    "workerReportSeconds": 5,
+    "databaseLogSeconds": 60,
+    "standaloneSaveSeconds": 60
+  },
+  "logging": {
+    "verbose": false
+  },
+  "validation": {
+    "checkpointInputs": 20,
+    "probabilisticInputs": 202,
+    "maximumWires": 64
+  },
+  "search": {
+    "probabilistic": true,
+    "variableElimination": true,
+    "exactMaximumWires": 7,
+    "subsetMinimum": 2,
+    "subsetMaximum": 199,
+    "sliceMinimum": 2,
+    "sliceMaximum": 199,
+    "maximumInnerChunks": 5,
+    "minimumInnerChunkGates": 200,
+    "workerShufflePasses": 200,
+    "roundShufflePasses": 2000
+  },
+  "cache": {
+    "lookupEntries": 1000000,
+    "processedEntries": 1000000,
+    "shuffleEntries": 100000
+  },
+  "database": {
+    "wires": 4,
+    "gates": 5,
+    "queryBatchSize": 900,
+    "insertBatchSize": 1000000,
+    "flushEntries": 15000000,
+    "flushCheckEntries": 1000
+  }
+}

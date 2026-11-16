@@ -311,3 +311,46 @@ try {
 	await rm(stopDirectory, { recursive: true, force: true })
 }
 console.log('Detailed progress, reduction checkpoints and round-stop regressions passed')
+
+const { defaults, parseConfig, config } = await import('./config.js')
+assert.deepEqual(parseConfig({}), defaults)
+assert.deepEqual(parseConfig(JSON.parse(readFileSync(new URL('../solver.config.json', import.meta.url), 'utf8'))), defaults)
+const custom = parseConfig({ timing: { summarySeconds: 10, improvedRoundMinutes: 2 }, workers: { maximum: 3 }, logging: { verbose: true } })
+assert.equal(custom.timing.summarySeconds, 10)
+assert.equal(custom.workers.maximum, 3)
+assert.equal(custom.database.wires, 4)
+assert.equal(defaults.timing.summarySeconds, 30)
+for (const invalid of [null, [], { typo: {} }, { timing: { typo: 5 } }, { workers: { maximum: 0 } }, { workers: { maximum: 1.5 } }, { timing: { summarySeconds: '30' } }, { search: { subsetMinimum: 100, subsetMaximum: 2 } }, { timing: { improvedRoundMinutes: 30 } }, { files: { workerDirectory: '../elsewhere' } }, JSON.parse('{"__proto__":{}}')]) {
+	assert.throws(() => parseConfig(invalid))
+}
+// Worker configuration is carried in workerData, independent of its cwd.
+const configFixture = new URL('data:text/javascript,' + encodeURIComponent(`
+import { parentPort, workerData } from 'node:worker_threads';
+parentPort.on('message', () => parentPort.postMessage({gates:[{a:workerData.solverConfig.timing.summarySeconds,b:0,target:0,gate_i:0}]}));
+`))
+const configPool = new WorkerPool(1, configFixture)
+try { assert.equal((await configPool.run([], 1))[0].a, config.timing.summarySeconds) }
+finally { await configPool.close() }
+console.log('JSON configuration regressions passed')
+
+const { execFileSync, spawnSync } = await import('node:child_process')
+const { fileURLToPath } = await import('node:url')
+const configDir = await mkdtemp(join(tmpdir(), 'deobfuscator-config-'))
+try {
+	const { writeFileSync } = await import('node:fs')
+	const customPath = join(configDir, 'custom.json')
+	writeFileSync(customPath, JSON.stringify({ timing: { improvedRoundMinutes: 2, summarySeconds: 10 }, files: { dataDirectory: 'custom-data' }, search: { sliceMinimum: 3 } }))
+	const script = `
+		import {config} from ${JSON.stringify(new URL('./config.js', import.meta.url).href)};
+		import {outputPaths} from ${JSON.stringify(new URL('./storage.js', import.meta.url).href)};
+		import {shouldFinishReducedRound} from ${JSON.stringify(new URL('./logging.js', import.meta.url).href)};
+		console.log(JSON.stringify({seconds:config.timing.summarySeconds, path:outputPaths('task').latest, finish:shouldFinishReducedRound(120000, 10, 9)}));
+	`
+	const result = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, OPTIMIZER_CONFIG: customPath }, encoding: 'utf8' }))
+	assert.equal(result.seconds, 10)
+	assert.equal(result.path, join('custom-data', 'latest.json'))
+	assert.equal(result.finish, true)
+	const launch = spawnSync(process.execPath, [fileURLToPath(new URL('./launch.js', import.meta.url)), 'only-one-argument'], { encoding: 'utf8' })
+	assert.equal(launch.status, 1)
+	assert.match(launch.stderr, /Usage:/)
+} finally { await rm(configDir, { recursive: true, force: true }) }

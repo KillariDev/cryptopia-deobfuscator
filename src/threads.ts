@@ -1,3 +1,4 @@
+import { config } from './config.js'
 import { Worker } from 'worker_threads'
 import { availableParallelism } from 'os'
 import { Gate } from './types.js'
@@ -5,7 +6,7 @@ import { WorkerActivity } from './logging.js'
 
 export function configuredWorkerCount() {
 	const setting = process.env.OPTIMIZER_WORKERS
-	const count = setting === undefined ? Math.min(24, availableParallelism()) : Number(setting)
+	const count = setting === undefined ? Math.min(config.workers.maximum, availableParallelism()) : Number(setting)
 	if (!Number.isSafeInteger(count) || count < 1) throw new Error('OPTIMIZER_WORKERS must be a positive integer')
 	return count
 }
@@ -30,7 +31,7 @@ export class WorkerPool {
 			let slot = this.slots.find(slot => !slot.job)
 			if (!slot) {
 				if (this.slots.length >= this.size) return
-				const worker = new Worker(this.workerUrl)
+				const worker = new Worker(this.workerUrl, { workerData: { solverConfig: config } })
 				slot = { worker }
 				const current = slot
 				this.slots.push(current)

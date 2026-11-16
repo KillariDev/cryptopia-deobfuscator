@@ -85,3 +85,29 @@ individually for quick rejection, and the remaining inputs use packed batches.
 Subset selection uses per-wire access indexes shared for the current graph.
 Completed checkpoints are verified and serialized once, then the same payload
 is written to both the progress file and `data/latest.json`. Randomized verification guarantees are unchanged.
+
+## JSON settings
+
+Edit `solver.config.json` in the repository root, then restart the solver.
+Run `npm run optimize` to use its configured input paths, or supply the two
+input filenames as before to override them. Startup prints the configuration
+file and effective settings. Changes apply on the next run, not during a run.
+
+- `files`: working/original input paths, output root, latest filename, worker/progress subdirectories, and rainbow database directory. Relative paths use the current working directory.
+- `runtime.heapMegabytes`: Node heap limit used by `optimize` and `optimize-prof`.
+- `workers`: CPU-based concurrency cap, minimum chunk size, and maximum chunk fraction.
+- `timing`: round budget and improved-round target in minutes; summary/checkpoint, worker-report, database-log and standalone-save intervals in seconds. The summary interval also controls checking the improved-round target.
+- `logging.verbose`: enable detailed diagnostics.
+- `validation`: checkpoint test inputs, probabilistic test inputs, and maximum supported circuit wires. Fewer inputs reduce verification confidence.
+- `search`: probabilistic/variable elimination switches, maximum wires for exhaustive checks, inclusive subset/slice ranges, internal chunk sizing, and shuffle passes.
+- `cache`: per-worker lookup/processed cache capacities and shuffle cache capacity.
+- `database`: rainbow circuit wire/gate limits, query/insert batch sizes, and generation flush settings. Changing wire/gate limits selects a different database and may require building it.
+
+Settings omitted from a section use the defaults. Unknown keys, invalid types,
+and unsupported ranges fail at startup. The checked-in file lists all options.
+Algorithm constants such as 32-bit packing and gate truth tables remain fixed.
+
+`OPTIMIZER_CONFIG` selects another JSON file. `OPTIMIZER_WORKERS` overrides the
+worker cap with an exact worker limit, and `OPTIMIZER_VERBOSE=1`/`0` overrides
+verbose logging. These environment variables remain optional. Workers receive
+the coordinator's parsed configuration, so all workers use the same settings.

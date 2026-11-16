@@ -1,3 +1,4 @@
+import { config } from './config.js'
 import sqlite3 from 'sqlite3'
 import { formatProgress, formatWorkerActivity, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
 import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, hashGatesRange, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, remove, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
@@ -135,14 +136,14 @@ const replaceNonTargetVar = (gate: Gate, variableToReplace: number, variableToRe
 	})
 }
 
-const MAX_DETERMINISTIC_USELESS_VARS = 8
+const MAX_DETERMINISTIC_USELESS_VARS = config.search.exactMaximumWires + 1
 const BYTE_ALL_INPUTS = new Map<number, boolean[][]>()
 for (let wires = 2; wires < MAX_DETERMINISTIC_USELESS_VARS; wires++) {
 	BYTE_ALL_INPUTS.set(wires, generateCombinations(wires))
 }
 
-const INPUTS = 202
-const randomInputs = generateNRandomBooleanArray(INPUTS, 64)
+const INPUTS = config.validation.probabilisticInputs
+const randomInputs = generateNRandomBooleanArray(INPUTS, config.validation.maximumWires)
 const randomInputSets = new Map<number, boolean[][]>()
 const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGates: Gate[]) => {
 	const nVariables = variableIndexMapping.length
@@ -342,7 +343,7 @@ const save = (filenames: string[], gates: Gate[], wires: number, originalGates: 
 	gates = gateSimplifier(gates)
 	logTimed(`Saving a version with ${ gates.length } gates to ${ filenames.join(', ') } (${ Math.floor(gates.length/originalGates.length*100) }% of original)`)
 	logVerbose(`Average gate complexity: ${ gates.flatMap((gate) => getVars(gate).length).reduce((a, c) => a + c, 0) / gates.length }`)
-	verifyCircuit(originalGates, gates, wires, 20)
+	verifyCircuit(originalGates, gates, wires, config.validation.checkpointInputs)
 	writeCircuitCopies(filenames, wires, gates)
 }
 
@@ -409,7 +410,7 @@ function* allGatesWithTarget(target: number, wires: number) {
 	}
 }
 
-const shuffleCache = new LimitedMap<string, Gate[]>(100000)
+const shuffleCache = new LimitedMap<string, Gate[]>(config.cache.shuffleEntries)
 export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number) {
 	const hasCommonNumber = (arr1: number, arr2: number[]): boolean => {
 		return arr2.includes(arr1)
@@ -479,15 +480,15 @@ function appendMissingNumbers(arr: number[], n: number): number[] {
 }
 
 const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, rainbowTableWires: number, rainbowTableAllInputs: boolean[][], activity: WorkerActivity, onCandidate: (gates: Gate[]) => void): Promise<Gate[]> => {
-	const useProbabilistically = phase === 'heavy'
-	const findUselessVarsSetting = true
+	const useProbabilistically = phase === 'heavy' && config.search.probabilistic
+	const findUselessVarsSetting = config.search.variableElimination
 	let regenerateGraph = false
 	let linesLooped = 0
 	do {
 		let graphIterator = findConvexSubsets(subsetSize, slicedVersion)
 		regenerateGraph = false
 		for (let lines of graphIterator) {
-			let sliceToUse = 1
+			let sliceToUse = config.search.sliceMinimum - 1
 			linesLooped++
 			activity.subsets++
 			while(true) {
@@ -497,7 +498,7 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 				let it = 0
 				for (;it < maxSlice; it++) {
 					sliceToUse++
-					if (sliceToUse > maxSlice) sliceToUse = 2
+					if (sliceToUse > maxSlice) sliceToUse = config.search.sliceMinimum
 					if (sliceToUse > linesN) continue
 					if (timeToEndWorker()) {
 						logVerbose(`did not finish iteration loop: ${linesLooped}/${slicedVersion.length} sub${subsetSize} slice:${maxSlice}`)
@@ -517,7 +518,7 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 						const offset = lines[lines.length - 1] + 1 - lines.length
 						lines = Array.from(Array(optimizationOutput.gates.length).keys()).map((x) => x + offset)
 						regenerateGraph = true
-						sliceToUse = 1
+						sliceToUse = config.search.sliceMinimum - 1
 						it = 0
 						break
 					}
@@ -534,21 +535,21 @@ const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIde
 }
 
 export const createOptimizerCaches = () => ({
-	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(1000000),
-	processedGatesCache: new LimitedMap<string, boolean>(1000000),
+	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(config.cache.lookupEntries),
+	processedGatesCache: new LimitedMap<string, boolean>(config.cache.processedEntries),
 })
 
 export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, rainbowTableWires: number, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot: Gate[]) => void, shouldFinish?: () => boolean) => {
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	optimizedVersion = gateSimplifier(optimizedVersion)
-	verifyCircuit(originalGates, optimizedVersion, wires, 20)
+	verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
 	let lastSaved = performance.now()
 	const { ioIdentifierCache, processedGatesCache } = caches
 	
 	const rainbowTableAllInputs = generateCombinations(rainbowTableWires)
-	let subsetSize = getRandomNumberInRange(2, 200)
-	let maxSlice = getRandomNumberInRange(2, 200)
+	let subsetSize = getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1)
+	let maxSlice = getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1)
 	let phase: 'simplest' | 'heavy' = 'heavy'
 	//logTimed(`optimizer started with subset ${subsetSize}`)
 	const activity: WorkerActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
@@ -557,7 +558,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	onProgress?.(optimizedVersion.length, { ...activity }, candidateSnapshot)
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
-		if (onProgress && endTime - lastProgress >= 5_000) {
+		if (onProgress && endTime - lastProgress >= config.timing.workerReportSeconds * 1000) {
 			onProgress(candidateSnapshot.length, { ...activity }, candidateSnapshot)
 			lastProgress = endTime
 		}
@@ -569,7 +570,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 		activity.passes++
 		activity.stage = 'searching'
 		const startLength = optimizedVersion.length
-		const nChunks = Math.max(1, Math.min(5, Math.floor(optimizedVersion.length / 200)))
+		const nChunks = Math.max(1, Math.min(config.search.maximumInnerChunks, Math.floor(optimizedVersion.length / config.search.minimumInnerChunkGates)))
 		const chunked = chunkArray(optimizedVersion, nChunks)
 		const chunkVersions = chunked.slice()
 		optimizedVersion = (await Promise.all(chunked.map(async (data, index) => {
@@ -583,7 +584,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 			return result
 		}))).flat()
 		candidateSnapshot = optimizedVersion
-		/*if (phase === 'heavy') {
+		/*if (phase === 'heavy' && config.search.probabilistic) {
 			shuffleRowsWithDependentGateSwap(optimizedVersion, 1)
 			maxSlice++
 			if (maxSlice > subsetSize) subsetSize++
@@ -591,9 +592,9 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 		}*/
 		//else if (optimizedVersion.length < startLength) {
 			activity.stage = 'shuffling'
-			if (!timeToEndWorker()) shuffleRowsWithDependentGateSwap(optimizedVersion, 200)
-			subsetSize = getRandomNumberInRange(2, 200)
-			maxSlice = getRandomNumberInRange(2, 200)
+			if (!timeToEndWorker()) shuffleRowsWithDependentGateSwap(optimizedVersion, config.search.workerShufflePasses)
+			subsetSize = getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1)
+			maxSlice = getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1)
 		/*} else {
 			phase = 'heavy'
 			subsetSize = 40
@@ -606,14 +607,14 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 				logVerbose(`Total Removed Gates Since Terminating: ${ gatesRemoved }`)
 				activity.stage = 'verifying'
 				onProgress?.(optimizedVersion.length, { ...activity }, optimizedVersion)
-				verifyCircuit(originalGates, optimizedVersion, wires, 20)
+				verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
 				return optimizedVersion
 			}
 		} else {
 			if (gatesRemoved > 0) {
 				const endTime = performance.now()
 				const timeDiffMins = (endTime - lastSaved) / 60000
-				if (timeDiffMins >= 1) {
+				if (timeDiffMins >= config.timing.standaloneSaveSeconds / 60) {
 					logVerbose(`Total Removed Gates Since last save: ${ gatesRemoved }`)
 					const filename = outputPaths(problemName).progress(optimizedVersion.length)
 					save([filename, outputPaths(problemName).latest], optimizedVersion, wires, originalGates)
@@ -655,7 +656,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	const originalGates: Gate[] = originalCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
 	const gates: Gate[] = inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
 	if (originalGates.length < gates.length) throw new Error('Original circuit is bigger than working. Do you have arguments the right way?')
-	verifyCircuit(originalGates, gates, originalCircuit.wire_count, 20)
+	verifyCircuit(originalGates, gates, originalCircuit.wire_count, config.validation.checkpointInputs)
 	const nMaxWorkers = configuredWorkerCount()
 	const pool = new WorkerPool(nMaxWorkers)
 	const paths = outputPaths(pathToFileWithoutExt)
@@ -666,7 +667,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			currentGates = gateSimplifier(currentGates)
 			let lastIterationTime = performance.now()
 			const nPrevGates = currentGates.length
-			const workersSize = getRandomNumberInRange(100, currentGates.length/2)
+			const workersSize = getRandomNumberInRange(Math.min(config.workers.minimumChunkGates, currentGates.length), Math.max(1, currentGates.length * config.workers.maximumChunkFraction))
 			const nWorkers = Math.max(1, Math.min(Math.floor(currentGates.length / workersSize), nMaxWorkers, currentGates.length || 1))
 			const approxGates = splitArrayIntoApproximatelyChunks(currentGates, nWorkers)
 			const candidateCounts = approxGates.map(chunk => chunk.length)
@@ -685,14 +686,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				checkpoint.saveIfReduced(snapshot)
 				if (shouldFinishReducedRound(elapsed, nPrevGates, snapshot.length) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
-					logTimed('Five-minute round target reached with gate reductions; finishing all workers between optimization steps.')
+					logTimed(`Improved-round target (${config.timing.improvedRoundMinutes} minutes) reached with gate reductions; finishing all workers between optimization steps.`)
 				}
 			}
-			logTimed(`Round started: ${nPrevGates} gates across ${nWorkers} worker chunks; summaries every 30 seconds`)
+			logTimed(`Round started: ${nPrevGates} gates across ${nWorkers} worker chunks; summaries every ${config.timing.summarySeconds} seconds`)
 			const summaryTimer = setInterval(() => {
 				try { report() }
 				catch (error) { clearInterval(summaryTimer); rejectCheckpoint(error) }
-			}, 30_000)
+			}, config.timing.summarySeconds * 1000)
 			try {
 				currentGates = (await Promise.race([checkpointFailed, Promise.all(approxGates.map(async (dataChunk, index) => {
 					const workerFile = paths.worker(index)
@@ -720,7 +721,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const endTime = performance.now()
 			const timeDiffMins = (endTime - lastIterationTime) / 60000
 			logTimed(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
-			shuffleRowsWithDependentGateSwap(currentGates, 2000)
+			shuffleRowsWithDependentGateSwap(currentGates, config.search.roundShufflePasses)
 		}
 	} finally {
 		await pool.close()

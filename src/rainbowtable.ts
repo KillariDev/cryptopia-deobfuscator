@@ -1,11 +1,13 @@
+import { join } from 'path'
+import { config } from './config.js'
 import sqlite3 from 'sqlite3'
 import { logVerbose } from './logging.js'
 import { InputOutputReplacer, Gate } from './types.js'
 import { evalCircuit, generateCombinations, getVars, ioHash, isReplacementSimpler, logTimed, toBatches } from './utils.js'
 import { LimitedMap } from './limitedMap.js'
 
-export const RAINBOW_TABLE_WIRES = 4
-export const RAINBOW_TABLE_GATES = 5
+export const RAINBOW_TABLE_WIRES = config.database.wires
+export const RAINBOW_TABLE_GATES = config.database.gates
 
 const gatesToBinary = (gates: Gate[]): string => {
 	let binary = ''
@@ -57,7 +59,7 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string
 
 	const ios = Array.from(replacers.keys())
 
-	const chunkSize = 900
+	const chunkSize = config.database.queryBatchSize
 	
 	const dbPromises: Promise<{ ioIdentifier: string, replacerGates: string }[]>[] = []
 	for (let i = 0; i < ios.length; i += chunkSize) {
@@ -96,7 +98,7 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string
 		}
 	}
 	logVerbose(`inserting: ${ insertAmount }`)
-	const insertChunkSize = 1000000
+	const insertChunkSize = config.database.insertBatchSize
 	for (let i = 0; i < insertThese.length; i += insertChunkSize) {
 		logVerbose('inserting...')
 		const chunk = insertThese.slice(i, Math.min(i + insertChunkSize, insertThese.length))
@@ -199,7 +201,7 @@ export const getReplacersByIds = async (db: sqlite3.Database, ioIdentifierCache:
     if (missingIdentifiers.size === 0) return cacheHits
 
     const identifiers = [...missingIdentifiers]
-    const chunkSize = 900
+    const chunkSize = config.database.queryBatchSize
     const dbPromises: Promise<{ ioIdentifier: string, gates: Gate[] }[]>[] = []
 
     // Query the database for the missing identifiers in chunks
@@ -298,7 +300,7 @@ const containsAllNumbersInOrder = (arr: number[]): boolean => {
 	return true
 }
 
-const FLUSH_SIZE = 15_000_000
+const FLUSH_SIZE = config.database.flushEntries
 
 const flushIfNeeded = async (db: sqlite3.Database, rainbowMap: Map<string, InputOutputReplacer>) => {
 	if (rainbowMap.size < FLUSH_SIZE) return
@@ -310,7 +312,7 @@ const flushIfNeeded = async (db: sqlite3.Database, rainbowMap: Map<string, Input
 }
 
 export const getRainbowTable = (wires: number, maxGates: number) => {
-	const filename = `canonHashrainbowtable_${ wires }_${ maxGates }.db`
+	const filename = join(config.files.databaseDirectory, `canonHashrainbowtable_${ wires }_${ maxGates }.db`)
 	const db = new sqlite3.Database(filename)
 	return db
 }
@@ -331,7 +333,7 @@ export function collectVariables(gates: Gate[]) {
 }
 
 export const createRainbowTable = async (wires: number, maxGates: number) => {
-	const filename = `canonHashrainbowtable_${ wires }_${ maxGates }.db`
+	const filename = join(config.files.databaseDirectory, `canonHashrainbowtable_${ wires }_${ maxGates }.db`)
 	const db = new sqlite3.Database(filename)
 	await createTable(db)
 	if (!await isEmpty(db)) {
@@ -378,12 +380,12 @@ export const createRainbowTable = async (wires: number, maxGates: number) => {
 			stack.push({ sequence: newSequence, depth: depth + 1 })
 		}
 
-		if (rainbowMap.size % 1000 === 0) {
+		if (rainbowMap.size % config.database.flushCheckEntries === 0) {
 			await flushIfNeeded(db, rainbowMap)
 		}
 
 		const now = performance.now()
-		if ((now - lastSaved) / 60000 >= 1) {
+		if (now - lastSaved >= config.timing.databaseLogSeconds * 1000) {
 			logTimed(`rainbowsize: ${rainbowMap.size}`)
 			lastSaved = now
 		}
