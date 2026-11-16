@@ -1,3 +1,4 @@
+import { config } from './config.js'
 import * as fs from 'fs'
 import { createHash } from 'crypto'
 import { DependencyNode, Gate } from './types.js'
@@ -297,6 +298,11 @@ export const hashNumberArray = (array: number[]): string => {
 }
 
 export function ioHash(mapping: boolean[]) {
+	if (config.database.format === 'compact') {
+		const bytes = Buffer.alloc(Math.ceil(mapping.length / 8))
+		mapping.forEach((value, i) => { if (value) bytes[i >>> 3] |= 1 << (i & 7) })
+		return bytes.toString('hex')
+	}
 	return hashBooleanArrays(mapping)
 }
 

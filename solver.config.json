@@ -64,6 +64,23 @@
     "queryBatchSize": 900,
     "insertBatchSize": 1000000,
     "flushEntries": 15000000,
-    "flushCheckEntries": 1000
+    "flushCheckEntries": 1000,
+    "format": "legacy",
+    "memoryMapBytes": 268435456,
+    "semanticGeneration": false,
+    "generationStates": 1000000
+  },
+  "synthesis": {
+    "templates": true,
+    "templateEntries": 10000,
+    "maximumWires": 3,
+    "maximumWindowGates": 8,
+    "maximumReplacementGates": 3,
+    "attemptEvery": 100,
+    "timeoutMs": 100,
+    "states": 2000,
+    "smt": false,
+    "meetInMiddle": false,
+    "equalitySaturation": false
   }
 }

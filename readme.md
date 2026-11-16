@@ -144,3 +144,51 @@ Improved rounds use the five-minute target by default; otherwise the default is
 25 minutes. Finished rounds say “All workers finished” rather than showing a
 partial time-budget percentage. Routine report age and internal search counters
 are shown only in verbose mode. Delayed worker updates produce a warning.
+
+## Compact lookup database and migration
+
+`database.format` accepts `"legacy"` (the default) or `"compact"`. Compact databases
+use exact packed truth-table BLOB keys, binary gate payloads, and `WITHOUT ROWID`.
+For four wires a key contains the complete mapping, without SHA hashing. Database
+filenames include `.compact` so changing the format cannot overwrite a legacy
+file. `database.memoryMapBytes` configures SQLite mmap on each connection; set it
+to `0` to disable mapping. SQLite may cap or disable mapping depending on its build.
+
+To convert an existing table, keep `database.wires` set to the source's wire count:
+
+```bash
+npm run migrate-db -- canonHashrainbowtable_4_5.db canonHashrainbowtable_4_5.compact.db
+```
+
+Migration opens the source read-only, streams batches, recomputes each entry's
+truth table, verifies its original SHA key, and writes a new compact database.
+It refuses existing destinations and known-incomplete generations. A `.building`
+file is renamed only after completion; a failed migration removes that temporary
+file. Stop a running table generator before migration. Large databases require
+additional disk space and migration time. After success, set `database.format`
+to `"compact"`. No migration is performed automatically.
+
+## Semantic generation and bounded synthesis
+
+`database.semanticGeneration` (opt-in; default `false`) builds new tables breadth-first by distinct labeled
+functions, retaining used-wire/read-cost metadata for equal-depth alternatives.
+`database.generationStates` bounds both retained states and frontier entries;
+reaching a limit raises an error rather than treating a partial table as complete.
+Generation completion is recorded in the database. An interrupted build is
+recomputed on the next attempt, reusing stored entries; it does not resume the
+in-memory frontier. Existing completed databases are reused without rebuilding.
+
+The `synthesis` section controls additional local optimizers:
+
+- `templates` enables structural identities and target/control-safe pair merging before database lookup. Successful exact rewrites are learned as wire-normalized templates, admitted only after exhaustive verification. `templateEntries` bounds the learned cache.
+- `smt` enables Z3-backed counterexample-guided synthesis. Candidate gate fields are symbolic; failing exhaustive inputs are added until a replacement is proven locally equivalent. `timeoutMs` bounds search after WASM initialization; loading Z3 and cleanup add overhead. The WASM helper threads are cleaned up after each attempt.
+- `meetInMiddle` enables bounded bidirectional search for small bijective functions, using self-inverse gates whose targets do not occur as controls. Non-bijective targets are rejected.
+- `equalitySaturation` enables a bounded circuit-sequence equality graph. Prefix nodes share exact semantic equivalence classes; commuting alternatives and template reductions are explored without discarding the original, then the cheapest discovered circuit is selected. This is a local bounded engine, not whole-program Boolean-expression saturation.
+
+SMT, meet-in-the-middle and equality saturation are opt-in and default to `false`.
+They run only after ordinary local search fails. `maximumWires` (at most four),
+`maximumWindowGates`, `maximumReplacementGates`, `attemptEvery`, `states` and
+`timeoutMs` limit their scope and cost. Timed-out attempts are cached as failed
+heuristic attempts, not proofs of impossibility. Optional synthesis is serialized
+per worker. All returned replacements are checked exhaustively before use and
+can become reusable templates. Global checkpoint verification remains probabilistic.

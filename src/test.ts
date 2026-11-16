@@ -459,8 +459,9 @@ try {
 	const lookups = new LimitedMap<string, Gate[] | null>(1000)
 	const counters = () => ({ passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const })
 	const first = counters(), second = counters()
-	await optimizeSubset(integrationDb, circuit, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, first, () => {}, tested, 'rainbow')
-	await optimizeSubset(integrationDb, circuit, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, second, () => {}, tested, 'rainbow')
+	const unchanged = circuit.map((gate, i) => ({ ...gate, a: i % 2, target: 1 - i % 2 }))
+	await optimizeSubset(integrationDb, unchanged, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, first, () => {}, tested, 'rainbow')
+	await optimizeSubset(integrationDb, unchanged, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, second, () => {}, tested, 'rainbow')
 	assert.ok(first.checks > 0)
 	assert.equal(second.checks, 0)
 } finally { await new Promise<void>((resolve, reject) => integrationDb.close(error => error ? reject(error) : resolve())) }
@@ -483,3 +484,102 @@ const lateStatus = formatStatus({ original: 100, roundStart: 100, candidate: 100
 assert.match(lateStatus, /Warning: 1 worker update delayed/)
 assert.match(lateStatus, /6% elapsed/)
 assert.ok(!formatStatus({ original: 0, roundStart: 0, candidate: 0, statuses: [], elapsedMs: 0 }).includes('NaN'))
+
+const { TemplateLibrary } = await import('./templates.js')
+const { functionKey, circuitState, semanticCircuits, meetInMiddle, encodeGates, decodeGates, truthKey } = await import('./semantic.js')
+const { saturateCircuit, CircuitEqualityGraph } = await import('./equality.js')
+const library = new TemplateLibrary(100, 4)
+for (let f = 0; f < 16; f++) for (let h = 0; h < 16; h++) {
+	const gates = [{ a: 0, b: 1, target: 2, gate_i: f }, { a: 1, b: 0, target: 2, gate_i: h }]
+	const rewritten = library.rewrite(gates)
+	assert.equal(functionKey(gates, 3), functionKey(rewritten, 3))
+	assert.ok(rewritten.length < gates.length)
+	assert.deepEqual(decodeGates(encodeGates(gates)), gates)
+}
+const unsafe = [{ a: 0, b: 1, target: 0, gate_i: 3 }, { a: 0, b: 1, target: 0, gate_i: 3 }]
+assert.equal(functionKey(library.rewrite(unsafe), 2), functionKey(unsafe, 2))
+assert.equal(library.learn(singleGate, []), false)
+const not0 = { a: 0, b: 0, target: 0, gate_i: 15 }, not1 = { a: 0, b: 0, target: 1, gate_i: 15 }
+const separated = [not0, not1, not0]
+const saturated = saturateCircuit(separated, 2, library, 100, 500)
+assert.ok(saturated && saturated.length < separated.length)
+assert.equal(functionKey(saturated!, 2), functionKey(separated, 2))
+const egraph = new CircuitEqualityGraph()
+assert.equal(egraph.add([not0, not0], 2), egraph.add([], 2))
+const catalog = [not0, not1, { a: 1, b: 0, target: 0, gate_i: 3 }]
+const semantic = [...semanticCircuits(2, 3, catalog, 10000)]
+let brute: Gate[][] = [[]]
+for (let depth = 1, layer: Gate[][] = [[]]; depth <= 3; depth++) { layer = layer.flatMap(sequence => catalog.map(gate => [...sequence, gate])); brute.push(...layer) }
+const cheapest = (circuits: Gate[][]) => {
+	const map = new Map<string, Gate[]>()
+	for (const gates of circuits) { const key = functionKey(gates, 2), old = map.get(key); if (!old || isReplacementSimpler(gates, old)) map.set(key, gates) }
+	return map
+}
+const exhaustive = cheapest(brute), deduplicated = cheapest(semantic)
+assert.equal(exhaustive.size, deduplicated.size)
+for (const [key, gates] of exhaustive) {
+	assert.equal(deduplicated.get(key)!.length, gates.length)
+	assert.equal(isReplacementSimpler(gates, deduplicated.get(key)!), false)
+}
+assert.throws(() => [...semanticCircuits(2, 3, catalog, 1)], /limit/)
+const middle = meetInMiddle([not0, not0, not0], 2, catalog, 2, 100, 500)
+assert.ok(middle && middle.length === 1)
+assert.equal(functionKey(middle!, 2), functionKey([not0], 2))
+assert.equal(meetInMiddle(unsafe, 2, catalog, 2, 100, 500), undefined)
+assert.equal(truthKey(generateCombinations(4).flat()).length, 8)
+const { synthesizeSMT } = await import('./smt.js')
+const smtResult = await synthesizeSMT([singleGate[0], singleGate[0], singleGate[0]], 2, 1, 5000)
+assert.ok(smtResult && smtResult.length <= 1)
+assert.equal(functionKey(smtResult!, 2), functionKey(singleGate, 2))
+console.log('Template, semantic generation, meet-in-the-middle, equality graph and SMT regressions passed')
+
+const { migrateDatabase } = await import('./migrate.js')
+const dbDirectory = await mkdtemp(join(tmpdir(), 'deobfuscator-migration-'))
+const sourcePath = join(dbDirectory, 'legacy.db'), destinationPath = join(dbDirectory, 'compact.db')
+const legacy = new sqlite3.Database(sourcePath)
+const legacyRun = (sql: string, params: unknown[] = []) => new Promise<void>((resolve, reject) => legacy.run(sql, params, error => error ? reject(error) : resolve()))
+try {
+	await legacyRun('CREATE TABLE InputOutputReplacers (ioIdentifier TEXT PRIMARY KEY, replacerGates TEXT NOT NULL)')
+	const { hashBooleanArrays } = await import('./utils.js')
+	const inputs = generateCombinations(2)
+	for (const gates of [[], [not0], [singleGate[0]]]) await legacyRun('INSERT INTO InputOutputReplacers VALUES (?, ?)', [hashBooleanArrays(inputs.flatMap(input => evalCircuit(gates, input))), encodeGates(gates).toString('latin1')])
+	await new Promise<void>((resolve, reject) => legacy.close(error => error ? reject(error) : resolve()))
+	const originalBytes = readFileSync(sourcePath)
+	assert.equal(await migrateDatabase(sourcePath, destinationPath, 2, 2), 3)
+	assert.deepEqual(readFileSync(sourcePath), originalBytes)
+	await assert.rejects(migrateDatabase(sourcePath, destinationPath, 2, 2), /new destination/)
+	const compactDb = new sqlite3.Database(destinationPath)
+	try {
+		const rows = await new Promise<any[]>((resolve, reject) => compactDb.all('SELECT * FROM InputOutputReplacers', (error, rows) => error ? reject(error) : resolve(rows)))
+		assert.equal(rows.length, 3)
+		for (const row of rows) {
+			assert.ok(Buffer.isBuffer(row.ioIdentifier) && Buffer.isBuffer(row.replacerGates))
+			assert.deepEqual(row.ioIdentifier, truthKey(inputs.flatMap(input => evalCircuit(decodeGates(row.replacerGates), input))))
+		}
+	} finally { await new Promise<void>(resolve => compactDb.close(() => resolve())) }
+	await assert.rejects(migrateDatabase(sourcePath, join(dbDirectory, 'wrong-wires.db'), 3, 2), /Invalid legacy entry/)
+	assert.equal(existsSync(join(dbDirectory, 'wrong-wires.db')), false)
+	assert.equal(existsSync(join(dbDirectory, 'wrong-wires.db.building')), false)
+	const configPath = join(dbDirectory, 'settings.json')
+	const { writeFileSync } = await import('node:fs')
+	writeFileSync(configPath, JSON.stringify({ files: { databaseDirectory: dbDirectory }, database: { format: 'compact', wires: 2, gates: 2, semanticGeneration: true, generationStates: 10000, memoryMapBytes: 4096 }, synthesis: { meetInMiddle: true, attemptEvery: 1 } }))
+	const script = `
+		import {createRainbowTable,getReplacersByIds} from ${JSON.stringify(new URL('./rainbowtable.js', import.meta.url).href)};
+		import {generateCombinations,ioHash} from ${JSON.stringify(new URL('./utils.js', import.meta.url).href)};
+		import {LimitedMap} from ${JSON.stringify(new URL('./limitedMap.js', import.meta.url).href)};
+		import {advancedRewrite} from ${JSON.stringify(new URL('./strategies.js', import.meta.url).href)};
+		const db=await createRainbowTable(2,2);
+		const matches=await getReplacersByIds(db,new LimitedMap(10),[ioHash(generateCombinations(2).flat())]);
+		if(matches.length!==1 || matches[0].gates.length!==0) throw Error('Compact lookup failed');
+		const not={a:0,b:0,target:0,gate_i:15};
+		const replacement=await advancedRewrite([not,not,not]);
+		if(!replacement || replacement.length!==1) throw Error('Integrated synthesis failed');
+		await new Promise((resolve,reject)=>db.close(error=>error?reject(error):resolve()));
+	`
+	execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, OPTIMIZER_CONFIG: configPath }, timeout: 15000 })
+} finally { await rm(dbDirectory, { recursive: true, force: true }) }
+console.log('Compact storage, migration, memory-map readiness and synthesis integration regressions passed')
+
+assert.equal(parseConfig({ database: { memoryMapBytes: 0 } }).database.memoryMapBytes, 0)
+assert.throws(() => parseConfig({ database: { format: 'unknown' } }))
+assert.throws(() => parseConfig({ synthesis: { maximumWires: 5 } }))

@@ -1,3 +1,4 @@
+import { semanticCircuits, decodeGates, encodeGates } from './semantic.js'
 import { join } from 'path'
 import { config } from './config.js'
 import sqlite3 from 'sqlite3'
@@ -9,30 +10,20 @@ import { LimitedMap } from './limitedMap.js'
 export const RAINBOW_TABLE_WIRES = config.database.wires
 export const RAINBOW_TABLE_GATES = config.database.gates
 
-const gatesToBinary = (gates: Gate[]): string => {
-	let binary = ''
-	for (const gate of gates) {
-		// Pack a and b into 2 bytes
-		binary += String.fromCharCode(gate.a)
-		binary += String.fromCharCode(gate.b)
-		// Pack target and gate_i into 1 byte, target into 4 least significant bits and gate_i into 4 most significant bits
-		binary += String.fromCharCode((gate.gate_i << 4) | (gate.target & 0x0F))
-	}
-	return binary
-}
-
-const binaryToGates = (binary: string): Gate[] => {
-	const gates: Gate[] = []
-	for (let i = 0; i < binary.length; i += 3) {
-		// Unpack a and b from 2 bytes
-		const a = binary.charCodeAt(i)
-		const b = binary.charCodeAt(i + 1)
-		// Unpack target and gate_i from 1 byte, target from 4 least significant bits and gate_i from 4 most significant bits
-		const target = binary.charCodeAt(i + 2) & 0x0F
-		const gate_i = binary.charCodeAt(i + 2) >> 4
-		gates.push({ a, b, target, gate_i })
-	}
-	return gates;
+const compact = config.database.format === 'compact'
+const keyToSql = (key: string) => compact ? Buffer.from(key, 'hex') : key
+const rowKey = (key: string | Buffer) => Buffer.isBuffer(key) ? key.toString('hex') : key
+const gatesToBinary = (gates: Gate[]) => encodeGates(gates).toString('latin1')
+const binaryToGates = decodeGates
+export const databaseFilename = (wires: number, maxGates: number) => join(config.files.databaseDirectory, `canonHashrainbowtable_${wires}_${maxGates}${compact ? '.compact' : ''}.db`)
+const readyDatabases = new WeakMap<sqlite3.Database, Promise<void>>()
+export const databaseReady = (db: sqlite3.Database) => readyDatabases.get(db) ?? Promise.resolve()
+const tuneDatabase = (db: sqlite3.Database) => {
+	readyDatabases.set(db, new Promise<void>((resolve, reject) => {
+		db.once('error', reject)
+		db.run(`PRAGMA mmap_size=${config.database.memoryMapBytes}`, error => error ? reject(error) : resolve())
+	}))
+	return db
 }
 
 // Create table if not exists
@@ -40,9 +31,9 @@ const createTable = (db: sqlite3.Database) => {
 	return new Promise<void>((resolve, reject) => {
 		db.run(`
 			CREATE TABLE IF NOT EXISTS InputOutputReplacers (
-				ioIdentifier TEXT PRIMARY KEY,
-				replacerGates TEXT NOT NULL
-			);
+				ioIdentifier ${compact ? 'BLOB' : 'TEXT'} PRIMARY KEY,
+				replacerGates ${compact ? 'BLOB' : 'TEXT'} NOT NULL
+			) ${compact ? 'WITHOUT ROWID' : ''};
 		`, (err: unknown) => {
 			if (err) {
 				reject(err)
@@ -60,15 +51,16 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string
 	const ios = Array.from(replacers.keys())
 
 	const chunkSize = config.database.queryBatchSize
-	
+
 	const dbPromises: Promise<{ ioIdentifier: string, replacerGates: string }[]>[] = []
 	for (let i = 0; i < ios.length; i += chunkSize) {
 		const chunk = ios.slice(i, Math.min(i + chunkSize, ios.length))
 		dbPromises.push(new Promise<{ ioIdentifier: string, replacerGates: string }[]>((resolve, reject) => {
-			db.all('SELECT ioIdentifier, replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk, (err: unknown, rows: any[]) => {
+			db.all('SELECT ioIdentifier, replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk.map(keyToSql), (err: unknown, rows: any[]) => {
 				if (err) {
 					reject(err)
 				} else {
+					rows.forEach(row => { row.ioIdentifier = rowKey(row.ioIdentifier) })
 					const results = rows.map((row: any) => {
 						if (row === undefined) return undefined
 						return { ioIdentifier: row.ioIdentifier, replacerGates: row.replacerGates }
@@ -116,7 +108,7 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string
 			const stmt = db.prepare('INSERT OR REPLACE INTO InputOutputReplacers (ioIdentifier, replacerGates) VALUES (?, ?)')
 			for (const insert of chunk) {
 				await new Promise<void>((resolve, reject) => {
-					stmt.run(...insert, (err: unknown) => {
+					stmt.run(keyToSql(insert[0]), compact ? Buffer.from(insert[1], 'latin1') : insert[1], (err: unknown) => {
 						if (err) {
 							reject(err)
 						} else {
@@ -166,11 +158,12 @@ export const getReplacerById = async (db: sqlite3.Database, ioIdentifierCache: L
 		return cacheHit
 	}
 	return new Promise<Gate[] | null>((resolve, reject) => {
-		db.get('SELECT * FROM InputOutputReplacers WHERE ioIdentifier = ?', [ioIdentifier], (err: unknown, row: any) => {
+		db.get('SELECT * FROM InputOutputReplacers WHERE ioIdentifier = ?', [keyToSql(ioIdentifier)], (err: unknown, row: any) => {
 			if (err) {
 				reject(err)
 			} else {
 				if (row) {
+					row.ioIdentifier = rowKey(row.ioIdentifier)
 					const replacerGates = binaryToGates(row.replacerGates)
 					ioIdentifierCache.set(row.ioIdentifier, replacerGates)
 					resolve(replacerGates)
@@ -208,10 +201,11 @@ export const getReplacersByIds = async (db: sqlite3.Database, ioIdentifierCache:
     for (let i = 0; i < identifiers.length; i += chunkSize) {
         const chunk = identifiers.slice(i, i + chunkSize)
         dbPromises.push(new Promise<{ ioIdentifier: string, gates: Gate[] }[]>((resolve, reject) => {
-            db.all('SELECT ioIdentifier, replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk, (err: unknown, rows: any[]) => {
+            db.all('SELECT ioIdentifier, replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk.map(keyToSql), (err: unknown, rows: any[]) => {
                 if (err) {
                     reject(err)
                 } else {
+                    rows.forEach(row => { row.ioIdentifier = rowKey(row.ioIdentifier) })
                     const found = new Set(rows.map((row: any) => row.ioIdentifier))
                     for (const id of chunk) {
                         if (!found.has(id)) ioIdentifierCache.set(id, null)
@@ -312,8 +306,8 @@ const flushIfNeeded = async (db: sqlite3.Database, rainbowMap: Map<string, Input
 }
 
 export const getRainbowTable = (wires: number, maxGates: number) => {
-	const filename = join(config.files.databaseDirectory, `canonHashrainbowtable_${ wires }_${ maxGates }.db`)
-	const db = new sqlite3.Database(filename)
+	const filename = databaseFilename(wires, maxGates)
+	const db = tuneDatabase(new sqlite3.Database(filename))
 	return db
 }
 
@@ -333,19 +327,25 @@ export function collectVariables(gates: Gate[]) {
 }
 
 export const createRainbowTable = async (wires: number, maxGates: number) => {
-	const filename = join(config.files.databaseDirectory, `canonHashrainbowtable_${ wires }_${ maxGates }.db`)
-	const db = new sqlite3.Database(filename)
+	const filename = databaseFilename(wires, maxGates)
+	const db = tuneDatabase(new sqlite3.Database(filename))
+	await databaseReady(db)
 	await createTable(db)
-	if (!await isEmpty(db)) {
+	const get = (sql: string) => new Promise<any>((resolve, reject) => db.get(sql, (error, row) => error ? reject(error) : resolve(row)))
+	const run = (sql: string) => new Promise<void>((resolve, reject) => db.run(sql, error => error ? reject(error) : resolve()))
+	await run('CREATE TABLE IF NOT EXISTS GenerationStatus (id INTEGER PRIMARY KEY, complete INTEGER NOT NULL)')
+	const status = await get('SELECT complete FROM GenerationStatus WHERE id=1')
+	if (!await isEmpty(db) && status?.complete !== 0) {
 		logTimed(`using rainbowtable ${ filename }`)
 		return db
 	}
+	await run('INSERT OR REPLACE INTO GenerationStatus VALUES (1, 0)')
 	logTimed(`creating rainbow table. Wires: ${ wires } Gates: ${ maxGates }`)
 	let rainbowMap = new Map<string, InputOutputReplacer>()
 	const combinations = generateCombinations(wires)
 	const addgates = (gates: Gate[]) => {
 		const uniqueVars = collectVariables(gates)
-		if (!containsAllNumbersInOrder(uniqueVars)) return
+		if (!config.database.semanticGeneration && !containsAllNumbersInOrder(uniqueVars)) return
 		const ioId = ioHash(combinations.flatMap((input) => evalCircuit(gates, input)))
 		const old = rainbowMap.get(ioId)
 		const newEntry = { ioIdentifier: ioId, replacerGates: gates }
@@ -356,44 +356,55 @@ export const createRainbowTable = async (wires: number, maxGates: number) => {
 	const allGates = Array.from(generateAllGates(wires))
 	logTimed(`different gates: ${ allGates.length }`)
 	addgates([])
-	// Iterative stack-based DFS to avoid nested loops
-	type StackEntry = {
-		sequence: Gate[],
-		depth: number
+	if (config.database.semanticGeneration) {
+		try {
+			for (const gates of semanticCircuits(wires, maxGates, allGates, config.database.generationStates)) {
+				addgates(gates)
+				if (rainbowMap.size >= FLUSH_SIZE) await flushIfNeeded(db, rainbowMap)
+			}
+		} catch (error) { await new Promise<void>(resolve => db.close(() => resolve())); throw error }
+	} else {
+		// Iterative stack-based DFS to avoid nested loops
+		type StackEntry = {
+			sequence: Gate[],
+			depth: number
+		}
+		const stack: StackEntry[] = [{ sequence: [], depth: 0 }]
+		let lastSaved = performance.now()
+
+		while (stack.length > 0) {
+			const { sequence, depth } = stack.pop()!
+
+			// Only add sequences that are complete (i.e., depth <= maxGates)
+			if (depth <= maxGates) {
+				addgates(sequence)
+			}
+
+			// Stop if we've reached maxGates
+			if (depth >= maxGates) continue
+
+			for (const gate of allGates) {
+				const newSequence = [...sequence, gate]
+				stack.push({ sequence: newSequence, depth: depth + 1 })
+			}
+
+			if (rainbowMap.size % config.database.flushCheckEntries === 0) {
+				await flushIfNeeded(db, rainbowMap)
+			}
+
+			const now = performance.now()
+			if (now - lastSaved >= config.timing.databaseLogSeconds * 1000) {
+				logTimed(`rainbowsize: ${rainbowMap.size}`)
+				lastSaved = now
+			}
+		}
 	}
-	const stack: StackEntry[] = [{ sequence: [], depth: 0 }]
-	let lastSaved = performance.now()
 
-	while (stack.length > 0) {
-		const { sequence, depth } = stack.pop()!
-
-		// Only add sequences that are complete (i.e., depth <= maxGates)
-		if (depth <= maxGates) {
-			addgates(sequence)
-		}
-
-		// Stop if we've reached maxGates
-		if (depth >= maxGates) continue
-
-		for (const gate of allGates) {
-			const newSequence = [...sequence, gate]
-			stack.push({ sequence: newSequence, depth: depth + 1 })
-		}
-
-		if (rainbowMap.size % config.database.flushCheckEntries === 0) {
-			await flushIfNeeded(db, rainbowMap)
-		}
-
-		const now = performance.now()
-		if (now - lastSaved >= config.timing.databaseLogSeconds * 1000) {
-			logTimed(`rainbowsize: ${rainbowMap.size}`)
-			lastSaved = now
-		}
-	}
 	await flushIfNeeded(db, rainbowMap)
 
 	logTimed(`created rainbowtable of size: ${ rainbowMap.size }, inserting...`)
 	await storeReplacers(db, rainbowMap)
+	await run('INSERT OR REPLACE INTO GenerationStatus VALUES (1, 1)')
 	logTimed(`Done`)
 	return db
 }

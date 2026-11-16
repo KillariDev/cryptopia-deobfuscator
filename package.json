@@ -7,7 +7,8 @@
 	"scripts": {
 		"test": "npx tsc && node --max-old-space-size=16384 dist/test.js",
 		"optimize": "npx tsc && node dist/launch.js",
-		"optimize-prof": "npx tsc && node dist/launch.js --profile"
+		"optimize-prof": "npx tsc && node dist/launch.js --profile",
+		"migrate-db": "npx tsc && node dist/migrate-cli.js"
 	},
 	"keywords": [],
 	"author": "",
@@ -20,6 +21,7 @@
 	},
 	"dependencies": {
 		"d3": "^7.9.0",
-		"sqlite3": "5.1.7"
+		"sqlite3": "5.1.7",
+		"z3-solver": "^5.4.1"
 	}
 }

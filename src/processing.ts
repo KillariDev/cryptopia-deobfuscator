@@ -1,3 +1,4 @@
+import { templates, advancedRewrite } from './strategies.js'
 import { IncrementalEvaluator } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm } from './search.js'
 import { config } from './config.js'
@@ -236,6 +237,7 @@ const findExactReplacement = (variableIndexMapping: number[], mappedGates: Gate[
 const findUselessVars = (mapping: number[], gates: Gate[]) => {
 	if (mapping.length > config.search.exactMaximumWires) return undefined
 	const result = normalizedRewrites.resolve(gates, canonical => findExactReplacement(Array.from({ length: mapping.length }, (_, i) => i), canonical))
+	if (result !== undefined && config.synthesis.templates) templates.learn(gates, result)
 	return result === undefined ? undefined : reverseMapCircuit(result, mapping)
 }
 
@@ -292,8 +294,13 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 
 export const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, rainbowTableWires: number, RAINBOW_TABLE_ALL_INPUTS: boolean[][], lookup = true): Promise<{ gates: Gate[], changed: boolean }> => {
 	const prepared = new Map<number, PreparedWindow>()
-	const changes = optimizeVariables(processedGatesCache, originalGates, sliceSize, useProbabilistically, findUselessVarsSetting, lookup ? rainbowTableWires : 0, prepared)
-	if (!lookup) return changes
+	const templateResult = config.synthesis.templates ? templates.rewrite(originalGates) : originalGates
+	const changes = optimizeVariables(processedGatesCache, templateResult, sliceSize, useProbabilistically, findUselessVarsSetting, lookup ? rainbowTableWires : 0, prepared)
+	changes.changed ||= templateResult !== originalGates
+	if (!lookup) {
+		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return { gates: candidate, changed: true } }
+		return changes
+	}
 	const gates = changes.gates
 	const queries: { gatesHash: string, ioIdentifier: string, start: number, end: number, variableIndexMapping: number[], mappedGates: Gate[] }[] = []
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
@@ -338,7 +345,10 @@ export const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: 
 			})
 		}
 	}
-	if (replacements.length === 0) return changes
+	if (replacements.length === 0) {
+		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return { gates: candidate, changed: true } }
+		return changes
+	}
 	const newCircuit = replace(gates, replacements)
 	const diff = gates.length - newCircuit.length
 	if (diff > 0) logVerbose(`Rainbow: Removed ${ diff } gates with slice ${ sliceSize }`)
