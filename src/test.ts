@@ -43,6 +43,7 @@ const { createDependencyGraph } = await import('./lineswapper.js')
 const { shuffleRowsWithDependentGateSwap, optimize, createOptimizerCaches } = await import('./processing.js')
 const { LimitedMap } = await import('./limitedMap.js')
 const { getReplacersByIds, isEmpty } = await import('./rainbowtable.js')
+const { RainbowPortfolio } = await import('./rainbow-portfolio.js')
 const { default: sqlite3 } = await import('sqlite3')
 const { WorkerPool, configuredWorkerCount } = await import('./threads.js')
 
@@ -92,13 +93,14 @@ assert.equal(await isEmpty(db), false)
 const cache = new LimitedMap<string, Gate[] | null>(100)
 assert.deepEqual(await getReplacersByIds(db, cache, ['00', '00', 'ff']), [{ ioIdentifier: 'ff', gates: [] }])
 assert.equal(cache.get('00'), null)
+const testPortfolio = new RainbowPortfolio([{ db, wires: 4, gates: 5 }])
 const optimizerCaches = createOptimizerCaches()
 const singleGate = [{ a: 0, b: 0, target: 1, gate_i: 3 }]
 for (let round = 0; round < 2; round++) {
-	const result = await optimize(db, singleGate, 4, 'test', true, 4, optimizerCaches, 1)
+	const result = await optimize(testPortfolio, singleGate, 4, 'test', true, optimizerCaches, 1)
 	assert.deepEqual(calculateAllOutputsArray(result!, generateCombinations(4)), calculateAllOutputsArray(singleGate, generateCombinations(4)))
 }
-assert.deepEqual(await optimize(db, [], 4, 'test', true, 4, optimizerCaches, 1), [])
+assert.deepEqual(await optimize(testPortfolio, [], 4, 'test', true, optimizerCaches, 1), [])
 await new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
 // A cached miss and hit must work even after the database is closed.
 assert.deepEqual(await getReplacersByIds(db, cache, ['00', 'ff']), [{ ioIdentifier: 'ff', gates: [] }])
@@ -318,7 +320,7 @@ assert.deepEqual(parseConfig(JSON.parse(readFileSync(new URL('../solver.config.j
 const custom = parseConfig({ timing: { summarySeconds: 10, improvedRoundMinutes: 2 }, workers: { maximum: 3 }, logging: { verbose: true } })
 assert.equal(custom.timing.summarySeconds, 10)
 assert.equal(custom.workers.maximum, 3)
-assert.equal(custom.database.wires, 4)
+assert.deepEqual(custom.database.tables, defaults.database.tables)
 assert.equal(defaults.timing.summarySeconds, 30)
 for (const invalid of [{ files: { working: 'job.json' } }, { files: { original: 'source.json' } }, null, [], { typo: {} }, { timing: { typo: 5 } }, { workers: { maximum: 0 } }, { workers: { maximum: 1.5 } }, { timing: { summarySeconds: '30' } }, { search: { subsetMinimum: 100, subsetMaximum: 2 } }, { timing: { improvedRoundMinutes: 30 } }, { files: { workerDirectory: '../elsewhere' } }, JSON.parse('{"__proto__":{}}')]) {
 	assert.throws(() => parseConfig(invalid))
@@ -437,6 +439,7 @@ console.log('Adaptive, incremental, packed, normalized-cache, pruning and balanc
 const { massOptimizeStep, optimizeSubset } = await import('./processing.js')
 const { ioHash } = await import('./utils.js')
 const integrationDb = new sqlite3.Database(':memory:')
+const integrationPortfolio = new RainbowPortfolio([{ db: integrationDb, wires: 4, gates: 5 }])
 const runSql = (sql: string, params: unknown[] = []) => new Promise<void>((resolve, reject) => integrationDb.run(sql, params, error => error ? reject(error) : resolve()))
 try {
 	await runSql('CREATE TABLE InputOutputReplacers (ioIdentifier BLOB PRIMARY KEY, replacerGates BLOB NOT NULL)')
@@ -444,12 +447,12 @@ try {
 	await runSql('INSERT INTO InputOutputReplacers VALUES (?, ?)', [Buffer.from(ioHash(inputs.flat()), 'hex'), Buffer.alloc(0)])
 	const cnot = { a: 1, b: 0, target: 0, gate_i: 3 }
 	const circuit = Array.from({ length: 8 }, () => ({ ...cnot }))
-	const result = await massOptimizeStep(integrationDb, new LimitedMap(100), new LimitedMap(100), circuit, 2, false, false, 4, inputs)
+	const result = await massOptimizeStep(integrationPortfolio, new LimitedMap(100), new LimitedMap(100), circuit, 2, false, false)
 	assert.ok(result.gates.length < circuit.length)
 	assert.deepEqual(inputs.map(input => evalCircuit(result.gates, input)), inputs.map(input => evalCircuit(circuit, input)))
 	for (const offset of [0, 4]) {
 		const identity = Array.from({ length: 6 }, (_, i) => ({ a: 0, b: 0, target: offset + i % 2, gate_i: 0 }))
-		const exact = await massOptimizeStep(integrationDb, new LimitedMap(100), new LimitedMap(100), identity, 3, false, true, 4, inputs, false)
+		const exact = await massOptimizeStep(integrationPortfolio, new LimitedMap(100), new LimitedMap(100), identity, 3, false, true, false)
 		assert.ok(exact.gates.length < identity.length)
 		assert.deepEqual(generateCombinations(6).map(input => evalCircuit(exact.gates, input)), generateCombinations(6).map(input => evalCircuit(identity, input)))
 	}
@@ -460,8 +463,8 @@ try {
 	const counters = () => ({ passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const })
 	const first = counters(), second = counters()
 	const unchanged = circuit.map((gate, i) => ({ ...gate, a: i % 2, target: 1 - i % 2 }))
-	await optimizeSubset(integrationDb, unchanged, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, first, () => {}, tested, 'rainbow')
-	await optimizeSubset(integrationDb, unchanged, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, second, () => {}, tested, 'rainbow')
+	await optimizeSubset(integrationPortfolio, unchanged, lookups, processed, 3, 2, 'heavy', () => false, first, () => {}, tested, 'rainbow')
+	await optimizeSubset(integrationPortfolio, unchanged, lookups, processed, 3, 2, 'heavy', () => false, second, () => {}, tested, 'rainbow')
 	assert.ok(first.checks > 0)
 	assert.equal(second.checks, 0)
 } finally { await new Promise<void>((resolve, reject) => integrationDb.close(error => error ? reject(error) : resolve())) }
@@ -781,3 +784,106 @@ secondWindow.remember(bounded,0,1)
 assert.equal(secondWindow.seen(bounded,0,1), true)
 assert.equal(firstWindow.seen(bounded,0,1), false)
 console.log('Out-of-order jobs, cooperative queue cancellation, SQL request sharing and window-cache bounds passed')
+
+// Portfolio routing must use each table's truth-table width and its own cache namespace.
+{
+const { formatRainbowActivity } = await import('./logging.js')
+const specs = [{ wires: 5, gates: 2 }, { wires: 3, gates: 3 }, { wires: 4, gates: 2 }, { wires: 3, gates: 2 }]
+const tableDbs = specs.map(spec => ({ ...spec, db: new sqlite3.Database(':memory:') }))
+const portfolio = new RainbowPortfolio(tableDbs)
+const portfolioCache = new LimitedMap<string, Gate[] | null>(1000)
+const not0 = { a: 0, b: 0, target: 0, gate_i: 15 }
+const cn = { a: 1, b: 0, target: 0, gate_i: 3 }
+const and012 = { a: 0, b: 1, target: 2, gate_i: 1 }
+const and234 = { a: 2, b: 3, target: 4, gate_i: 1 }
+const putPortfolio = async (wires: number, depth: number, gates: Gate[], stored = gates) => {
+	const table = tableDbs.find(table => table.wires === wires && table.gates === depth)!
+	await runSQL(table.db, 'INSERT OR REPLACE INTO InputOutputReplacers VALUES (?,?)', [Buffer.from(ioHash(calculateAllOutputsArray(gates, generateCombinations(wires))), 'hex'), encodeGates(stored)])
+}
+try {
+	for (const table of tableDbs) await runSQL(table.db, 'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
+	await putPortfolio(3, 2, [not0])
+	await putPortfolio(3, 3, [cn])
+	await putPortfolio(4, 2, [cn])
+	const windows = [{ wires: 1, mappedGates: [not0, not0, not0] }, { wires: 2, mappedGates: [cn, cn, cn] }]
+	const first = await portfolio.findReplacements(windows, portfolioCache)
+	assert.equal(first.get(0)?.table, '3/2')
+	assert.equal(first.get(1)?.table, '3/3')
+	assert.deepEqual(portfolio.statistics().map(stat => stat.windows), [2, 1, 0, 0])
+	assert.deepEqual(await portfolio.findReplacements(windows, portfolioCache), first)
+	for (const [index, match] of first) {
+		assert.equal(functionKey(match.gates, 5), functionKey(windows[index].mappedGates, 5))
+		portfolio.recordApplied(match, windows[index].mappedGates.length)
+	}
+	assert.deepEqual(portfolio.statistics().map(stat => stat.gatesRemoved), [2, 2, 0, 0])
+	const summary = formatRainbowActivity([{ done: false, updatedAtMs: 0, activity: { ...status.activity, rainbowTables: portfolio.statistics() } }])
+	assert.match(summary, /3\/2: 2 gates removed, 1 rewrites/)
+	assert.match(summary, /lookup worker-seconds/)
+	// A miss in both three-wire tables can still match after widening to four wires.
+	await putPortfolio(4, 2, [cn, and012])
+	const wider = await portfolio.findReplacements([{ wires: 3, mappedGates: [cn, and012, not0, not0] }], portfolioCache)
+	assert.equal(wider.get(0)?.table, '4/2')
+	// Five-wire windows bypass all smaller tables, and an exact-size window is scanned.
+	await putPortfolio(5, 2, [and012, and234])
+	portfolio.resetStatistics()
+	const fiveWindow = [and012, and234, not0, not0]
+	const templatesEnabled = config.synthesis.templates
+	try {
+		config.synthesis.templates = false
+		const result = await massOptimizeStep(portfolio, portfolioCache, new LimitedMap(100), fiveWindow, 4, false, false)
+		assert.deepEqual(result.gates, [and012, and234])
+		assert.equal(functionKey(result.gates, 5), functionKey(fiveWindow, 5))
+	} finally { config.synthesis.templates = templatesEnabled }
+	assert.deepEqual(portfolio.statistics().map(stat => stat.windows), [0, 0, 0, 1])
+	assert.equal(portfolio.statistics()[3].gatesRemoved, 2)
+	assert.equal((await portfolio.findReplacements([{ wires: 6, mappedGates: fiveWindow }], portfolioCache)).size, 0)
+	// Non-improving hits and hits borrowing absent wires must allow fallback.
+	await putPortfolio(3, 2, [], [not0, not0])
+	await putPortfolio(3, 3, [])
+	const identityWindow = { wires: 1, mappedGates: [not0, not0] }
+	assert.equal((await portfolio.findReplacements([identityWindow], new LimitedMap(100))).get(0)?.table, '3/3')
+	const not2 = { ...not0, target: 2 }
+	await putPortfolio(3, 2, [], [not2, not2])
+	assert.equal((await portfolio.findReplacements([{ wires: 1, mappedGates: [not0, not0, not0, not0] }], new LimitedMap(100))).get(0)?.table, '3/3')
+	// The same raw ID can be a miss in one table and a hit in another at the same width.
+	const shared = new LimitedMap<string, Gate[] | null>(100)
+	const cnKey = ioHash(calculateAllOutputsArray([cn], generateCombinations(3)))
+	assert.deepEqual(await getReplacersByIds(tableDbs[3].db, shared, [cnKey], '3/2:'), [])
+	assert.equal((await getReplacersByIds(tableDbs[1].db, shared, [cnKey], '3/3:')).length, 1)
+} finally { await portfolio.close() }
+for (const tables of [[], null, {}, [null], [1], [{ wires: 0, gates: 1 }], [{ wires: 9, gates: 1 }], [{ wires: 3, gates: 0 }], [{ wires: 3.5, gates: 2 }], [{ wires: 3, gates: 2.5 }], [{ wires: '3', gates: 2 }], [{ wires: 3 }], [{ wires: 3, gates: 2, typo: true }], [{ wires: 3, gates: 2 }, { wires: 3, gates: 2 }]]) {
+	assert.throws(() => parseConfig({ database: { tables } }))
+}
+const tableSettings = [{ wires: 2, gates: 2 }, { wires: 2, gates: 3 }]
+const parsedTables = parseConfig({ database: { tables: tableSettings } })
+tableSettings[0].gates = 99
+assert.equal(parsedTables.database.tables[0].gates, 2)
+assert.throws(() => parseConfig({ database: { tables: [{ wires: 8, gates: 1 }] }, validation: { maximumWires: 7 } }))
+console.log('Rainbow portfolio routing, fallback, cache isolation, contribution and configuration regressions passed')
+}
+
+// The startup lifecycle generates every missing table and reuses complete files.
+{
+	const { initializeRainbowTables, openRainbowPortfolio } = await import('./rainbow-portfolio.js')
+	const { databaseFilename } = await import('./rainbowtable.js')
+	const directory = await mkdtemp(join(tmpdir(), 'deobfuscator-portfolio-'))
+	const tables = [{ wires: 2, gates: 1 }, { wires: 2, gates: 2 }]
+	try {
+		process.chdir(directory)
+		await initializeRainbowTables(tables)
+		const snapshots = tables.map(table => readFileSync(databaseFilename(table.wires, table.gates)))
+		await initializeRainbowTables(tables)
+		for (const [i, table] of tables.entries()) assert.deepEqual(readFileSync(databaseFilename(table.wires, table.gates)), snapshots[i])
+		const opened = await openRainbowPortfolio(tables)
+		try {
+			const cn = { a: 1, b: 0, target: 0, gate_i: 3 }
+			const result = await opened.findReplacements([{ wires: 2, mappedGates: [cn, cn, cn] }], new LimitedMap(100))
+			assert.equal(result.get(0)?.table, '2/1')
+			assert.equal(functionKey(result.get(0)!.gates, 2), functionKey([cn], 2))
+		} finally { await opened.close() }
+	} finally {
+		process.chdir(originalCwd)
+		await rm(directory, { recursive: true, force: true })
+	}
+}
+console.log('Multi-table generation, reuse and connection lifecycle regressions passed')

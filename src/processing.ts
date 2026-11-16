@@ -5,11 +5,10 @@ import { templates, advancedRewrite } from './strategies.js'
 import { IncrementalEvaluator } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm } from './search.js'
 import { config } from './config.js'
-import sqlite3 from 'sqlite3'
 import { formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
 import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
 import { Gate } from './types.js'
-import { getReplacersByIds } from './rainbowtable.js'
+import { RainbowPortfolio } from './rainbow-portfolio.js'
 import { LimitedMap } from './limitedMap.js'
 import { WorkerPool, configuredWorkerCount } from './threads.js'
 import { createDependencyGraph } from './lineswapper.js'
@@ -253,7 +252,7 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 	let uselessVarsFound = 0
 	let uselessVarsFoundProb = 0
 	if (sliceSize <= 2 || !findUselessVarsSetting) return { gates, changed: false }
-	for (let a = 0; a < gates.length - sliceSize; a++) {
+	for (let a = 0; a <= gates.length - sliceSize; a++) {
 		const start = a
 		const end = a + sliceSize
 		if (fingerprints.seen(processedGatesCache, start, end)) continue
@@ -288,10 +287,10 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 	return { gates: newCircuit, changed: true }
 }
 
-export const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, rainbowTableWires: number, RAINBOW_TABLE_ALL_INPUTS: boolean[][], lookup = true): Promise<{ gates: Gate[], changed: boolean }> => {
+export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, lookup = true): Promise<{ gates: Gate[], changed: boolean }> => {
 	const prepared = new Map<number, PreparedWindow>()
 	const templateResult = config.synthesis.templates ? templates.rewrite(originalGates) : originalGates
-	const changes = optimizeVariables(processedGatesCache, templateResult, sliceSize, useProbabilistically, findUselessVarsSetting, lookup ? rainbowTableWires : 0, prepared)
+	const changes = optimizeVariables(processedGatesCache, templateResult, sliceSize, useProbabilistically, findUselessVarsSetting, lookup ? tables.maximumWires : 0, prepared)
 	changes.changed ||= templateResult !== originalGates
 	if (!lookup) {
 		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return { gates: candidate, changed: true } }
@@ -299,9 +298,9 @@ export const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: 
 	}
 	const gates = changes.gates
 	const fingerprints = new WindowFingerprints(gates)
-	const queries: { ioIdentifier: string, start: number, end: number, variableIndexMapping: number[], mappedGates: Gate[] }[] = []
+	const queries: { start: number, end: number, variableIndexMapping: number[], mappedGates: Gate[] }[] = []
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
-	for (let a = 0; a < gates.length - sliceSize; a++) {
+	for (let a = 0; a <= gates.length - sliceSize; a++) {
 		const start = a
 		const end = a + sliceSize
 		if (fingerprints.seen(processedGatesCache, start, end)) continue
@@ -309,26 +308,23 @@ export const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: 
 		const cached = changes.changed ? undefined : prepared.get(start)
 		const sliceGates = cached ? [] : gates.slice(start, end)
 		const variableIndexMapping = cached?.variableIndexMapping ?? mapVariablesToIndexes(sliceGates)
-		if (variableIndexMapping.length <= rainbowTableWires) {
+		if (variableIndexMapping.length <= tables.maximumWires) {
 			const mappedGates = cached?.mappedGates ?? mapCircuit(sliceGates, variableIndexMapping)
-			const allOutputs = calculateAllOutputsArray(mappedGates, RAINBOW_TABLE_ALL_INPUTS)
-			const ioIdentifier = ioHash(allOutputs)
-			queries.push({ ioIdentifier, start, end, variableIndexMapping, mappedGates })
+			queries.push({ start, end, variableIndexMapping, mappedGates })
 		}
 	}
-	const rainbowMatches = await getReplacersByIds(db, ioIdentifierCache, queries.map((x) => x.ioIdentifier))
-	const rainbowMap = new Map<String, Gate[]>()
-	rainbowMatches.forEach((entry) => { rainbowMap.set(entry.ioIdentifier, entry.gates) })
+	const rainbowMatches = await tables.findReplacements(queries.map(query => ({ mappedGates: query.mappedGates, wires: query.variableIndexMapping.length })), ioIdentifierCache)
 	let currentIndex = 0
-	for (const query of queries) {
-		const match = rainbowMap.get(query.ioIdentifier)
-		if (!match || match.flatMap(getVars).some(wire => wire >= query.variableIndexMapping.length) || !isReplacementSimpler(match, query.mappedGates)) {
+	for (const [index, query] of queries.entries()) {
+		const match = rainbowMatches.get(index)
+		if (!match) {
 			fingerprints.remember(processedGatesCache, query.start, query.end)
 			continue
 		}
 		if (query.start < currentIndex) continue
 		currentIndex = query.end
-		replacements.push({ start: query.start, end: query.end - 1, replacement: reverseMapCircuit(match, query.variableIndexMapping) })
+		tables.recordApplied(match, query.mappedGates.length)
+		replacements.push({ start: query.start, end: query.end - 1, replacement: reverseMapCircuit(match.gates, query.variableIndexMapping) })
 	}
 	if (replacements.length === 0) {
 		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return { gates: candidate, changed: true } }
@@ -482,7 +478,7 @@ function appendMissingNumbers(arr: number[], n: number): number[] {
 	return [...Array.from(allNumbers), ...arr]
 }
 
-export const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, rainbowTableWires: number, rainbowTableAllInputs: boolean[][], activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method']): Promise<Gate[]> => {
+export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method']): Promise<Gate[]> => {
 	const useProbabilistically = method !== 'rainbow' && phase === 'heavy' && config.search.probabilistic
 	const findUselessVarsSetting = method !== 'rainbow' && config.search.variableElimination
 	let regenerateGraph = false
@@ -514,7 +510,7 @@ export const optimizeSubset = async (db: sqlite3.Database, slicedVersion: Gate[]
 					}
 					const slice = sliceToUse
 					activity.checks++
-					const optimizationOutput = await massOptimizeStep(db, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, rainbowTableWires, rainbowTableAllInputs, method !== 'variables')
+					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables')
 					if (optimizationOutput.changed) {
 						subsetChanged = true
 						activity.improvements++
@@ -554,7 +550,7 @@ export const createOptimizerCaches = () => ({
 	methodCaches: new Map<string, LimitedMap<string, boolean>>(),
 })
 
-export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, rainbowTableWires: number, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: () => boolean, wantsSnapshot?: (gates: number) => boolean) => {
+export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: () => boolean, wantsSnapshot?: (gates: number) => boolean) => {
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	optimizedVersion = gateSimplifier(optimizedVersion)
@@ -562,7 +558,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	let lastSaved = performance.now()
 	const { ioIdentifierCache, processedGatesCache } = caches
 	
-	const rainbowTableAllInputs = generateCombinations(rainbowTableWires)
+	tables.resetStatistics()
 	let subsetSize = getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1)
 	let maxSlice = getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1)
 	let phase: 'simplest' | 'heavy' = 'heavy'
@@ -571,17 +567,23 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	const activity: WorkerActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
 	let lastProgress = performance.now()
 	let candidateParts = new LazyCircuit([optimizedVersion])
-	onProgress?.(optimizedVersion.length, { ...activity }, optimizedVersion)
+	onProgress?.(optimizedVersion.length, { ...activity, rainbowTables: tables.statistics() }, optimizedVersion)
+	const finishWorker = () => {
+		activity.stage = 'verifying'
+		onProgress?.(optimizedVersion.length, { ...activity, rainbowTables: tables.statistics() }, optimizedVersion)
+		verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
+		return optimizedVersion
+	}
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
 		if (onProgress && endTime - lastProgress >= config.timing.workerReportSeconds * 1000) {
-			onProgress(candidateParts.length, { ...activity }, wantsSnapshot && !wantsSnapshot(candidateParts.length) ? undefined : candidateParts.materialize())
+			onProgress(candidateParts.length, { ...activity, rainbowTables: tables.statistics() }, wantsSnapshot && !wantsSnapshot(candidateParts.length) ? undefined : candidateParts.materialize())
 			lastProgress = endTime
 		}
 		return shouldFinish?.() === true || endTime - lastSaved >= roundDurationMs
 	}
 	while (true) {
-		if (workerMode && optimizedVersion.length === 0) return optimizedVersion
+		if (workerMode && optimizedVersion.length === 0) return finishWorker()
 		//shuffleRows(optimizedVersion, 20)
 		let method: SearchArm['method'] = 'all'
 		if (config.search.adaptive) {
@@ -605,7 +607,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 		const chunked = chunkArray(optimizedVersion, nChunks)
 		candidateParts = new LazyCircuit(chunked)
 		await Promise.all(chunked.map(async (data, index) => {
-			const result = await optimizeSubset(db, data, ioIdentifierCache, methodCache!, subsetSize, maxSlice, phase, timeToEndWorker, rainbowTableWires, rainbowTableAllInputs, activity, gates => {
+			const result = await optimizeSubset(tables, data, ioIdentifierCache, methodCache!, subsetSize, maxSlice, phase, timeToEndWorker, activity, gates => {
 				candidateParts.update(index, gates)
 				timeToEndWorker()
 			}, caches.testedSubsets, method)
@@ -635,10 +637,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 		if (workerMode) {
 			if (timeToEndWorker()) {
 				logVerbose(`Total Removed Gates Since Terminating: ${ gatesRemoved }`)
-				activity.stage = 'verifying'
-				onProgress?.(optimizedVersion.length, { ...activity }, optimizedVersion)
-				verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
-				return optimizedVersion
+				return finishWorker()
 			}
 		} else {
 			if (gatesRemoved > 0) {

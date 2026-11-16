@@ -63,8 +63,20 @@
     "windowKeyBytes": 16777216
   },
   "database": {
-    "wires": 4,
-    "gates": 5,
+    "tables": [
+      {
+        "wires": 3,
+        "gates": 6
+      },
+      {
+        "wires": 4,
+        "gates": 5
+      },
+      {
+        "wires": 5,
+        "gates": 2
+      }
+    ],
     "queryBatchSize": 900,
     "insertBatchSize": 1000000,
     "memoryMapBytes": 268435456,

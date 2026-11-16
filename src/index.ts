@@ -1,5 +1,5 @@
 import { logTimed } from './utils.js'
-import { createRainbowTable, RAINBOW_TABLE_GATES, RAINBOW_TABLE_WIRES } from './rainbowtable.js'
+import { initializeRainbowTables } from './rainbow-portfolio.js'
 import { join, parse } from 'path'
 import { splitTaskAndRun } from './processing.js'
 import { loadJob, logJob } from './job.js'
@@ -7,9 +7,8 @@ import { loadJob, logJob } from './job.js'
 const run = async (pathToFileWithoutExt: string, original: string) => {
 	const circuits = loadJob(pathToFileWithoutExt, original)
 	logJob(pathToFileWithoutExt, original, circuits)
-	logTimed('Initializing rainbow table...')
-	const db = await createRainbowTable(RAINBOW_TABLE_WIRES, RAINBOW_TABLE_GATES)
-	await new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
+	logTimed('Initializing rainbow table portfolio...')
+	await initializeRainbowTables()
 	try {
 		await splitTaskAndRun(pathToFileWithoutExt, original, circuits)
 	} catch(e: unknown) {

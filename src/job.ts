@@ -6,7 +6,7 @@ import { CircuitData } from './types.js'
 import { logTimed, readJsonFile } from './utils.js'
 import { outputPaths } from './storage.js'
 import { configuredWorkerCount } from './threads.js'
-import { RAINBOW_TABLE_GATES, RAINBOW_TABLE_WIRES, databaseFilename } from './rainbowtable.js'
+import { databaseFilename } from './rainbowtable.js'
 
 export const WORKER_ROUND_MS = config.timing.roundMinutes * 60_000
 export type JobCircuits = { originalCircuit: CircuitData, inputCircuit: CircuitData }
@@ -39,7 +39,7 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 		`Worker snapshots: ${resolve(dirname(paths.worker(0)))}`,
 		`Worker limit: ${configuredWorkerCount()} (${process.env.OPTIMIZER_WORKERS === undefined ? 'automatic CPU-based limit' : 'OPTIMIZER_WORKERS override'}); actual count depends on circuit size`,
 		`Round budget: ${WORKER_ROUND_MS / 60_000} minutes; worker job budget: ${config.workers.jobSeconds} seconds; up to ${config.workers.jobsPerWorker} jobs per worker (checked between optimization steps)`,
-		`Rainbow table: ${resolve(databaseFilename(RAINBOW_TABLE_WIRES, RAINBOW_TABLE_GATES))} (${RAINBOW_TABLE_WIRES} wires, up to ${RAINBOW_TABLE_GATES} gates)`,
+		...config.database.tables.map(table => `Rainbow table: ${resolve(databaseFilename(table.wires, table.gates))} (${table.wires} wires, up to ${table.gates} gates)`),
 		`Logging: ${verboseLogging() ? 'verbose' : `summaries every ${config.timing.summarySeconds} seconds (OPTIMIZER_VERBOSE=1 enables details)`}`,
 		`Optimization: probabilistic=${config.search.probabilistic}; subset sizes ${config.search.subsetMinimum}-${config.search.subsetMaximum}; slice sizes ${config.search.sliceMinimum}-${config.search.sliceMaximum}`,
 		`Validation: ${config.validation.checkpointInputs} random inputs at startup/checkpoints; probabilistic replacements use ${config.validation.probabilisticInputs} inputs`,
