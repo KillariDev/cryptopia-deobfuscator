@@ -10,8 +10,6 @@ import { runSQL, allSQL, insertRows } from './sql.js'
 import { generateOnDisk } from './disk-generation.js'
 import { GenerationEstimator, formatGenerationProgress, generationDuration, SemanticProgress } from './generation-progress.js'
 
-export const RAINBOW_TABLE_WIRES = config.database.wires
-export const RAINBOW_TABLE_GATES = config.database.gates
 export const databaseFilename = (wires: number, gates: number) => join(config.files.databaseDirectory, `rainbow_${wires}_${gates}.db`)
 const keyToSql = (key: string) => Buffer.from(key, 'hex')
 const rowKey = (key: Buffer) => key.toString('hex')
@@ -57,7 +55,7 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string
 
 
 const lookupBatchers = new WeakMap<sqlite3.Database, LookupBatcher>()
-export const getReplacersByIds = async (db: sqlite3.Database, cache: LimitedMap<string, Gate[] | null>, identifiers: string[]) => {
+export const getReplacersByIds = async (db: sqlite3.Database, cache: LimitedMap<string, Gate[] | null>, identifiers: string[], namespace = '') => {
 	let batcher = lookupBatchers.get(db)
 	if (!batcher) {
 		batcher = new LookupBatcher(config.database.queryBatchSize, config.database.lookupBatchMilliseconds, async ids => {
@@ -67,8 +65,9 @@ export const getReplacersByIds = async (db: sqlite3.Database, cache: LimitedMap<
 		lookupBatchers.set(db, batcher)
 	}
 	const resolved = await Promise.all([...new Set(identifiers)].map(async id => {
-		let gates = cache.get(id)
-		if (gates === undefined) { gates = await batcher!.get(id); cache.set(id, gates) }
+		const cacheKey = namespace + id
+		let gates = cache.get(cacheKey)
+		if (gates === undefined) { gates = await batcher!.get(id); cache.set(cacheKey, gates) }
 		return gates === null ? undefined : { ioIdentifier: id, gates }
 	}))
 	return resolved.filter((entry): entry is { ioIdentifier: string, gates: Gate[] } => entry !== undefined)
