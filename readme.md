@@ -134,3 +134,13 @@ conversion is only needed when populating the reference cache. Candidate edits
 that cannot improve the existing gate-count/wire-count/read-count ordering are
 rejected before equivalence evaluation. These heuristics change search order;
 full-scale gains depend on the circuit and database workload.
+
+### Compact status
+
+Normal updates show the remaining gate count, percentage fewer gates than the
+original, gates removed this round, checkpoint state, active workers and elapsed
+time toward the current round target. Gate reduction is not solver completion.
+Improved rounds use the five-minute target by default; otherwise the default is
+25 minutes. Finished rounds say “All workers finished” rather than showing a
+partial time-budget percentage. Routine report age and internal search counters
+are shown only in verbose mode. Delayed worker updates produce a warning.

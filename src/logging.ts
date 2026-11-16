@@ -39,3 +39,27 @@ export function formatWorkerActivity(statuses: WorkerStatus[], elapsedMs: number
 }
 
 export const shouldFinishReducedRound = (elapsedMs: number, initialCount: number, currentCount: number) => elapsedMs >= config.timing.improvedRoundMinutes * 60_000 && currentCount < initialCount
+
+const duration = (ms: number) => `${Math.floor(Math.max(0, ms) / 60_000)}m ${Math.floor(Math.max(0, ms) / 1000) % 60}s`
+export type SolverStatus = {
+	original: number
+	roundStart: number
+	candidate: number
+	saved?: number
+	statuses: WorkerStatus[]
+	elapsedMs: number
+}
+export function formatStatus(status: SolverStatus) {
+	const { original, roundStart, candidate, saved, statuses, elapsedMs } = status
+	const reduction = original > 0 ? Math.max(0, (original - candidate) / original * 100) : 0
+	const finished = statuses.filter(worker => worker.done).length
+	const targetMs = (candidate < roundStart ? config.timing.improvedRoundMinutes : config.timing.roundMinutes) * 60_000
+	const progress = Math.min(100, Math.floor(Math.max(0, elapsedMs) / targetMs * 100))
+	const round = finished === statuses.length
+		? `Round finished in ${duration(elapsedMs)}`
+		: elapsedMs >= targetMs ? 'Finishing round (time target reached; waiting for optimization steps)'
+		: `Round time: ${duration(elapsedMs)} / ${duration(targetMs)} target (${progress}% elapsed)`
+	const save = saved === undefined ? 'No checkpoint saved this run yet' : saved === candidate ? 'Checkpoint up to date' : `Checkpoint: ${saved} gates; new reductions pending save`
+	const late = statuses.filter(worker => !worker.done && elapsedMs - worker.updatedAtMs > Math.max(config.timing.summarySeconds * 2000, config.timing.workerReportSeconds * 3000)).length
+	return `Gates: ${candidate} (${reduction.toFixed(2)}% fewer than original; ${Math.max(0, roundStart - candidate)} removed this round) | ${save} | ${finished === statuses.length ? 'All workers finished' : `${statuses.length - finished} worker${statuses.length - finished === 1 ? '' : 's'} active`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
+}

@@ -2,7 +2,7 @@ import { IncrementalEvaluator } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm } from './search.js'
 import { config } from './config.js'
 import sqlite3 from 'sqlite3'
-import { formatProgress, formatWorkerActivity, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
+import { formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
 import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, hashGatesRange, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, remove, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
 import { Gate } from './types.js'
 import { getReplacersByIds } from './rainbowtable.js'
@@ -698,6 +698,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	prepareOutputDirectories()
 	let currentGates = gates.slice()
 	const wireCosts = new Map<number, number>()
+	let savedGateCount: number | undefined
 	try {
 		while(currentGates.length > 0) {
 			currentGates = gateSimplifier(currentGates)
@@ -709,17 +710,21 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
 			const stopSignal = new Int32Array(new SharedArrayBuffer(4))
-			const checkpoint = new ReductionCheckpoint(nPrevGates, snapshot => save([paths.progress(snapshot.length), paths.latest], snapshot, inputCircuit.wire_count, originalGates))
+			const checkpoint = new ReductionCheckpoint(nPrevGates, snapshot => {
+				save([paths.progress(snapshot.length), paths.latest], snapshot, inputCircuit.wire_count, originalGates)
+				savedGateCount = snapshot.length
+			})
 			let rejectCheckpoint!: (error: unknown) => void
 			const checkpointFailed = new Promise<never>((_, reject) => { rejectCheckpoint = reject })
 			let completed = 0
 			const statuses: WorkerStatus[] = approxGates.map(() => ({ updatedAtMs: 0, done: false }))
 			const report = () => {
 				const elapsed = performance.now() - lastIterationTime
-				logTimed(formatProgress(nPrevGates, candidateCounts.reduce((sum, count) => sum + count, 0), completed, nWorkers, elapsed))
-				logTimed(formatWorkerActivity(statuses, elapsed, WORKER_ROUND_MS))
+				logVerbose(formatProgress(nPrevGates, candidateCounts.reduce((sum, count) => sum + count, 0), completed, nWorkers, elapsed))
+				logVerbose(formatWorkerActivity(statuses, elapsed, WORKER_ROUND_MS))
 				const snapshot = snapshots.flat()
 				checkpoint.saveIfReduced(snapshot)
+				logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate: snapshot.length, saved: savedGateCount, statuses, elapsedMs: elapsed }))
 				if (shouldFinishReducedRound(elapsed, nPrevGates, snapshot.length) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
 					logTimed(`Improved-round target (${config.timing.improvedRoundMinutes} minutes) reached with gate reductions; finishing all workers between optimization steps.`)
@@ -754,8 +759,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			}
 			report()
 			const filename = paths.progress(currentGates.length)
-			if (!checkpoint.hasSaved) save([filename, paths.latest], currentGates, inputCircuit.wire_count, originalGates)
-			else checkpoint.saveIfReduced(currentGates)
+			if (!checkpoint.hasSaved) {
+				save([filename, paths.latest], currentGates, inputCircuit.wire_count, originalGates)
+				savedGateCount = currentGates.length
+			} else checkpoint.saveIfReduced(currentGates)
 			const gatesRemoved = nPrevGates - currentGates.length
 			const endTime = performance.now()
 			const timeDiffMins = (endTime - lastIterationTime) / 60000
