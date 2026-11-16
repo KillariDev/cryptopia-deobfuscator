@@ -1,19 +1,63 @@
 import { Worker } from 'worker_threads'
+import { availableParallelism } from 'os'
+import { Gate } from './types.js'
 
-export const runWorker = async (filename: string) => {
-	return new Promise<void>((resolve, reject) => {
-		const worker = new Worker('./dist/worker.js', { workerData: filename })
-		worker.on('message', async () => {})
+export function configuredWorkerCount() {
+	const setting = process.env.OPTIMIZER_WORKERS
+	const count = setting === undefined ? Math.min(24, availableParallelism()) : Number(setting)
+	if (!Number.isSafeInteger(count) || count < 1) throw new Error('OPTIMIZER_WORKERS must be a positive integer')
+	return count
+}
 
-		worker.on('error', (t: any) => {
-			console.log('worker error')
-			console.log(t)
-			reject(t)
+type Job = { gates: Gate[], wires: number, onProgress?: (gates: number) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
+export class WorkerPool {
+	private slots: { worker: Worker, job?: Job }[] = []
+	private queue: Job[] = []
+	private failure?: Error
+	constructor(private size: number, private workerUrl = new URL('./worker.js', import.meta.url)) {
+		if (!Number.isSafeInteger(size) || size < 1) throw new Error('Invalid worker pool size')
+	}
+	run(gates: Gate[], wires: number, onProgress?: (gates: number) => void): Promise<Gate[]> {
+		if (this.failure) return Promise.reject(this.failure)
+		return new Promise((resolve, reject) => {
+			this.queue.push({ gates, wires, onProgress, resolve, reject })
+			this.dispatch()
 		})
-
-		worker.on('exit', (code) => {
-			if (code !== 0) reject(new Error(`Worker stopped with exit code ${ code }`))
-			resolve()
-		})
-	})
+	}
+	private dispatch() {
+		while (this.queue.length) {
+			let slot = this.slots.find(slot => !slot.job)
+			if (!slot) {
+				if (this.slots.length >= this.size) return
+				const worker = new Worker(this.workerUrl)
+				slot = { worker }
+				const current = slot
+				this.slots.push(current)
+				worker.on('message', (message: { gates?: Gate[], error?: string, progress?: number }) => {
+					const job = current.job
+					if (message.progress !== undefined) { job?.onProgress?.(message.progress); return }
+					current.job = undefined
+					if (message.error) { this.fail(new Error(message.error)); job?.reject(this.failure!); return }
+					job?.resolve(message.gates!)
+					this.dispatch()
+				})
+				worker.on('error', error => this.fail(error))
+				worker.on('exit', code => {
+					if (!this.failure) this.fail(new Error(`Worker exited unexpectedly (${code})`))
+				})
+			}
+			slot.job = this.queue.shift()!
+			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires })
+		}
+	}
+	private fail(error: Error) {
+		if (this.failure) return
+		this.failure = error
+		for (const slot of this.slots) { slot.job?.reject(error); slot.job = undefined }
+		for (const job of this.queue.splice(0)) job.reject(error)
+	}
+	async close() {
+		this.fail(new Error('Worker pool closed'))
+		await Promise.all(this.slots.map(slot => slot.worker.terminate()))
+	}
 }

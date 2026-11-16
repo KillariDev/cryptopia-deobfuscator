@@ -11,19 +11,26 @@ export const createDependencyGraph = (gates: Gate[]) => {
 		const rest = vars.slice(1)
 		const targetDepends = variableDependedLast.get(target)
 		const restDepends = rest.map((variable) => variableSetLast.get(variable)).filter((variableOrUndefined): variableOrUndefined is number => variableOrUndefined !== undefined)
-		const dependOnFuture = gates.slice(currentLineNumber + 1).findIndex((futureLine) => {
-			const futureVars = getVars(futureLine)
-			const futureTarget = futureVars[0]
-			return futureVars.includes(target) || rest.includes(futureTarget)
-		})
+
 		dependencyGraph.push({
 			lineNumber: currentLineNumber,
-			dependOnPastLines: Array.from(new Set([...targetDepends ? [targetDepends] : [], ...restDepends])).sort((a, b) => a - b),
-			dependOnFutureLine: dependOnFuture < 0 ? dependOnFuture : dependOnFuture + currentLineNumber +1,
+			dependOnPastLines: Array.from(new Set([...(targetDepends !== undefined ? [targetDepends] : []), ...restDepends])).sort((a, b) => a - b),
+			dependOnFutureLine: -1,
 		})
 		vars.forEach((x) => variableDependedLast.set(x, currentLineNumber))
 		variableSetLast.set(vars[0], currentLineNumber)
 	})
+	// Nearest future access to our target, or write to any control wire.
+	const nextAccess = new Map<number, number>()
+	const nextWrite = new Map<number, number>()
+	for (let i = gates.length - 1; i >= 0; i--) {
+		const [target, ...controls] = getVars(gates[i])
+		let next = nextAccess.get(target) ?? Infinity
+		for (const wire of controls) next = Math.min(next, nextWrite.get(wire) ?? Infinity)
+		dependencyGraph[i].dependOnFutureLine = next === Infinity ? -1 : next
+		for (const wire of [target, ...controls]) nextAccess.set(wire, i)
+		nextWrite.set(target, i)
+	}
 	return dependencyGraph
 }
 
