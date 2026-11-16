@@ -133,3 +133,5 @@ rainbowtable.db
 
 # Generated rainbow databases and SQLite sidecars
 /rainbow_*.db*
+*.db
+build/config.gypi
