@@ -1,9 +1,10 @@
+import { SlidingWindowWires } from './window-wires.js'
 import { patchCircuit, LazyCircuit } from './circuit-edit.js'
 import { IncrementalGraph } from './incremental-graph.js'
 import { WindowFingerprints } from './fingerprints.js'
 import { templates, advancedRewrite } from './strategies.js'
 import { IncrementalEvaluator } from './packed.js'
-import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm } from './search.js'
+import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue } from './search.js'
 import { config } from './config.js'
 import { formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
 import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
@@ -249,23 +250,24 @@ type PreparedWindow = { variableIndexMapping: number[], mappedGates: Gate[] }
 const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, rainbowTableWires: number, prepared: Map<number, PreparedWindow>): { gates: Gate[], changed: boolean } => {
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
 	const fingerprints = new WindowFingerprints(gates)
+	let nextStart = 0
 	let uselessVarsFound = 0
 	let uselessVarsFoundProb = 0
 	if (sliceSize <= 2 || !findUselessVarsSetting) return { gates, changed: false }
-	for (let a = 0; a <= gates.length - sliceSize; a++) {
-		const start = a
-		const end = a + sliceSize
+	for (const window = new SlidingWindowWires(gates, sliceSize); window.next();) {
+		const { start, end } = window
+		if (start < nextStart) continue
 		if (fingerprints.seen(processedGatesCache, start, end)) continue
 		const sliceGates = gates.slice(start, end)
 
-		const variableIndexMapping = mapVariablesToIndexes(sliceGates) // map variables to smaller amount of wires
+		const variableIndexMapping = window.mapping() // counts are maintained across adjacent windows
 		const mappedGates = mapCircuit(sliceGates, variableIndexMapping)
 		prepared.set(start, { variableIndexMapping, mappedGates })
 		const replacement = findUselessVars(variableIndexMapping, mappedGates)
 		if (replacement !== undefined) {
 			replacements.push({ start, end: end - 1, replacement: gateSimplifier(replacement) })
 			uselessVarsFound++
-			a += sliceSize - 1 // increment by slice amount that we don't optimize the same part again
+			nextStart = end
 			continue
 		}
 		if (useProbabilistically) {
@@ -273,7 +275,7 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 			if (replacement !== undefined) {
 				replacements.push({ start, end: end - 1, replacement: gateSimplifier(replacement) })
 				uselessVarsFoundProb++
-				a += sliceSize - 1 // increment by slice amount that we don't optimize the same part again
+				nextStart = end
 				continue
 			}
 		}
@@ -288,26 +290,30 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 }
 
 export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, lookup = true): Promise<{ gates: Gate[], changed: boolean }> => {
+	const finish = (result: { gates: Gate[], changed: boolean }) => {
+		if (result.changed && config.synthesis.templates) templates.learn(originalGates, result.gates)
+		return result
+	}
 	const prepared = new Map<number, PreparedWindow>()
 	const templateResult = config.synthesis.templates ? templates.rewrite(originalGates) : originalGates
 	const changes = optimizeVariables(processedGatesCache, templateResult, sliceSize, useProbabilistically, findUselessVarsSetting, lookup ? tables.maximumWires : 0, prepared)
 	changes.changed ||= templateResult !== originalGates
 	if (!lookup) {
-		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return { gates: candidate, changed: true } }
-		return changes
+		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return finish({ gates: candidate, changed: true }) }
+		return finish(changes)
 	}
 	const gates = changes.gates
 	const fingerprints = new WindowFingerprints(gates)
 	const queries: { start: number, end: number, variableIndexMapping: number[], mappedGates: Gate[] }[] = []
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
-	for (let a = 0; a <= gates.length - sliceSize; a++) {
-		const start = a
-		const end = a + sliceSize
+	for (const window = new SlidingWindowWires(gates, sliceSize); window.next();) {
+		const { start, end } = window
+		if (window.wireCount > tables.maximumWires) continue
 		if (fingerprints.seen(processedGatesCache, start, end)) continue
 		// Window positions remain valid only when the variable pass made no changes.
 		const cached = changes.changed ? undefined : prepared.get(start)
 		const sliceGates = cached ? [] : gates.slice(start, end)
-		const variableIndexMapping = cached?.variableIndexMapping ?? mapVariablesToIndexes(sliceGates)
+		const variableIndexMapping = cached?.variableIndexMapping ?? window.mapping()
 		if (variableIndexMapping.length <= tables.maximumWires) {
 			const mappedGates = cached?.mappedGates ?? mapCircuit(sliceGates, variableIndexMapping)
 			queries.push({ start, end, variableIndexMapping, mappedGates })
@@ -324,16 +330,17 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		if (query.start < currentIndex) continue
 		currentIndex = query.end
 		tables.recordApplied(match, query.mappedGates.length)
+		if (config.synthesis.templates) templates.learn(query.mappedGates, match.gates)
 		replacements.push({ start: query.start, end: query.end - 1, replacement: reverseMapCircuit(match.gates, query.variableIndexMapping) })
 	}
 	if (replacements.length === 0) {
-		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return { gates: candidate, changed: true } }
-		return changes
+		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return finish({ gates: candidate, changed: true }) }
+		return finish(changes)
 	}
 	const newCircuit = replace(gates, replacements)
 	const diff = gates.length - newCircuit.length
 	if (diff > 0) logVerbose(`Rainbow: Removed ${ diff } gates with slice ${ sliceSize }`)
-	return { gates: newCircuit, changed: true }
+	return finish({ gates: newCircuit, changed: true })
 }
 
 const gateSimplifier = (gates: Gate[]) => gates.map((gate) => simplifyGate(gate))
@@ -484,12 +491,13 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 	let regenerateGraph = false
 	let linesLooped = 0
 	let changedWires = new Set<number>()
+	const neighborhoods = new NeighborhoodQueue(config.search.localSearchSeeds, config.search.localSearchRadius, config.search.localSearchBroadEvery)
 	const graph = config.search.incrementalDependencies ? new IncrementalGraph(slicedVersion) : undefined
 	do {
-		let graphIterator = findConvexSubsets(subsetSize, slicedVersion, config.search.prioritizeChangedWires ? changedWires : undefined, graph?.context())
+		let graphIterator = findConvexSubsets(subsetSize, slicedVersion, config.search.prioritizeChangedWires ? changedWires : undefined, graph?.context(), config.search.localSearch ? neighborhoods.take() : [])
 		regenerateGraph = false
 		for (let lines of graphIterator) {
-			const subsetKey = `${maxSlice}:${method}:${hashGates(lines.map(line => slicedVersion[line]))}`
+			const subsetKey = `${config.synthesis.templates ? templates.version : 0}:${maxSlice}:${method}:${hashGates(lines.map(line => slicedVersion[line]))}`
 			if (testedSubsets.has(subsetKey)) continue
 			let subsetChanged = false
 			let sliceToUse = config.search.sliceMinimum - 1
@@ -521,6 +529,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 						const patched = patchCircuit(slicedVersion, lines, newGates)
 						graph?.replace(lines, newGates)
 						slicedVersion = patched.values
+						neighborhoods.afterRewrite(patched.start, newGates.length, slicedVersion.length)
 						onCandidate(slicedVersion)
 						const offset = patched.start
 						lines = Array.from(Array(optimizationOutput.gates.length).keys()).map((x) => x + offset)
@@ -545,7 +554,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 export const createOptimizerCaches = () => ({
 	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(config.cache.lookupEntries),
 	processedGatesCache: new LimitedMap<string, boolean>(config.cache.processedEntries),
-	scheduler: new SearchScheduler(config.search.explorationEvery),
+	scheduler: new SearchScheduler(config.search.explorationEvery, config.search.schedulerDecay),
 	testedSubsets: new LimitedMap<string, boolean>(config.cache.subsetEntries),
 	methodCaches: new Map<string, LimitedMap<string, boolean>>(),
 })

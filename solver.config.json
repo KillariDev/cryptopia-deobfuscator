@@ -14,7 +14,11 @@
     "minimumChunkGates": 100,
     "maximumChunkFraction": 0.5,
     "jobsPerWorker": 4,
-    "jobSeconds": 30
+    "jobSeconds": 30,
+    "shareTemplates": true,
+    "sharedTemplateSeconds": 15,
+    "sharedTemplateEntries": 64,
+    "sharedTemplateBatch": 16
   },
   "timing": {
     "roundMinutes": 25,
@@ -53,7 +57,12 @@
     "prefixStride": 16,
     "normalizedCacheEntries": 10000,
     "balancedWorkers": true,
-    "incrementalDependencies": true
+    "incrementalDependencies": true,
+    "schedulerDecay": 0.98,
+    "localSearch": true,
+    "localSearchSeeds": 32,
+    "localSearchRadius": 16,
+    "localSearchBroadEvery": 5
   },
   "cache": {
     "lookupEntries": 1000000,

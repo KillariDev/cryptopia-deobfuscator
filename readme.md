@@ -310,3 +310,41 @@ time. Normal status distinguishes active workers from queued jobs, and queued
 jobs do not trigger stale-worker warnings. Smaller jobs may trade cross-boundary
 search opportunities for scheduling responsiveness; later rounds repartition and
 shuffle the circuit. Increasing job size can favor larger search neighborhoods.
+
+## Lookup reuse and search adaptation
+
+Rainbow windows are evaluated into packed bitsets once on their actual used
+wires. Keys are serialized directly to the existing packed table format. A wider
+table key extends the untouched inputs/outputs of that same function; fallback
+across widths or depths does not re-evaluate the gates. Keys for repeated table
+widths are cached for the lookup call. Sliding-window wire counts are updated as
+gates enter and leave each window, rejecting windows wider than the portfolio
+before allocating gate slices or mappings. No table regeneration is needed.
+
+Search settings:
+
+- `search.localSearch: true` tries convex subsets seeded near the boundaries of a recent rewrite before the ordinary traversal. The same dependency-convex subset constructor is used for both paths.
+- `localSearchSeeds: 32` and `localSearchRadius: 16` bound queued seed indices and their distance from the rewritten boundaries. Seeds are rebuilt after each edit, so stale circuit indices are not reused.
+- `localSearchBroadEvery: 5` makes every fifth traversal begin with ordinary broader search. Every traversal still falls through to the ordinary search after its bounded seed queue if no rewrite interrupts it; normal worker time budgets still apply.
+- `search.schedulerDecay: 0.98` discounts past scheduler observations after every recorded pass. Recent unproductive passes can outweigh earlier successes as the circuit changes. Set it to `1` for lifetime scoring; scheduled exploration remains enabled.
+
+Verified successes from small rewritten windows are learned as normalized
+structural templates. With `workers.shareTemplates: true`, each worker sends up
+to `sharedTemplateBatch: 16` queued rules on progress reports at most once per
+`sharedTemplateSeconds: 15`, plus one bounded batch at job completion. The timing
+is checked when a progress report occurs, so it is a target rather than an exact
+timer. `sharedTemplateEntries: 64` bounds each worker's pending export queue and
+the parent relay's retained bank. Newly created workers receive the retained
+rules in bounded batches; existing peers receive new successes. The ordinary
+local template cache is still bounded by `synthesis.templateEntries`.
+
+Senders, the relay, and receivers exhaustively check local equivalence before
+admitting a shared rule. Template windows remain limited by
+`synthesis.maximumWires` and `synthesis.maximumWindowGates`. Only improving rules
+are admitted, a better existing rule is retained, and imported rules are not
+echoed back. Subset failure keys include the local template revision, so newly
+learned/imported rules can retry previously unsuccessful subsets. Failed-search
+caches are not shared. Set `workers.shareTemplates`
+to `false` to keep learned rules local. Sharing and extra verification have costs;
+full-job gate reductions per second should be measured on the actual circuit
+before tuning these defaults. Full-scale throughput gains are not yet measured.

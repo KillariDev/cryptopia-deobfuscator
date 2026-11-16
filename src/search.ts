@@ -41,7 +41,9 @@ type Score = { count: number, milliseconds: number, removed: number }
 export class SearchScheduler {
 	private scores = new Map<string, Score>()
 	private choices = 0
-	constructor(private explorationEvery: number) {}
+	constructor(private explorationEvery: number, private decay = 0.98) {
+		if (!(decay > 0 && decay <= 1)) throw new Error('Invalid scheduler decay')
+	}
 	choose(options: SearchArm[], random = Math.random) {
 		this.choices++
 		const key = (x: SearchArm) => `${x.subset}:${x.slice}:${x.method ?? 'all'}`
@@ -53,17 +55,41 @@ export class SearchScheduler {
 			return pool[Math.floor(random() * pool.length)]
 		}
 		return options.reduce((best, x) => {
-			const rate = (o: typeof x) => { const score = this.scores.get(key(o)); return score ? score.removed / Math.max(1, score.milliseconds) : -1 }
+			const rate = (o: typeof x) => { const score = this.scores.get(key(o)); return score ? score.removed / Math.max(1e-9, score.milliseconds) : -1 }
 			return rate(x) > rate(best) ? x : best
 		})
 	}
 	record(option: SearchArm, elapsed: number, removed: number) {
+		for (const score of this.scores.values()) {
+			score.count *= this.decay; score.milliseconds *= this.decay; score.removed *= this.decay
+		}
 		const key = `${option.subset}:${option.slice}:${option.method ?? 'all'}`
 		const score = this.scores.get(key) ?? { count: 0, milliseconds: 0, removed: 0 }
 		score.count++
-		score.milliseconds += Math.max(0, elapsed)
+		score.milliseconds += Math.max(1e-9, elapsed)
 		score.removed += Math.max(0, removed)
 		this.scores.set(key, score)
+	}
+}
+
+/** Index seeds are rebuilt after each edit; broad traversal periodically goes first. */
+export class NeighborhoodQueue {
+	private seeds: number[] = []
+	private rounds = 0
+	constructor(private maximum: number, private radius: number, private broadEvery: number) {}
+	afterRewrite(start: number, length: number, total: number) {
+		this.seeds = []
+		const anchors = [Math.min(start, Math.max(0, total - 1)), Math.min(start + Math.max(0, length - 1), Math.max(0, total - 1))]
+		const seen = new Set<number>()
+		for (let distance = 0; distance <= this.radius && this.seeds.length < this.maximum; distance++) {
+			for (const index of anchors.flatMap(anchor => distance ? [anchor - distance, anchor + distance] : [anchor])) {
+				if (index >= 0 && index < total && !seen.has(index) && this.seeds.length < this.maximum) { this.seeds.push(index); seen.add(index) }
+			}
+		}
+	}
+	take() {
+		const seeds = this.seeds; this.seeds = []
+		return ++this.rounds % this.broadEvery === 0 ? [] : seeds
 	}
 }
 

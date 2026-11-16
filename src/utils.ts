@@ -514,12 +514,19 @@ export const dependencyGraphToMap = (nodes: DependencyNode[]) => {
 
 export type DependencyContext = { nodes: DependencyNode[], dependantMap: Map<number, number[]>, access: WireAccessIndex }
 
-export function* findConvexSubsets(N: number, gates: Gate[], preferredWires?: Set<number>, context?: DependencyContext): Generator<number[]> {
+export function* findConvexSubsets(N: number, gates: Gate[], preferredWires?: Set<number>, context?: DependencyContext, seeds: number[] = []): Generator<number[]> {
 	//yield Array.from(Array(gates.length).keys()) // start with current order
 	if (N === 0) return
 	const nodes = context?.nodes ?? createDependencyGraph(gates)
 	const dependantMap = context?.dependantMap ?? dependencyGraphToMap(nodes)
 	const access = context?.access ?? indexWireAccesses(gates)
+	const visited = new Set<number>()
+	for (const seed of seeds) {
+		if (!Number.isInteger(seed) || seed < 0 || seed >= nodes.length || visited.has(seed)) continue
+		visited.add(seed)
+		const subset = dependencySort(dependantMap, nodes[seed], N, nodes, gates, access)
+		if (subset.length >= N) yield subset
+	}
 
 	function shuffle(array: DependencyNode[]) {
 		let currentIndex = array.length;
@@ -541,6 +548,7 @@ export function* findConvexSubsets(N: number, gates: Gate[], preferredWires?: Se
 	const revesedNodes = shuffle(nodes.slice())
 	if (preferredWires?.size) revesedNodes.sort((a, b) => Number(getVars(gates[b.lineNumber]).some(wire => preferredWires.has(wire))) - Number(getVars(gates[a.lineNumber]).some(wire => preferredWires.has(wire))))
 	for (const node of revesedNodes) {
+		if (visited.has(node.lineNumber)) continue
 		const currentSubset = dependencySort(dependantMap, node, N, nodes, gates, access)
 		if (currentSubset.length >= N) yield currentSubset
 	}

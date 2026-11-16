@@ -1,8 +1,9 @@
 import sqlite3 from 'sqlite3'
+import { LookupFunction } from './lookup-function.js'
 import { config, RainbowTableSpec } from './config.js'
 import { Gate } from './types.js'
 import { LimitedMap } from './limitedMap.js'
-import { calculateAllOutputsArray, generateCombinations, getVars, ioHash, isReplacementSimpler } from './utils.js'
+import { getVars, isReplacementSimpler } from './utils.js'
 import { createRainbowTable, databaseReady, getRainbowTable, getReplacersByIds } from './rainbowtable.js'
 
 export type RainbowTableStats = RainbowTableSpec & { windows: number, matches: number, rewrites: number, gatesRemoved: number, lookupMs: number }
@@ -14,13 +15,13 @@ const closeDatabase = (db: sqlite3.Database) => new Promise<void>((resolve, reje
 
 /** Each table has its own truth-table width and cache namespace. */
 export class RainbowPortfolio {
-	private tables: (OpenTable & { id: string, inputs: boolean[][] })[]
+	private tables: (OpenTable & { id: string })[]
 	private stats = new Map<string, RainbowTableStats>()
 	readonly maximumWires: number
 	constructor(tables: OpenTable[]) {
 		if (!tables.length) throw new Error('Rainbow portfolio needs at least one table')
 		this.tables = [...tables].sort((a, b) => a.wires - b.wires || a.gates - b.gates)
-			.map(table => ({ ...table, id: tableId(table), inputs: generateCombinations(table.wires) }))
+			.map(table => ({ ...table, id: tableId(table) }))
 		this.maximumWires = Math.max(...tables.map(table => table.wires))
 		this.resetStatistics()
 	}
@@ -35,11 +36,16 @@ export class RainbowPortfolio {
 	}
 	async findReplacements(windows: RainbowWindow[], cache: LimitedMap<string, Gate[] | null>) {
 		const found = new Map<number, RainbowMatch>()
+		const functions = new Map<number, LookupFunction>()
 		for (const table of this.tables) {
 			const pending = windows.flatMap((window, index) => !found.has(index) && window.wires <= table.wires ? [{ window, index }] : [])
 			if (!pending.length) continue
 			const started = performance.now()
-			const ids = pending.map(({ window }) => ioHash(calculateAllOutputsArray(window.mappedGates, table.inputs)))
+			const ids = pending.map(({ window, index }) => {
+				let fn = functions.get(index)
+				if (!fn) { fn = new LookupFunction(window.mappedGates, window.wires); functions.set(index, fn) }
+				return fn.key(table.wires)
+			})
 			const rows = await getReplacersByIds(table.db, cache, ids, `rainbow:${table.id}:`)
 			const matches = new Map(rows.map(row => [row.ioIdentifier, row.gates]))
 			const stat = this.stats.get(table.id)!
