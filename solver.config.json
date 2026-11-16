@@ -12,7 +12,9 @@
   "workers": {
     "maximum": 24,
     "minimumChunkGates": 100,
-    "maximumChunkFraction": 0.5
+    "maximumChunkFraction": 0.5,
+    "jobsPerWorker": 4,
+    "jobSeconds": 30
   },
   "timing": {
     "roundMinutes": 25,
@@ -50,13 +52,15 @@
     "prefixCacheBytes": 8388608,
     "prefixStride": 16,
     "normalizedCacheEntries": 10000,
-    "balancedWorkers": true
+    "balancedWorkers": true,
+    "incrementalDependencies": true
   },
   "cache": {
     "lookupEntries": 1000000,
     "processedEntries": 1000000,
     "shuffleEntries": 100000,
-    "subsetEntries": 100000
+    "subsetEntries": 100000,
+    "windowKeyBytes": 16777216
   },
   "database": {
     "wires": 4,
@@ -69,7 +73,8 @@
     "keepGenerationState": false,
     "etaWindowSamples": 5,
     "etaWarmupSamples": 3,
-    "etaSmoothing": 0.2
+    "etaSmoothing": 0.2,
+    "lookupBatchMilliseconds": 0
   },
   "synthesis": {
     "templates": true,

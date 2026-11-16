@@ -11,23 +11,37 @@ export function configuredWorkerCount() {
 	return count
 }
 
-type Job = { gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
+type Job = { budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
 export class WorkerPool {
 	private slots: { worker: Worker, job?: Job }[] = []
 	private queue: Job[] = []
 	private failure?: Error
+	private concurrency: number
 	constructor(private size: number, private workerUrl = new URL('./worker.js', import.meta.url)) {
 		if (!Number.isSafeInteger(size) || size < 1) throw new Error('Invalid worker pool size')
+		this.concurrency = size
 	}
-	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer): Promise<Gate[]> {
+	setConcurrency(limit: number) {
+		if (!Number.isSafeInteger(limit) || limit < 1 || limit > this.size) throw new Error('Invalid worker concurrency')
+		this.concurrency = limit
+		this.dispatch()
+	}
+	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000): Promise<Gate[]> {
 		if (this.failure) return Promise.reject(this.failure)
+		if (!Number.isFinite(budgetMs) || budgetMs <= 0) return Promise.reject(new Error('Invalid job budget'))
 		return new Promise((resolve, reject) => {
-			this.queue.push({ gates, wires, stopSignal, onProgress, resolve, reject })
+			this.queue.push({ budgetMs, gates, wires, stopSignal, onProgress, resolve, reject })
 			this.dispatch()
 		})
 	}
 	private dispatch() {
 		while (this.queue.length) {
+			const next = this.queue[0]
+			if (next.stopSignal && Atomics.load(new Int32Array(next.stopSignal), 0) !== 0) {
+				this.queue.shift()!.resolve(next.gates)
+				continue
+			}
+			if (this.slots.filter(slot => slot.job).length >= this.concurrency) return
 			let slot = this.slots.find(slot => !slot.job)
 			if (!slot) {
 				if (this.slots.length >= this.size) return
@@ -49,7 +63,7 @@ export class WorkerPool {
 				})
 			}
 			slot.job = this.queue.shift()!
-			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal })
+			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs })
 		}
 	}
 	private fail(error: Error) {

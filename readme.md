@@ -212,3 +212,19 @@ by `maximumWires`, `maximumWindowGates`, `maximumReplacementGates`, `attemptEver
 fails and is serialized per worker. Returned replacements are exhaustively
 checked. Timeouts are heuristic failed attempts, not proofs of impossibility.
 Global checkpoint verification remains probabilistic.
+
+## Search-loop overhead controls
+
+- Progress keeps chunk references and an updated gate count. Full snapshots are materialized only for a requested reduced snapshot or completed pass, rather than after every local rewrite.
+- A rewrite applies removals and replacements in one pass. With `search.incrementalDependencies=true`, stable gate IDs retain dependency edges across rewrites; only users of edited wires have their edges recomputed. Numeric graph views are still materialized for subset selection. Set the flag to `false` to use full reference graph construction.
+- Window fingerprints use prefix hashes for constant-time range fingerprints. Hashes are only prefilters: remembered failures require an exact structural key. `cache.windowKeyBytes` bounds estimated retained key storage per method, in addition to `cache.processedEntries`; exceeding the budget clears that method's window memo. Hash collisions cannot silently suppress a different window.
+- Concurrent lookups on the same SQLite connection share in-flight IDs and combine pending requests. `database.lookupBatchMilliseconds=0` batches in the next microtask without a timer delay; a positive value adds a short batching window. Hits and misses are copied into each caller's cache, and failures release pending requests for retry.
+- `workers.jobsPerWorker` controls the number of smaller contiguous jobs per worker slot (default four); `workers.jobSeconds` sets a job's cooperative time budget (default 30 seconds). Idle workers take the next queued job. Results and intermediate checkpoints are assembled in original job order, regardless of completion order.
+
+Round timing is still an upper/early-finish target; a round can finish sooner
+when all jobs finish. The shared round stop signal returns queued jobs unchanged
+and asks active jobs to finish between steps. Workload history excludes queue wait
+time. Normal status distinguishes active workers from queued jobs, and queued
+jobs do not trigger stale-worker warnings. Smaller jobs may trade cross-boundary
+search opportunities for scheduling responsiveness; later rounds repartition and
+shuffle the circuit. Increasing job size can favor larger search neighborhoods.
