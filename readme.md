@@ -107,7 +107,7 @@ on the next run, not during a run.
 - `validation`: checkpoint test inputs, probabilistic test inputs, and maximum supported circuit wires. Fewer inputs reduce verification confidence.
 - `search`: probabilistic/variable elimination switches, maximum wires for exhaustive checks, inclusive subset/slice ranges, internal chunk sizing, and shuffle passes.
 - `cache`: per-worker lookup/processed cache capacities and shuffle cache capacity.
-- `database`: rainbow circuit wire/gate limits, query/insert batch sizes, disk generation bounds, and ETA smoothing settings. Changing wire/gate limits selects a different database and may require building it.
+- `database`: rainbow table portfolio, query/insert batch sizes, disk generation bounds, and ETA smoothing settings. Changing wire/gate limits selects a different database and may require building it.
 
 Settings omitted from a section use the defaults. Unknown keys, invalid types,
 and unsupported ranges fail at startup. The checked-in file lists all options.
@@ -148,8 +148,9 @@ are shown only in verbose mode. Delayed worker updates produce a warning.
 ## Rainbow table generation
 
 There is one table format and one generator. Tables are named
-`rainbow_<wires>_<gates>.db` under `files.databaseDirectory`. If the selected table
-does not exist, the solver generates it; a completed table is used as-is.
+`rainbow_<wires>_<gates>.db` under `files.databaseDirectory`. The solver initializes
+every configured table sequentially before starting optimization. Missing tables
+are generated; completed tables are used as-is.
 Interrupted builds resume automatically. There is no migration, rebuild command,
 format selector, or compatibility mode for older hash tables.
 
@@ -178,9 +179,51 @@ Generation settings:
 Only build one copy of a particular table at a time. Disk requirements can still
 be substantial; bounded RAM does not make the search space small. Completed
 layers and partially processed layers are resumable without recomputing their
-committed work. A smaller `database.gates` value builds a smaller library; enable
+committed work. A smaller `gates` limit in a table entry builds a smaller library; enable
 bounded on-demand synthesis for uncommon windows instead of precomputing every
 larger replacement. Changing wire/gate limits selects a different table filename.
+
+### Multiple tables
+
+`database.tables` replaces the single `database.wires` / `database.gates` settings:
+
+```json
+"tables": [
+  { "wires": 3, "gates": 6 },
+  { "wires": 4, "gates": 5 },
+  { "wires": 5, "gates": 2 }
+]
+```
+
+The defaults retain the existing four-wire/five-gate library, add deeper
+three-wire coverage, and add shallow five-wire coverage without making a large
+five-wire build the default. These are starting defaults, not benchmarked optimal
+sizes. For more five-wire coverage, change its `gates` limit to `3`; generation
+and disk costs can grow substantially. To use only the existing table, keep just
+`{ "wires": 4, "gates": 5 }`. Remove entries to disable them. The list must be
+nonempty, entries must be unique wire/depth pairs, and wire counts must be 1–8.
+
+Lookup tries tables by ascending wire count, then ascending gate limit, regardless
+of configuration order. A window skips tables narrower than its used wires.
+A miss, a non-improving hit, or a hit requiring an absent wire falls through to
+the next fitting table. The first improving replacement wins; this minimizes
+lookup work but does not compare every table for the globally shortest result.
+Each table uses its own truth-table width and cache namespace. Failed windows
+are remembered only after all fitting tables have been tried.
+
+Workers retain one connection per table. `cache.lookupEntries` remains a shared
+entry limit across their table lookups; `database.memoryMapBytes` applies per
+connection, so adding tables increases possible mapping usage. Generation remains
+sequential to bound resource contention; search lookups use all configured tables.
+
+Verbose summaries show each table's applied gate reductions, rewrite count,
+improving-match percentage, and accumulated lookup worker-seconds (including
+truth-table calculation, cache access, and database wait). Overlapping lookups
+can overlap in that time total; it is not elapsed job time. A match is counted
+before overlapping windows are filtered, while reductions count only applied
+replacements. These figures show contributions under the chosen lookup order,
+not isolated speedups or proof that another table could not make the same rewrite.
+Normal progress stays compact.
 
 ### Stable generation progress
 

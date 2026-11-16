@@ -1,5 +1,6 @@
 import { config } from './config.js'
 import { logTimed } from './utils.js'
+import type { RainbowTableStats } from './rainbow-portfolio.js'
 
 export const verboseLogging = () => process.env.OPTIMIZER_VERBOSE === undefined ? config.logging.verbose : process.env.OPTIMIZER_VERBOSE === '1'
 export function logVerbose(...args: unknown[]) {
@@ -19,6 +20,7 @@ export type WorkerActivity = {
 	checks: number
 	improvements: number
 	stage: 'searching' | 'shuffling' | 'verifying'
+	rainbowTables?: RainbowTableStats[]
 }
 export type WorkerStatus = { activity?: WorkerActivity, updatedAtMs: number, done: boolean, started?: boolean }
 
@@ -35,7 +37,7 @@ export function formatWorkerActivity(statuses: WorkerStatus[], elapsedMs: number
 		}
 	}
 	const budget = Math.min(100, Math.floor(Math.max(0, elapsedMs) / budgetMs * 100))
-	return `Work: ${totals.passes} passes, ${totals.subsets} subsets visited, ${totals.checks} optimization checks, ${totals.improvements} improving rewrites; workers: ${stages.searching} searching, ${stages.shuffling} shuffling, ${stages.verifying} verifying, ${stages.waiting} awaiting report, ${stages.completed} completed; round time budget ${budget}% elapsed (not search completion); oldest active report ${Math.max(0, Math.floor(oldest / 1000))}s ago.`
+	return `Work: ${totals.passes} passes, ${totals.subsets} subsets visited, ${totals.checks} optimization checks, ${totals.improvements} improving rewrites; workers: ${stages.searching} searching, ${stages.shuffling} shuffling, ${stages.verifying} verifying, ${stages.waiting} awaiting report, ${stages.completed} completed; round time budget ${budget}% elapsed (not search completion); oldest active report ${Math.max(0, Math.floor(oldest / 1000))}s ago.${formatRainbowActivity(statuses)}`
 }
 
 export const shouldFinishReducedRound = (elapsedMs: number, initialCount: number, currentCount: number) => elapsedMs >= config.timing.improvedRoundMinutes * 60_000 && currentCount < initialCount
@@ -64,4 +66,16 @@ export function formatStatus(status: SolverStatus) {
 	const queued = statuses.filter(worker => !worker.done && worker.started === false).length
 	const late = statuses.filter(worker => !worker.done && worker.started !== false && elapsedMs - worker.updatedAtMs > Math.max(config.timing.summarySeconds * 2000, config.timing.workerReportSeconds * 3000)).length
 	return `Gates: ${candidate} (${reduction.toFixed(2)}% fewer than original; ${Math.max(0, roundStart - candidate)} removed this round) | ${save} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
+}
+
+/** Per-job snapshots are summed once, including completed jobs in this round. */
+export function formatRainbowActivity(statuses: WorkerStatus[]) {
+	const totals = new Map<string, RainbowTableStats>()
+	for (const status of statuses) for (const stat of status.activity?.rainbowTables ?? []) {
+		const id = `${stat.wires}/${stat.gates}`
+		const total = totals.get(id) ?? { ...stat, windows: 0, matches: 0, rewrites: 0, gatesRemoved: 0, lookupMs: 0 }
+		for (const key of ['windows', 'matches', 'rewrites', 'gatesRemoved', 'lookupMs'] as const) total[key] += stat[key]
+		totals.set(id, total)
+	}
+	return totals.size ? ' Tables: ' + [...totals.entries()].map(([id, stat]) => `${id}: ${stat.gatesRemoved} gates removed, ${stat.rewrites} rewrites, ${stat.windows ? (stat.matches / stat.windows * 100).toFixed(1) : '0.0'}% improving matches, ${(stat.lookupMs / 1000).toFixed(2)} lookup worker-seconds`).join('; ') + '.' : ''
 }
