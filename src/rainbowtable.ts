@@ -1,5 +1,7 @@
 import { LookupBatcher } from './lookup-batcher.js'
 import { join } from 'path'
+import { availableParallelism } from 'os'
+import { logVerbose } from './logging.js'
 import sqlite3 from 'sqlite3'
 import { config } from './config.js'
 import { Gate, InputOutputReplacer } from './types.js'
@@ -8,7 +10,7 @@ import { LimitedMap } from './limitedMap.js'
 import { isReplacementSimpler, logTimed } from './utils.js'
 import { runSQL, allSQL, insertRows } from './sql.js'
 import { generateOnDisk } from './disk-generation.js'
-import { GenerationEstimator, formatGenerationProgress, generationDuration, SemanticProgress } from './generation-progress.js'
+import { GenerationEstimator, formatGenerationProgress, generationDuration, GenerationProfile, SemanticProgress } from './generation-progress.js'
 
 export const databaseFilename = (wires: number, gates: number) => join(config.files.databaseDirectory, `rainbow_${wires}_${gates}.db`)
 const keyToSql = (key: string) => Buffer.from(key, 'hex')
@@ -138,6 +140,9 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 		logTimed(`Generating rainbow table: ${wires} wires, up to ${gates} gates, ${catalog.length} gate choices`)
 		const started = performance.now(), estimator = new GenerationEstimator(config.database.etaWindowSamples, config.database.etaWarmupSamples, config.database.etaSmoothing)
 		let lastReport = started, current: SemanticProgress | undefined
+		let profile: GenerationProfile | undefined
+		const workers = Math.min(config.database.generationWorkers, Math.max(1, availableParallelism() - 1))
+		logTimed(`Generation expansion: up to ${workers} CPU slots; batches below ${config.database.generationMinimumWork.toLocaleString('en-US')} candidates run inline; one database writer`)
 		const report = (force = false) => {
 			const now = performance.now()
 			if (!force && now - lastReport < config.timing.databaseLogSeconds * 1000) return
@@ -151,6 +156,8 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 				readRows: config.database.queryBatchSize, stageRows: config.database.generationBatchRows,
 				parameterLimit: config.database.queryBatchSize, stateLimit: config.database.generationStates,
 				keepState: config.database.keepGenerationState,
+				workers, queueBatches: config.database.generationQueueBatches, minimumWork: config.database.generationMinimumWork,
+				onProfile: value => { profile = value },
 			}, entries => storeReplacers(db, entries, true), progress => {
 				const newLayer = current?.depth !== progress.depth
 				current = progress
@@ -158,6 +165,7 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 			})
 			await runSQL(db, 'INSERT OR REPLACE INTO GenerationStatus VALUES(1,1)')
 			logTimed(`Rainbow generation complete in ${generationDuration(performance.now() - started)}.`)
+			if (profile) logVerbose(`Generation profile: ${profile.workersUsed} CPU threads started; ${profile.candidates} candidates expanded, ${profile.emitted} emitted after local deduplication; ${(profile.expansionMs / 1000).toFixed(2)} expansion worker-seconds; ${((profile.writeMs + profile.readMs) / 1000).toFixed(2)}s database work; ${(profile.waitMs / 1000).toFixed(2)}s waiting for expansion; peak ${profile.peakPending} pending tasks. Times can overlap.`)
 		} finally { clearInterval(timer) }
 		return db
 	} catch (error) { await new Promise<void>(resolve => db.close(() => resolve())); throw error }
