@@ -348,3 +348,53 @@ caches are not shared. Set `workers.shareTemplates`
 to `false` to keep learned rules local. Sharing and extra verification have costs;
 full-job gate reductions per second should be measured on the actual circuit
 before tuning these defaults. Full-scale throughput gains are not yet measured.
+
+## Eliminating repeated search work
+
+An unchanged subset shares its template scan and fingerprint encoding across
+slice sizes. Template revision changes invalidate the prepared template result;
+rewrites create a new preparation. Each valid slice size runs once, bounded by
+the subset length. Exact window keys slice a pre-encoded gate representation;
+rolling fingerprints remain prefilters only. The window-key memory estimate
+also charges the retained backing encoding, conservatively, once per preparation
+and cache budget cycle.
+
+A table fallback is omitted only when both tables have verified complete
+canonical generation metadata and an earlier table has enough wires for the
+window and at least the later table's gate depth. Verification checks completion,
+finished build depth, and the exact current catalogue signature in `BuildMeta`.
+Unknown, absent, mismatched or unreadable metadata disables this pruning, without
+changing table loading or its data format. A hit rejected for borrowing absent
+wires also disables that table's coverage proof for the window: its stored
+winner can hide an equally cheap permitted alternative. Tables must remain unchanged while a
+search uses them. This does not enable borrowing absent wires. For example, a
+verified 3-wire/6-gate table covers all permitted 3-wire replacements that a
+4-wire/5-gate table could return; 4-wire windows still consult the wider table.
+
+Rainbow matches in one pass are selected with weighted interval scheduling,
+maximizing total removed gates among the non-overlapping matches found. Ties
+prefer summed local used-wire savings, then read savings. These secondary scores
+are local costs, not a proof of globally minimal wire usage. Selection does not
+search new functions or compare every table after an improving match has already
+been found. Variable elimination retains its existing replacement selection.
+
+`database.statementCacheEntries` (default `16`) bounds prepared lookup statements
+per connection, keyed by batch size and evicted by least recent use. Lookups on
+each connection serialize statement bindings, reset statements after use, and
+discard failed statements. Closing a portfolio finalizes them before SQLite is
+closed. Internal callers opening lookup connections directly must use
+`closeRainbowTable` for the same cleanup.
+
+`search.circuitChunkGates` (default `128`) controls chunked gate and stable-ID
+storage. Edits copy affected chunks and coalesce small neighboring chunks;
+untouched chunks are retained. Stable IDs use chunk-local handles, avoiding a
+full gate-position map rebuild. Prefix offsets still update across chunks, and
+numeric dependency views still materialize for traversal. Wire-list updates can
+still touch many gates; this is not a claim that every graph operation is local.
+The production progress path retains chunk references and flattens them for
+requested snapshots or completed passes. Disabling incremental dependencies
+still uses the full reference graph path.
+
+These changes are covered by reference and randomized correctness tests.
+Full-job throughput and the best chunk/cache sizes remain workload-dependent
+and have not been benchmarked on the full circuit.

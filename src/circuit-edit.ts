@@ -1,3 +1,4 @@
+import { ChunkedSequence } from './chunked-sequence.js'
 import { Gate } from './types.js'
 
 export function patchCircuit<T>(values: T[], selected: number[], replacement: T[]) {
@@ -14,14 +15,15 @@ export function patchCircuit<T>(values: T[], selected: number[], replacement: T[
 }
 
 export class LazyCircuit {
-	private parts: Gate[][]
+	private parts: (Gate[] | ChunkedSequence<Gate>)[]
 	private snapshot?: Gate[]
+	private counts: number[]
 	length: number
-	constructor(parts: Gate[][]) { this.parts = parts.slice(); this.length = parts.reduce((sum, gates) => sum + gates.length, 0) }
-	update(index: number, gates: Gate[]) {
-		this.length += gates.length - this.parts[index].length
-		this.parts[index] = gates
+	constructor(parts: (Gate[] | ChunkedSequence<Gate>)[]) { this.parts = parts.slice(); this.counts = parts.map(part => part.length); this.length = parts.reduce((sum, gates) => sum + gates.length, 0) }
+	update(index: number, gates: Gate[] | ChunkedSequence<Gate>) {
+		this.length += gates.length - this.counts[index]
+		this.parts[index] = gates; this.counts[index] = gates.length
 		this.snapshot = undefined
 	}
-	materialize() { return this.snapshot ??= this.parts.flat() }
+	materialize() { return this.snapshot ??= this.parts.flatMap(part => Array.isArray(part) ? part : part.toArray()) }
 }

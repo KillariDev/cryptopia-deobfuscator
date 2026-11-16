@@ -4,14 +4,14 @@ import { config, RainbowTableSpec } from './config.js'
 import { Gate } from './types.js'
 import { LimitedMap } from './limitedMap.js'
 import { getVars, isReplacementSimpler } from './utils.js'
-import { createRainbowTable, databaseReady, getRainbowTable, getReplacersByIds } from './rainbowtable.js'
+import { createRainbowTable, databaseReady, getRainbowTable, getReplacersByIds, closeRainbowTable, hasCanonicalCoverage } from './rainbowtable.js'
 
 export type RainbowTableStats = RainbowTableSpec & { windows: number, matches: number, rewrites: number, gatesRemoved: number, lookupMs: number }
 export type RainbowWindow = { mappedGates: Gate[], wires: number }
 export type RainbowMatch = { gates: Gate[], table: string }
-type OpenTable = RainbowTableSpec & { db: sqlite3.Database }
+type OpenTable = RainbowTableSpec & { db: sqlite3.Database, canonicalCoverage?: boolean }
 const tableId = (table: RainbowTableSpec) => `${table.wires}/${table.gates}`
-const closeDatabase = (db: sqlite3.Database) => new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
+const closeDatabase = closeRainbowTable
 
 /** Each table has its own truth-table width and cache namespace. */
 export class RainbowPortfolio {
@@ -37,8 +37,9 @@ export class RainbowPortfolio {
 	async findReplacements(windows: RainbowWindow[], cache: LimitedMap<string, Gate[] | null>) {
 		const found = new Map<number, RainbowMatch>()
 		const functions = new Map<number, LookupFunction>()
+		const coverage = new Map<number, OpenTable[]>()
 		for (const table of this.tables) {
-			const pending = windows.flatMap((window, index) => !found.has(index) && window.wires <= table.wires ? [{ window, index }] : [])
+			const pending = windows.flatMap((window, index) => !found.has(index) && window.wires <= table.wires && !(table.canonicalCoverage && coverage.get(index)?.some(other => other.wires <= table.wires && other.gates >= table.gates)) ? [{ window, index }] : [])
 			if (!pending.length) continue
 			const started = performance.now()
 			const ids = pending.map(({ window, index }) => {
@@ -54,7 +55,11 @@ export class RainbowPortfolio {
 			for (let i = 0; i < pending.length; i++) {
 				const { window, index } = pending[i], gates = matches.get(ids[i])
 				// A larger table must never borrow a wire missing from the window.
-				if (gates && !gates.flatMap(getVars).some(wire => wire >= window.wires) && isReplacementSimpler(gates, window.mappedGates)) {
+				const borrowed = gates?.flatMap(getVars).some(wire => wire >= window.wires)
+				// A borrowed-wire winner can hide an equally cheap permitted alternative.
+				// Its rejection does not establish coverage for subsequent tables.
+				if (table.canonicalCoverage && !borrowed) coverage.set(index, [...(coverage.get(index) ?? []), table])
+				if (gates && !borrowed && isReplacementSimpler(gates, window.mappedGates)) {
 					found.set(index, { gates, table: table.id })
 					stat.matches++
 				}
@@ -81,5 +86,6 @@ export async function openRainbowPortfolio(tables = config.database.tables) {
 		await Promise.allSettled(opened.map(table => closeDatabase(table.db)))
 		throw failed.reason
 	}
-	return new RainbowPortfolio(opened)
+	const verified = await Promise.all(opened.map(async table => ({ ...table, canonicalCoverage: await hasCanonicalCoverage(table.db, table.wires, table.gates) })))
+	return new RainbowPortfolio(verified)
 }

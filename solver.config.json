@@ -62,7 +62,8 @@
     "localSearch": true,
     "localSearchSeeds": 32,
     "localSearchRadius": 16,
-    "localSearchBroadEvery": 5
+    "localSearchBroadEvery": 5,
+    "circuitChunkGates": 128
   },
   "cache": {
     "lookupEntries": 1000000,
@@ -98,7 +99,8 @@
     "lookupBatchMilliseconds": 0,
     "generationWorkers": 4,
     "generationQueueBatches": 2,
-    "generationMinimumWork": 100000
+    "generationMinimumWork": 100000,
+    "statementCacheEntries": 16
   },
   "synthesis": {
     "templates": true,

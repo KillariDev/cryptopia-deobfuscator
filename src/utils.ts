@@ -486,10 +486,14 @@ function lastUnselected(lines: number[] = [], after: number, before: number, sub
 	return -1
 }
 
-function needToAddAsWell(dependantMap: Map<number, number[]>, subsetSet: Set<number>, node: number, maxNodeNumber: number, gates: Gate[], access: WireAccessIndex): { pastDepend: number[], addNode: number } {
+export type GateSequence = Gate[] | { length: number, at(index: number): Gate, toArray(): Gate[] }
+const gateAt = (gates: GateSequence, index: number) => Array.isArray(gates) ? gates[index] : gates.at(index)
+const gateArray = (gates: GateSequence) => Array.isArray(gates) ? gates : gates.toArray()
+
+function needToAddAsWell(dependantMap: Map<number, number[]>, subsetSet: Set<number>, node: number, maxNodeNumber: number, gates: GateSequence, access: WireAccessIndex): { pastDepend: number[], addNode: number } {
 	let currentNode = node
 	while (true) {
-		const [target, ...controls] = getVars(gates[currentNode])
+		const [target, ...controls] = getVars(gateAt(gates, currentNode))
 		let last = lastUnselected(access.accesses.get(target), currentNode, maxNodeNumber, subsetSet)
 		for (const wire of controls) last = Math.max(last, lastUnselected(access.writes.get(wire), currentNode, maxNodeNumber, subsetSet))
 		if (last === -1) return {
@@ -514,12 +518,12 @@ export const dependencyGraphToMap = (nodes: DependencyNode[]) => {
 
 export type DependencyContext = { nodes: DependencyNode[], dependantMap: Map<number, number[]>, access: WireAccessIndex }
 
-export function* findConvexSubsets(N: number, gates: Gate[], preferredWires?: Set<number>, context?: DependencyContext, seeds: number[] = []): Generator<number[]> {
+export function* findConvexSubsets(N: number, gates: GateSequence, preferredWires?: Set<number>, context?: DependencyContext, seeds: number[] = []): Generator<number[]> {
 	//yield Array.from(Array(gates.length).keys()) // start with current order
 	if (N === 0) return
-	const nodes = context?.nodes ?? createDependencyGraph(gates)
+	const nodes = context?.nodes ?? createDependencyGraph(gateArray(gates))
 	const dependantMap = context?.dependantMap ?? dependencyGraphToMap(nodes)
-	const access = context?.access ?? indexWireAccesses(gates)
+	const access = context?.access ?? indexWireAccesses(gateArray(gates))
 	const visited = new Set<number>()
 	for (const seed of seeds) {
 		if (!Number.isInteger(seed) || seed < 0 || seed >= nodes.length || visited.has(seed)) continue
@@ -546,7 +550,7 @@ export function* findConvexSubsets(N: number, gates: Gate[], preferredWires?: Se
 	  }
 
 	const revesedNodes = shuffle(nodes.slice())
-	if (preferredWires?.size) revesedNodes.sort((a, b) => Number(getVars(gates[b.lineNumber]).some(wire => preferredWires.has(wire))) - Number(getVars(gates[a.lineNumber]).some(wire => preferredWires.has(wire))))
+	if (preferredWires?.size) revesedNodes.sort((a, b) => Number(getVars(gateAt(gates, b.lineNumber)).some(wire => preferredWires.has(wire))) - Number(getVars(gateAt(gates, a.lineNumber)).some(wire => preferredWires.has(wire))))
 	for (const node of revesedNodes) {
 		if (visited.has(node.lineNumber)) continue
 		const currentSubset = dependencySort(dependantMap, node, N, nodes, gates, access)
@@ -554,7 +558,7 @@ export function* findConvexSubsets(N: number, gates: Gate[], preferredWires?: Se
 	}
 }
 
-export const dependencySort = (dependantMap: Map<number, number[]>, node: DependencyNode, maxLength: number, nodes: DependencyNode[], gates: Gate[], access = indexWireAccesses(gates)) => {
+export const dependencySort = (dependantMap: Map<number, number[]>, node: DependencyNode, maxLength: number, nodes: DependencyNode[], gates: GateSequence, access = indexWireAccesses(gateArray(gates))) => {
 	const currentSubset: number[] = []
 	const currentSubsetSet = new Set<number>()
 	let nonExploredDepenencies = new SortedArray()
