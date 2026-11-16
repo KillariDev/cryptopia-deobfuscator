@@ -1,3 +1,4 @@
+import * as generationProgressHelpers from './generation-progress.js'
 import { Gate } from './types.js'
 import { calculateAllOutputsArray, generateCombinations, getVars, isReplacementSimpler } from './utils.js'
 
@@ -26,14 +27,15 @@ export function circuitState(gates: Gate[], wires: number) {
 }
 
 /** Breadth-first semantic search. Equal-depth states retain used-wire cost metadata. */
-export function* semanticCircuits(wires: number, maxGates: number, catalog: Gate[], limit: number): Generator<Gate[]> {
+export function* semanticCircuits(wires: number, maxGates: number, catalog: Gate[], limit: number, onProgress?: (progress: import('./generation-progress.js').SemanticProgress) => void): Generator<Gate[]> {
 	let frontier: { gates: Gate[], state: Uint8Array }[] = [{ gates: [], state: circuitState([], wires) }]
 	const depths = new Map<string, number>()
 	const costs = new Map<string, number>()
 	let states = 0
-	for (let depth = 0; depth <= maxGates; depth++) {
+	for (let depth = 0; depth <= maxGates && frontier.length; depth++) {
 		const next: typeof frontier = []
-		for (const entry of frontier) {
+		for (const [index, entry] of frontier.entries()) {
+			if (index % 1024 === 0) onProgress?.({ depth, processed: index, total: frontier.length, states })
 			const key = stateKey(entry.state)
 			const prior = depths.get(key)
 			if (prior !== undefined && prior < depth) continue
@@ -50,6 +52,7 @@ export function* semanticCircuits(wires: number, maxGates: number, catalog: Gate
 				next.push({ gates: [...entry.gates, gate], state: applyState(entry.state, gate) })
 			}
 		}
+		onProgress?.({ depth, processed: frontier.length, total: frontier.length, states })
 		frontier = next
 	}
 }
@@ -96,4 +99,30 @@ export function meetInMiddle(gates: Gate[], wires: number, catalog: Gate[], maxD
 		frontier = next
 	}
 	return undefined
+}
+
+/** Invalid first-use numbering can never be repaired by appending more gates. */
+export function* canonicalCircuits(catalog: Gate[], maximumDepth: number, onProgress?: (progress: import('./generation-progress.js').SequenceProgress) => void): Generator<Gate[]> {
+	const { sequenceSpace } = generationProgressHelpers
+	const sizes = sequenceSpace(catalog.length, maximumDepth)
+	const total = sizes[maximumDepth]
+	let covered = 0n, pruned = 0n, examined = 0, evaluated = 0
+	const stack = [{ gates: [] as Gate[], depth: 0 }]
+	while (stack.length) {
+		const { gates, depth } = stack.pop()!
+		examined++
+		const wires = [...new Set(gates.flatMap(getVars))]
+		if (!wires.every((wire, index) => wire === index)) {
+			const skipped = sizes[maximumDepth - depth]
+			covered += skipped
+			pruned += skipped
+		} else {
+			covered++
+			evaluated++
+			yield gates
+			if (depth < maximumDepth) for (const gate of catalog) stack.push({ gates: [...gates, gate], depth: depth + 1 })
+		}
+		if (examined % 1024 === 0) onProgress?.({ covered, total, examined, evaluated, pruned })
+	}
+	onProgress?.({ covered, total, examined, evaluated, pruned })
 }

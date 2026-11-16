@@ -1,4 +1,5 @@
-import { semanticCircuits, decodeGates, encodeGates } from './semantic.js'
+import { formatGenerationProgress, sequenceSpace, generationDuration, generationETA, SequenceProgress, SemanticProgress } from './generation-progress.js'
+import { semanticCircuits, canonicalCircuits, decodeGates, encodeGates } from './semantic.js'
 import { join } from 'path'
 import { config } from './config.js'
 import sqlite3 from 'sqlite3'
@@ -287,12 +288,6 @@ export function* generateAllGates(wires: number): Generator<Gate, undefined, unk
 	}
 }
 
-const containsAllNumbersInOrder = (arr: number[]): boolean => {
-	for (let i = 0; i < arr.length; i++) {
-		if (arr[i] !== i) return false
-	}
-	return true
-}
 
 const FLUSH_SIZE = config.database.flushEntries
 
@@ -344,8 +339,6 @@ export const createRainbowTable = async (wires: number, maxGates: number) => {
 	let rainbowMap = new Map<string, InputOutputReplacer>()
 	const combinations = generateCombinations(wires)
 	const addgates = (gates: Gate[]) => {
-		const uniqueVars = collectVariables(gates)
-		if (!config.database.semanticGeneration && !containsAllNumbersInOrder(uniqueVars)) return
 		const ioId = ioHash(combinations.flatMap((input) => evalCircuit(gates, input)))
 		const old = rainbowMap.get(ioId)
 		const newEntry = { ioIdentifier: ioId, replacerGates: gates }
@@ -355,56 +348,66 @@ export const createRainbowTable = async (wires: number, maxGates: number) => {
 	}
 	const allGates = Array.from(generateAllGates(wires))
 	logTimed(`different gates: ${ allGates.length }`)
-	addgates([])
-	if (config.database.semanticGeneration) {
-		try {
-			for (const gates of semanticCircuits(wires, maxGates, allGates, config.database.generationStates)) {
-				addgates(gates)
-				if (rainbowMap.size >= FLUSH_SIZE) await flushIfNeeded(db, rainbowMap)
-			}
-		} catch (error) { await new Promise<void>(resolve => db.close(() => resolve())); throw error }
-	} else {
-		// Iterative stack-based DFS to avoid nested loops
-		type StackEntry = {
-			sequence: Gate[],
-			depth: number
+	const started = performance.now()
+	let lastReport = started
+	let sequence: SequenceProgress | undefined = config.database.semanticGeneration ? undefined : { covered: 0n, total: sequenceSpace(allGates.length, maxGates)[maxGates], examined: 0, evaluated: 0, pruned: 0n }
+	let semantic: SemanticProgress | undefined
+	let layerStarted = started, lastDepth = -1
+	let writing = false
+	let lastCovered = 0n, lastSample = started, samples = 0
+	const report = (force = false) => {
+		const now = performance.now()
+		if (!force && now - lastReport < config.timing.databaseLogSeconds * 1000) return
+		lastReport = now
+		// Layer ETA uses time within this depth, rather than previous depths.
+		const elapsed = semantic && !sequence ? now - layerStarted : now - started
+		let eta = 'learning processing speed'
+		if (sequence) {
+			const advance = sequence.covered - lastCovered
+			if (sequence.covered >= sequence.total) eta = '0s'
+			else if (!force && samples > 0) eta = advance > 0n ? generationETA(advance, sequence.total - sequence.covered + advance, now - lastSample) : 'unavailable (no progress in the last interval)'
+			if (!force) samples++
+			lastCovered = sequence.covered
+			lastSample = now
 		}
-		const stack: StackEntry[] = [{ sequence: [], depth: 0 }]
-		let lastSaved = performance.now()
-
-		while (stack.length > 0) {
-			const { sequence, depth } = stack.pop()!
-
-			// Only add sequences that are complete (i.e., depth <= maxGates)
-			if (depth <= maxGates) {
-				addgates(sequence)
-			}
-
-			// Stop if we've reached maxGates
-			if (depth >= maxGates) continue
-
-			for (const gate of allGates) {
-				const newSequence = [...sequence, gate]
-				stack.push({ sequence: newSequence, depth: depth + 1 })
-			}
-
-			if (rainbowMap.size % config.database.flushCheckEntries === 0) {
-				await flushIfNeeded(db, rainbowMap)
-			}
-
-			const now = performance.now()
-			if (now - lastSaved >= config.timing.databaseLogSeconds * 1000) {
-				logTimed(`rainbowsize: ${rainbowMap.size}`)
-				lastSaved = now
-			}
-		}
+		logTimed(formatGenerationProgress(sequence, semantic, rainbowMap.size, elapsed, writing, now - started, eta))
 	}
+	const persist = async (final = false) => {
+		if (!final && rainbowMap.size < FLUSH_SIZE) return
+		writing = true
+		try {
+			if (final) await storeReplacers(db, rainbowMap)
+			else await flushIfNeeded(db, rainbowMap)
+		} finally { writing = false }
+	}
+	report(true)
+	const timer = setInterval(() => report(), config.timing.databaseLogSeconds * 1000)
+	try {
+		if (config.database.semanticGeneration) {
+			for (const gates of semanticCircuits(wires, maxGates, allGates, config.database.generationStates, progress => {
+				if (progress.depth !== lastDepth) { lastDepth = progress.depth; layerStarted = performance.now() }
+				semantic = progress
+				report()
+			})) {
+				addgates(gates)
+				if (rainbowMap.size >= FLUSH_SIZE) await persist()
+			}
+		} else {
+			for (const gates of canonicalCircuits(allGates, maxGates, progress => { sequence = progress; report() })) {
+				addgates(gates)
+				// Avoid an async hop for every candidate; flush only when full.
+				if (rainbowMap.size >= FLUSH_SIZE) await persist()
+			}
+		}
+		report(true)
+		logTimed('Rainbow search complete; writing final entries (database write time is additional).')
+		await persist(true)
+		await run('INSERT OR REPLACE INTO GenerationStatus VALUES (1, 1)')
+		logTimed(`Rainbow generation complete in ${generationDuration(performance.now() - started)}.`)
+	} catch (error) {
+		await new Promise<void>(resolve => db.close(() => resolve()))
+		throw error
+	} finally { clearInterval(timer) }
 
-	await flushIfNeeded(db, rainbowMap)
-
-	logTimed(`created rainbowtable of size: ${ rainbowMap.size }, inserting...`)
-	await storeReplacers(db, rainbowMap)
-	await run('INSERT OR REPLACE INTO GenerationStatus VALUES (1, 1)')
-	logTimed(`Done`)
 	return db
 }

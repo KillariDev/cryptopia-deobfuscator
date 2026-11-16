@@ -192,3 +192,19 @@ They run only after ordinary local search fails. `maximumWires` (at most four),
 heuristic attempts, not proofs of impossibility. Optional synthesis is serialized
 per worker. All returned replacements are checked exhaustively before use and
 can become reusable templates. Global checkpoint verification remains probabilistic.
+
+### Rainbow generation progress
+
+Generation reports use `timing.databaseLogSeconds`. Legacy enumeration shows
+percentage of the configured sequence space accounted for, approximate remaining
+search time, buffered functions and elapsed time. Invalid first-use wire prefixes
+are skipped with their entire subtree and included in coverage; pruning preserves
+the same accepted circuits as filtering only at the leaves. Buffered functions
+are not a count of total processed sequences or total database rows.
+
+The ETA learns from reporting intervals and uses recent coverage throughput;
+pruning, deduplication and disk writes can change the rate, so it is an estimate.
+Writing phases are labeled separately; write duration is not predicted. Semantic
+generation shows depth, progress and ETA within the current layer. Its overall
+ETA is explicitly unavailable because future deduplicated frontier sizes are not
+known. Completion is reported only after the final database write succeeds.
