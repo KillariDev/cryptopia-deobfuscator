@@ -510,7 +510,7 @@ export const dependencyGraphToMap = (nodes: DependencyNode[]) => {
 	return dependantMap
 }
 
-export function* findConvexSubsets(N: number, gates: Gate[]): Generator<number[]> {
+export function* findConvexSubsets(N: number, gates: Gate[], preferredWires?: Set<number>): Generator<number[]> {
 	//yield Array.from(Array(gates.length).keys()) // start with current order
 	if (N === 0) return
 	const nodes = createDependencyGraph(gates)
@@ -535,6 +535,7 @@ export function* findConvexSubsets(N: number, gates: Gate[]): Generator<number[]
 	  }
 
 	const revesedNodes = shuffle(nodes.slice())
+	if (preferredWires?.size) revesedNodes.sort((a, b) => Number(getVars(gates[b.lineNumber]).some(wire => preferredWires.has(wire))) - Number(getVars(gates[a.lineNumber]).some(wire => preferredWires.has(wire))))
 	for (const node of revesedNodes) {
 		const currentSubset = dependencySort(dependantMap, node, N, nodes, gates, access)
 		if (currentSubset.length >= N) yield currentSubset

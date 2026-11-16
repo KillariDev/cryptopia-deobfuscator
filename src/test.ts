@@ -357,3 +357,129 @@ try {
 	assert.equal(missingInputs.status, 1)
 	assert.match(missingInputs.stderr, /Usage:/)
 } finally { await rm(configDir, { recursive: true, force: true }) }
+
+const { IncrementalEvaluator } = await import('./packed.js')
+const { RewriteCache, normalizeWindow, SearchScheduler, balancedChunks, improving } = await import('./search.js')
+const { isReplacementSimpler, findConvexSubsets } = await import('./utils.js')
+for (const wires of [1, 4, 8]) {
+	const combinations = generateCombinations(wires)
+	for (const count of [0, 1, 17, 32, 33, 64, 202]) {
+		const inputs = Array.from({ length: count }, (_, i) => combinations[i % combinations.length])
+		const reference = makeGates(45, wires)
+		for (const bytes of [0, 64, 8192]) {
+			const evaluator = new IncrementalEvaluator(reference, inputs, bytes, 4)
+			assert.deepEqual(evaluator.unpack(), inputs.map(input => evalCircuit(reference, input)))
+			assert.ok([...evaluator.checkpoints.values()].reduce((sum, state) => sum + state.byteLength, 0) <= bytes)
+			const variants = [reference, [], reference.slice(1), reference.slice(0, -1), [...reference, ...makeGates(1, wires)], [...reference.slice(0, 30), ...makeGates(1, wires), ...reference.slice(31)]]
+			for (const candidate of variants) {
+				const expected = inputs.map(input => evalCircuit(candidate, input))
+				assert.deepEqual(evaluator.unpack(evaluator.evaluate(candidate)), expected)
+				assert.equal(evaluator.equivalent(candidate), JSON.stringify(expected) === JSON.stringify(inputs.map(input => evalCircuit(reference, input))))
+			}
+		}
+	}
+}
+const rewriteCache = new RewriteCache(100)
+let computations = 0
+for (let f = 0; f < 16; f++) {
+	const gate = { a: 0, b: 1, target: 2, gate_i: f }
+	const first = [gate, gate]
+	const renamed = first.map(gate => ({ a: 5, b: 2, target: 4, gate_i: gate.gate_i }))
+	assert.equal(normalizeWindow(first).key, normalizeWindow(renamed).key)
+	for (const circuit of [first, renamed]) {
+		const replacement = rewriteCache.resolve(circuit, () => { computations++; return [] })
+		assert.deepEqual(replacement, [])
+		for (const input of generateCombinations(6)) assert.deepEqual(evalCircuit(circuit, input), evalCircuit(replacement!, input))
+	}
+}
+assert.equal(computations, 16)
+const misses = new RewriteCache(2)
+let failures = 0
+for (let i = 0; i < 2; i++) assert.equal(misses.resolve(singleGate, () => { failures++; return undefined }), undefined)
+assert.equal(failures, 1)
+for (let i = 0; i < 100; i++) {
+	const before = makeGates(random(20), 8), after = makeGates(random(20), 8)
+	assert.equal(improving(before)(after), isReplacementSimpler(after, before))
+}
+const scheduler = new SearchScheduler(3)
+const arms = [{ subset: 3, slice: 2, method: 'all' as const }, { subset: 5, slice: 3, method: 'rainbow' as const }]
+scheduler.record(arms[0], 100, 1)
+scheduler.record(arms[1], 10, 10)
+assert.deepEqual(scheduler.choose(arms, () => 0), arms[1])
+assert.deepEqual(scheduler.choose(arms, () => 0), arms[1])
+assert.deepEqual(scheduler.choose(arms, () => 0), arms[0]) // forced exploration
+assert.throws(() => scheduler.choose([]))
+const training = new SearchScheduler(2)
+training.record(arms[0], 1, 1)
+training.choose(arms, () => 0)
+assert.deepEqual(training.choose(arms, () => 0), arms[1]) // explore an untried method
+const gatesToBalance = makeGates(100, 8)
+for (const count of [1, 2, 16, 200]) {
+	const chunks = balancedChunks(gatesToBalance, count, new Map([[0, 100], [1, 1]]))
+	assert.ok(chunks.every(chunk => chunk.length > 0))
+	assert.equal(chunks.length, Math.min(count, gatesToBalance.length))
+	assert.deepEqual(chunks.flat(), gatesToBalance)
+	for (const input of generateCombinations(8)) assert.deepEqual(evalCircuit(chunks.flat(), input), evalCircuit(gatesToBalance, input))
+}
+assert.deepEqual(balancedChunks([], 4), [])
+// A changed-wire preference affects traversal order, not the set of available subsets.
+const savedRandom = Math.random
+try {
+	Math.random = () => 0.5
+	const baseline = [...findConvexSubsets(3, gatesToBalance)]
+	Math.random = () => 0.5
+	const preferred = [...findConvexSubsets(3, gatesToBalance, new Set([0]))]
+	assert.deepEqual(preferred.map(lines => lines.join(',')).sort(), baseline.map(lines => lines.join(',')).sort())
+} finally { Math.random = savedRandom }
+console.log('Adaptive, incremental, packed, normalized-cache, pruning and balancing regressions passed')
+
+// Exercise the actual rewrite and subset-search paths with a tiny SQLite table.
+const { massOptimizeStep, optimizeSubset } = await import('./processing.js')
+const { ioHash } = await import('./utils.js')
+const integrationDb = new sqlite3.Database(':memory:')
+const runSql = (sql: string, params: unknown[] = []) => new Promise<void>((resolve, reject) => integrationDb.run(sql, params, error => error ? reject(error) : resolve()))
+try {
+	await runSql('CREATE TABLE InputOutputReplacers (ioIdentifier TEXT PRIMARY KEY, replacerGates TEXT NOT NULL)')
+	const inputs = generateCombinations(4)
+	await runSql('INSERT INTO InputOutputReplacers VALUES (?, ?)', [ioHash(inputs.flat()), ''])
+	const cnot = { a: 1, b: 0, target: 0, gate_i: 3 }
+	const circuit = Array.from({ length: 8 }, () => ({ ...cnot }))
+	const result = await massOptimizeStep(integrationDb, new LimitedMap(100), new LimitedMap(100), circuit, 2, false, false, 4, inputs)
+	assert.ok(result.gates.length < circuit.length)
+	assert.deepEqual(inputs.map(input => evalCircuit(result.gates, input)), inputs.map(input => evalCircuit(circuit, input)))
+	for (const offset of [0, 4]) {
+		const identity = Array.from({ length: 6 }, (_, i) => ({ a: 0, b: 0, target: offset + i % 2, gate_i: 0 }))
+		const exact = await massOptimizeStep(integrationDb, new LimitedMap(100), new LimitedMap(100), identity, 3, false, true, 4, inputs, false)
+		assert.ok(exact.gates.length < identity.length)
+		assert.deepEqual(generateCombinations(6).map(input => evalCircuit(exact.gates, input)), generateCombinations(6).map(input => evalCircuit(identity, input)))
+	}
+	await runSql('DELETE FROM InputOutputReplacers')
+	const tested = new LimitedMap<string, boolean>(1000)
+	const processed = new LimitedMap<string, boolean>(1000)
+	const lookups = new LimitedMap<string, Gate[] | null>(1000)
+	const counters = () => ({ passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const })
+	const first = counters(), second = counters()
+	await optimizeSubset(integrationDb, circuit, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, first, () => {}, tested, 'rainbow')
+	await optimizeSubset(integrationDb, circuit, lookups, processed, 3, 2, 'heavy', () => false, 4, inputs, second, () => {}, tested, 'rainbow')
+	assert.ok(first.checks > 0)
+	assert.equal(second.checks, 0)
+} finally { await new Promise<void>((resolve, reject) => integrationDb.close(error => error ? reject(error) : resolve())) }
+console.log('Solver integration regressions passed')
+
+const { formatStatus } = await import('./logging.js')
+const compact = formatStatus({ original: 1000, roundStart: 200, candidate: 100, saved: 100, statuses: [status, { updatedAtMs: 0, done: true }], elapsedMs: 60_000 })
+assert.match(compact, /90.00% fewer than original; 100 removed this round/)
+assert.match(compact, /Checkpoint up to date/)
+assert.match(compact, /1 worker active/)
+assert.match(compact, /20% elapsed/)
+assert.ok(!compact.includes('oldest'))
+assert.ok(!compact.includes('subsets'))
+const completedStatus = formatStatus({ original: 100, roundStart: 100, candidate: 50, statuses: [{ updatedAtMs: 0, done: true }], elapsedMs: 300_000 })
+assert.match(completedStatus, /All workers finished/)
+assert.match(completedStatus, /Round finished in 5m 0s/)
+assert.ok(!completedStatus.includes('% elapsed'))
+assert.match(completedStatus, /No checkpoint saved this run yet/)
+const lateStatus = formatStatus({ original: 100, roundStart: 100, candidate: 100, saved: 100, statuses: [status], elapsedMs: 90_000 })
+assert.match(lateStatus, /Warning: 1 worker update delayed/)
+assert.match(lateStatus, /6% elapsed/)
+assert.ok(!formatStatus({ original: 0, roundStart: 0, candidate: 0, statuses: [], elapsedMs: 0 }).includes('NaN'))

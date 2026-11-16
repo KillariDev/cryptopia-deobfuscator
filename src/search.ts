@@ -1,0 +1,94 @@
+import { Gate } from './types.js'
+import { getVars, hashGates, mapCircuit, reverseMapCircuit } from './utils.js'
+import { LimitedMap } from './limitedMap.js'
+
+/** First-use renaming preserves gate order and control function orientation. */
+export function normalizeWindow(gates: Gate[]) {
+	const wires = [...new Set(gates.flatMap(getVars))]
+	const normalized = mapCircuit(gates, wires).map(gate => {
+		if ([0, 15].includes(gate.gate_i)) return { ...gate, a: 0, b: 0 }
+		if ([3, 12].includes(gate.gate_i)) return { ...gate, b: 0 }
+		if ([5, 10].includes(gate.gate_i)) return { ...gate, a: 0 }
+		return gate
+	})
+	return { wires, normalized, key: hashGates(normalized) }
+}
+export class RewriteCache {
+	private cache: LimitedMap<string, Gate[] | null>
+	constructor(entries: number) { this.cache = new LimitedMap(entries) }
+	resolve(gates: Gate[], compute: (normalized: Gate[]) => Gate[] | undefined) {
+		const { wires, normalized, key } = normalizeWindow(gates)
+		let result = this.cache.get(key)
+		if (result === undefined) {
+			result = compute(normalized) ?? null
+			this.cache.set(key, result)
+		}
+		return result === null ? undefined : reverseMapCircuit(result, wires)
+	}
+}
+export const improving = (old: Gate[]) => {
+	const oldWires = new Set(old.flatMap(getVars)).size
+	const oldReads = old.reduce((sum, gate) => sum + getVars(gate).length, 0)
+	return (candidate: Gate[]) => {
+		if (candidate.length !== old.length) return candidate.length < old.length
+		const wires = new Set(candidate.flatMap(getVars)).size
+		return wires !== oldWires ? wires < oldWires : candidate.reduce((sum, gate) => sum + getVars(gate).length, 0) < oldReads
+	}
+}
+
+export type SearchArm = { subset: number, slice: number, method?: 'all' | 'variables' | 'rainbow' }
+type Score = { count: number, milliseconds: number, removed: number }
+export class SearchScheduler {
+	private scores = new Map<string, Score>()
+	private choices = 0
+	constructor(private explorationEvery: number) {}
+	choose(options: SearchArm[], random = Math.random) {
+		this.choices++
+		const key = (x: SearchArm) => `${x.subset}:${x.slice}:${x.method ?? 'all'}`
+		const explore = this.choices % this.explorationEvery === 0
+		const untried = options.filter(x => !this.scores.has(key(x)))
+		if (!options.length) throw new Error('No search options')
+		if (explore || untried.length === options.length) {
+			const pool = untried.length ? untried : options
+			return pool[Math.floor(random() * pool.length)]
+		}
+		return options.reduce((best, x) => {
+			const rate = (o: typeof x) => { const score = this.scores.get(key(o)); return score ? score.removed / Math.max(1, score.milliseconds) : -1 }
+			return rate(x) > rate(best) ? x : best
+		})
+	}
+	record(option: SearchArm, elapsed: number, removed: number) {
+		const key = `${option.subset}:${option.slice}:${option.method ?? 'all'}`
+		const score = this.scores.get(key) ?? { count: 0, milliseconds: 0, removed: 0 }
+		score.count++
+		score.milliseconds += Math.max(0, elapsed)
+		score.removed += Math.max(0, removed)
+		this.scores.set(key, score)
+	}
+}
+
+/** Contiguous chunks preserve circuit order; costs include measured history. */
+export function balancedChunks(gates: Gate[], count: number, wireCosts: Map<number, number> = new Map()) {
+	if (!gates.length) return []
+	count = Math.max(1, Math.min(count, gates.length))
+	const meanCost = wireCosts.size ? [...wireCosts.values()].reduce((sum, cost) => sum + cost, 0) / wireCosts.size : 1
+	const weights = gates.map((gate, index) => {
+		const wires = new Set(getVars(gate))
+		const previous = index ? new Set(getVars(gates[index - 1])) : new Set<number>()
+		const overlap = [...wires].filter(wire => previous.has(wire)).length
+		const measured = [...wires].reduce((sum, wire) => sum + (wireCosts.get(wire) ?? meanCost), 0) / wires.size
+		return (wires.size + overlap) * Math.max(0.25, Math.min(4, measured / Math.max(0.001, meanCost)))
+	})
+	const chunks: Gate[][] = []
+	let start = 0, remaining = weights.reduce((a, b) => a + b, 0)
+	for (let part = 0; part < count - 1; part++) {
+		const target = remaining / (count - part)
+		let cost = 0, end = start
+		while (end < gates.length - (count - part - 1) && cost < target) cost += weights[end++]
+		chunks.push(gates.slice(start, end))
+		remaining -= cost
+		start = end
+	}
+	chunks.push(gates.slice(start))
+	return chunks
+}
