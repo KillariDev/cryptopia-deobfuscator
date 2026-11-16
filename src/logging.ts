@@ -20,7 +20,7 @@ export type WorkerActivity = {
 	improvements: number
 	stage: 'searching' | 'shuffling' | 'verifying'
 }
-export type WorkerStatus = { activity?: WorkerActivity, updatedAtMs: number, done: boolean }
+export type WorkerStatus = { activity?: WorkerActivity, updatedAtMs: number, done: boolean, started?: boolean }
 
 export function formatWorkerActivity(statuses: WorkerStatus[], elapsedMs: number, budgetMs: number) {
 	const totals = { passes: 0, subsets: 0, checks: 0, improvements: 0 }
@@ -31,7 +31,7 @@ export function formatWorkerActivity(statuses: WorkerStatus[], elapsedMs: number
 		if (status.done) stages.completed++
 		else {
 			stages[status.activity?.stage ?? 'waiting']++
-			oldest = Math.max(oldest, elapsedMs - status.updatedAtMs)
+			if (status.started !== false) oldest = Math.max(oldest, elapsedMs - status.updatedAtMs)
 		}
 	}
 	const budget = Math.min(100, Math.floor(Math.max(0, elapsedMs) / budgetMs * 100))
@@ -60,6 +60,8 @@ export function formatStatus(status: SolverStatus) {
 		: elapsedMs >= targetMs ? 'Finishing round (time target reached; waiting for optimization steps)'
 		: `Round time: ${duration(elapsedMs)} / ${duration(targetMs)} target (${progress}% elapsed)`
 	const save = saved === undefined ? 'No checkpoint saved this run yet' : saved === candidate ? 'Checkpoint up to date' : `Checkpoint: ${saved} gates; new reductions pending save`
-	const late = statuses.filter(worker => !worker.done && elapsedMs - worker.updatedAtMs > Math.max(config.timing.summarySeconds * 2000, config.timing.workerReportSeconds * 3000)).length
-	return `Gates: ${candidate} (${reduction.toFixed(2)}% fewer than original; ${Math.max(0, roundStart - candidate)} removed this round) | ${save} | ${finished === statuses.length ? 'All workers finished' : `${statuses.length - finished} worker${statuses.length - finished === 1 ? '' : 's'} active`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
+	const active = statuses.filter(worker => !worker.done && worker.started !== false).length
+	const queued = statuses.filter(worker => !worker.done && worker.started === false).length
+	const late = statuses.filter(worker => !worker.done && worker.started !== false && elapsedMs - worker.updatedAtMs > Math.max(config.timing.summarySeconds * 2000, config.timing.workerReportSeconds * 3000)).length
+	return `Gates: ${candidate} (${reduction.toFixed(2)}% fewer than original; ${Math.max(0, roundStart - candidate)} removed this round) | ${save} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
 }

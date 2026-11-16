@@ -512,12 +512,14 @@ export const dependencyGraphToMap = (nodes: DependencyNode[]) => {
 	return dependantMap
 }
 
-export function* findConvexSubsets(N: number, gates: Gate[], preferredWires?: Set<number>): Generator<number[]> {
+export type DependencyContext = { nodes: DependencyNode[], dependantMap: Map<number, number[]>, access: WireAccessIndex }
+
+export function* findConvexSubsets(N: number, gates: Gate[], preferredWires?: Set<number>, context?: DependencyContext): Generator<number[]> {
 	//yield Array.from(Array(gates.length).keys()) // start with current order
 	if (N === 0) return
-	const nodes = createDependencyGraph(gates)
-	const dependantMap = dependencyGraphToMap(nodes)
-	const access = indexWireAccesses(gates)
+	const nodes = context?.nodes ?? createDependencyGraph(gates)
+	const dependantMap = context?.dependantMap ?? dependencyGraphToMap(nodes)
+	const access = context?.access ?? indexWireAccesses(gates)
 
 	function shuffle(array: DependencyNode[]) {
 		let currentIndex = array.length;

@@ -1,3 +1,4 @@
+import { LookupBatcher } from './lookup-batcher.js'
 import { join } from 'path'
 import sqlite3 from 'sqlite3'
 import { config } from './config.js'
@@ -55,26 +56,24 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string
 }
 
 
+const lookupBatchers = new WeakMap<sqlite3.Database, LookupBatcher>()
 export const getReplacersByIds = async (db: sqlite3.Database, cache: LimitedMap<string, Gate[] | null>, identifiers: string[]) => {
-	const results: { ioIdentifier: string, gates: Gate[] }[] = []
-	const missing: string[] = []
-	for (const id of new Set(identifiers)) {
-		const hit = cache.get(id)
-		if (hit === undefined) missing.push(id)
-		else if (hit !== null) results.push({ ioIdentifier: id, gates: hit })
+	let batcher = lookupBatchers.get(db)
+	if (!batcher) {
+		batcher = new LookupBatcher(config.database.queryBatchSize, config.database.lookupBatchMilliseconds, async ids => {
+			const rows = await allSQL<{ ioIdentifier: Buffer, replacerGates: Buffer }>(db, 'SELECT ioIdentifier,replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + ids.map(() => '?').join(',') + ')', ids.map(keyToSql))
+			return new Map(rows.map(row => [rowKey(row.ioIdentifier), decodeGates(row.replacerGates)]))
+		})
+		lookupBatchers.set(db, batcher)
 	}
-	for (let i = 0; i < missing.length; i += config.database.queryBatchSize) {
-		const chunk = missing.slice(i, i + config.database.queryBatchSize)
-		const rows = await allSQL<{ ioIdentifier: Buffer, replacerGates: Buffer }>(db, 'SELECT ioIdentifier,replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk.map(keyToSql))
-		const found = new Set<string>()
-		for (const row of rows) {
-			const id = rowKey(row.ioIdentifier), gates = decodeGates(row.replacerGates)
-			found.add(id); cache.set(id, gates); results.push({ ioIdentifier: id, gates })
-		}
-		for (const id of chunk) if (!found.has(id)) cache.set(id, null)
-	}
-	return results
+	const resolved = await Promise.all([...new Set(identifiers)].map(async id => {
+		let gates = cache.get(id)
+		if (gates === undefined) { gates = await batcher!.get(id); cache.set(id, gates) }
+		return gates === null ? undefined : { ioIdentifier: id, gates }
+	}))
+	return resolved.filter((entry): entry is { ioIdentifier: string, gates: Gate[] } => entry !== undefined)
 }
+
 export const getReplacerById = async (db: sqlite3.Database, cache: LimitedMap<string, Gate[] | null>, id: string) => (await getReplacersByIds(db, cache, [id]))[0]?.gates ?? null
 
 export function* generateAllGates(wires: number): Generator<Gate, undefined, unknown> {

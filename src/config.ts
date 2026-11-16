@@ -6,13 +6,13 @@ import { isMainThread, workerData } from 'worker_threads'
 export const defaults = {
 	runtime: { heapMegabytes: 16384 },
 	files: { dataDirectory: 'data', latestName: 'latest.json', workerDirectory: 'worker', progressDirectory: 'progress', databaseDirectory: '.' },
-	workers: { maximum: 24, minimumChunkGates: 100, maximumChunkFraction: 0.5 },
+	workers: { maximum: 24, minimumChunkGates: 100, maximumChunkFraction: 0.5, jobsPerWorker: 4, jobSeconds: 30 },
 	timing: { roundMinutes: 25, improvedRoundMinutes: 5, summarySeconds: 30, workerReportSeconds: 5, databaseLogSeconds: 60, standaloneSaveSeconds: 60 },
 	logging: { verbose: false },
 	validation: { checkpointInputs: 20, probabilisticInputs: 202, maximumWires: 64 },
-	search: { probabilistic: true, variableElimination: true, exactMaximumWires: 7, subsetMinimum: 2, subsetMaximum: 199, sliceMinimum: 2, sliceMaximum: 199, maximumInnerChunks: 5, minimumInnerChunkGates: 200, workerShufflePasses: 200, roundShufflePasses: 2000, adaptive: true, explorationEvery: 5, searchArms: 16, prioritizeChangedWires: true, incrementalEvaluation: true, prefixCacheBytes: 8388608, prefixStride: 16, normalizedCacheEntries: 10000, balancedWorkers: true },
-	cache: { lookupEntries: 1000000, processedEntries: 1000000, shuffleEntries: 100000, subsetEntries: 100000 },
-	database: { wires: 4, gates: 5, queryBatchSize: 900, insertBatchSize: 1000000, memoryMapBytes: 268435456, generationStates: 0, generationBatchRows: 3000, keepGenerationState: false, etaWindowSamples: 5, etaWarmupSamples: 3, etaSmoothing: 0.2 },
+	search: { probabilistic: true, variableElimination: true, exactMaximumWires: 7, subsetMinimum: 2, subsetMaximum: 199, sliceMinimum: 2, sliceMaximum: 199, maximumInnerChunks: 5, minimumInnerChunkGates: 200, workerShufflePasses: 200, roundShufflePasses: 2000, adaptive: true, explorationEvery: 5, searchArms: 16, prioritizeChangedWires: true, incrementalEvaluation: true, incrementalDependencies: true, prefixCacheBytes: 8388608, prefixStride: 16, normalizedCacheEntries: 10000, balancedWorkers: true },
+	cache: { lookupEntries: 1000000, processedEntries: 1000000, shuffleEntries: 100000, subsetEntries: 100000, windowKeyBytes: 16777216 },
+	database: { wires: 4, gates: 5, queryBatchSize: 900, lookupBatchMilliseconds: 0, insertBatchSize: 1000000, memoryMapBytes: 268435456, generationStates: 0, generationBatchRows: 3000, keepGenerationState: false, etaWindowSamples: 5, etaWarmupSamples: 3, etaSmoothing: 0.2 },
 	synthesis: { templates: true, templateEntries: 10000, maximumWires: 3, maximumWindowGates: 8, maximumReplacementGates: 3, attemptEvery: 100, timeoutMs: 100, states: 2000, smt: false, meetInMiddle: false, equalitySaturation: false },
 }
 export type SolverConfig = typeof defaults
@@ -28,7 +28,7 @@ export function parseConfig(value: unknown): SolverConfig {
 			if (!Object.prototype.hasOwnProperty.call(target, key)) throw new Error(`Unknown config setting: ${section}.${key}`)
 			if (typeof setting !== typeof target[key]) throw new Error(`Invalid type for ${section}.${key}`)
 			if (typeof setting === 'string' && !setting.trim()) throw new Error(`Empty config setting: ${section}.${key}`)
-			if (typeof setting === 'number' && (!Number.isFinite(setting) || (setting < 0 || (setting === 0 && !['memoryMapBytes', 'generationStates'].includes(key))) || (key !== 'maximumChunkFraction' && key !== 'etaSmoothing' && !key.endsWith('Minutes') && !key.endsWith('Seconds') && !Number.isSafeInteger(setting)))) throw new Error(`Invalid positive setting: ${section}.${key}`)
+			if (typeof setting === 'number' && (!Number.isFinite(setting) || (setting < 0 || (setting === 0 && !['memoryMapBytes', 'generationStates', 'lookupBatchMilliseconds'].includes(key))) || (key !== 'maximumChunkFraction' && key !== 'etaSmoothing' && !key.endsWith('Minutes') && !key.endsWith('Seconds') && !Number.isSafeInteger(setting)))) throw new Error(`Invalid positive setting: ${section}.${key}`)
 			target[key] = setting
 		}
 	}

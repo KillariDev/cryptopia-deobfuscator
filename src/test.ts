@@ -300,9 +300,8 @@ const stoppedPool = new WorkerPool(1)
 try {
 	process.chdir(stopDirectory)
 	const signal = new Int32Array(new SharedArrayBuffer(4))
-	Atomics.store(signal, 0, 1)
 	const activities: string[] = []
-	const result = await stoppedPool.run(singleGate, 4, (_, activity) => { if (activity) activities.push(activity.stage) }, signal.buffer as SharedArrayBuffer)
+	const result = await stoppedPool.run(singleGate, 4, (_, activity) => { if (activity) { activities.push(activity.stage); Atomics.store(signal, 0, 1) } }, signal.buffer as SharedArrayBuffer)
 	assert.deepEqual(result, singleGate)
 	assert.ok(activities.includes('searching'))
 	assert.ok(activities.includes('verifying'))
@@ -641,3 +640,144 @@ try {
 	await rm(newTableDirectory, { recursive: true, force: true })
 }
 console.log('Stable layer ETA and single-format generation regressions passed')
+
+const { patchCircuit, LazyCircuit } = await import('./circuit-edit.js')
+const { IncrementalGraph } = await import('./incremental-graph.js')
+const { WindowFingerprints } = await import('./fingerprints.js')
+const { LookupBatcher } = await import('./lookup-batcher.js')
+for (let trial = 0; trial < 40; trial++) {
+	let gates = makeGates(40, 8)
+	const incremental = new IncrementalGraph(gates)
+	for (let step = 0; step < 12; step++) {
+		const context = incremental.context()
+		assert.deepEqual(context.nodes, createDependencyGraph(gates))
+		assert.deepEqual(context.dependantMap, dependencyGraphToMap(createDependencyGraph(gates)))
+		assert.deepEqual(context.access, indexWireAccesses(gates))
+		if (!gates.length) break
+		const selected = [...new Set(Array.from({ length: 1 + random(5) }, () => random(gates.length)))]
+		const replacement = makeGates(random(5), 8)
+		const last = Math.max(...selected)
+		const expected = [...gates.filter((_, i) => i <= last && !selected.includes(i)), ...replacement, ...gates.slice(last + 1)]
+		const patch = patchCircuit(gates, selected, replacement)
+		assert.deepEqual(patch.values, expected)
+		assert.deepEqual(patch.values.slice(patch.start, patch.start + replacement.length), replacement)
+		incremental.replace(selected, replacement)
+		gates = patch.values
+	}
+	assert.deepEqual(incremental.context().nodes, createDependencyGraph(gates))
+}
+const lazy = new LazyCircuit([singleGate, singleGate])
+assert.equal(lazy.length, 2)
+const oldSnapshot = lazy.materialize()
+assert.equal(lazy.materialize(), oldSnapshot)
+lazy.update(1, [])
+assert.equal(lazy.length, 1)
+assert.deepEqual(oldSnapshot, [...singleGate, ...singleGate])
+assert.deepEqual(lazy.materialize(), singleGate)
+assert.notEqual(lazy.materialize(), oldSnapshot)
+assert.throws(() => patchCircuit([1,2,3], [], [4]))
+for (let trial = 0; trial < 10; trial++) {
+	const gates = makeGates(25, 8), fingerprints = new WindowFingerprints(gates)
+	const cache = new LimitedMap<string, boolean>(10000)
+	for (let start = 0; start < gates.length; start++) for (let end = start; end <= gates.length; end++) {
+		assert.equal(fingerprints.key(start, end), new WindowFingerprints(gates.slice(start, end)).key(0, end - start))
+		fingerprints.remember(cache, start, end)
+		assert.equal(fingerprints.seen(cache, start, end), true)
+	}
+}
+const collisionA = new WindowFingerprints(singleGate), collisionB = new WindowFingerprints([{...singleGate[0], gate_i: 12}])
+collisionA.key = () => 'collision'; collisionB.key = () => 'collision'
+const collisions = new LimitedMap<string, boolean>(10)
+collisionA.remember(collisions, 0, 1)
+assert.equal(collisionB.seen(collisions, 0, 1), false)
+collisionB.remember(collisions, 0, 1)
+assert.equal(collisionA.seen(collisions, 0, 1), true)
+const tinyCache = new LimitedMap<string, boolean>(10)
+new WindowFingerprints(singleGate, 1).remember(tinyCache, 0, 1)
+assert.equal(tinyCache.size(), 0)
+let calls = 0
+const batcher = new LookupBatcher(2, 0, async ids => { calls++; return new Map(ids.filter(id => id !== 'missing').map(id => [id, singleGate])) })
+const shared = batcher.get('a')
+assert.equal(batcher.get('a'), shared)
+assert.deepEqual(await Promise.all([shared, batcher.get('b'), batcher.get('missing')]), [singleGate, singleGate, null])
+assert.equal(calls, 2)
+let resolveFetch!: (value: Map<string, Gate[]>) => void
+const pendingLookup = new LookupBatcher(10, 0, () => new Promise(resolve => { resolveFetch = resolve }))
+const inFlight = pendingLookup.get('same')
+await Promise.resolve()
+assert.equal(pendingLookup.get('same'), inFlight)
+resolveFetch(new Map([['same', singleGate]]))
+assert.deepEqual(await inFlight, singleGate)
+const failingLookup = new LookupBatcher(10, 0, async () => { throw new Error('lookup failed') })
+await assert.rejects(failingLookup.get('a'), /lookup failed/)
+await assert.rejects(failingLookup.get('a'), /lookup failed/) // retry after rejection
+const queuedStatus = formatStatus({ original: 10, roundStart: 10, candidate: 10, statuses: [{updatedAtMs:0,done:false,started:false}], elapsedMs: 100000 })
+assert.match(queuedStatus, /0 workers active; 1 job queued/)
+assert.ok(!queuedStatus.includes('Warning'))
+console.log('Circuit editing, local graph updates, lazy snapshots, verified rolling fingerprints and lookup coalescing regressions passed')
+
+const schedulingFixture = new URL('data:text/javascript,' + encodeURIComponent(`
+import {parentPort} from 'node:worker_threads';
+parentPort.on('message', async ({gates,stopSignal,budgetMs}) => {
+ const barrier=new Int32Array(stopSignal);
+ parentPort.postMessage({progress:gates.length});
+ Atomics.add(barrier,1,1);
+ while(Atomics.load(barrier,1)<2) await new Promise(resolve=>setTimeout(resolve,1));
+ await new Promise(resolve=>setTimeout(resolve,gates[0].a===0?80:2));
+ parentPort.postMessage({gates:gates.map(gate=>({...gate,b:budgetMs}))});
+});`))
+const schedulingPool = new WorkerPool(2, schedulingFixture)
+const schedulingSignal = new Int32Array(new SharedArrayBuffer(8))
+try {
+	const completedOrder: number[] = [], activeJobs = new Set<number>()
+	let peak = 0
+	const tasks = [0,1,2,3].map(id => schedulingPool.run([{a:id,b:0,target:0,gate_i:0}], 4, () => {
+		activeJobs.add(id); peak = Math.max(peak, activeJobs.size)
+	}, schedulingSignal.buffer as SharedArrayBuffer, 9).then(gates => { activeJobs.delete(id); completedOrder.push(id); return gates }))
+	const results = await Promise.all(tasks)
+	assert.deepEqual(results.map(gates => gates[0].a), [0,1,2,3])
+	assert.ok(completedOrder.indexOf(1) < completedOrder.indexOf(0))
+	assert.equal(peak, 2)
+	assert.ok(results.every(gates => gates[0].b === 9))
+} finally { await schedulingPool.close() }
+const cancellationFixture = new URL('data:text/javascript,' + encodeURIComponent(`
+import {parentPort} from 'node:worker_threads';
+parentPort.on('message', async ({gates,stopSignal}) => {
+ parentPort.postMessage({progress:gates.length});
+ const signal=new Int32Array(stopSignal);
+ while(!Atomics.load(signal,0)) await new Promise(resolve=>setTimeout(resolve,1));
+ parentPort.postMessage({gates});
+});`))
+const cancellationPool = new WorkerPool(2, cancellationFixture)
+cancellationPool.setConcurrency(1)
+assert.throws(() => cancellationPool.setConcurrency(3), /concurrency/)
+try {
+	const signal = new Int32Array(new SharedArrayBuffer(4))
+	let secondRan = false
+	const active = cancellationPool.run(singleGate, 4, () => { Atomics.store(signal,0,1) }, signal.buffer as SharedArrayBuffer)
+	const queued = cancellationPool.run(singleGate, 4, () => { secondRan = true }, signal.buffer as SharedArrayBuffer)
+	assert.deepEqual(await Promise.all([active, queued]), [singleGate, singleGate])
+	assert.equal(secondRan, false)
+} finally { await cancellationPool.close() }
+const coalescedDb = new sqlite3.Database(':memory:')
+try {
+	await runSQL(coalescedDb, 'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
+	await runSQL(coalescedDb, 'INSERT INTO InputOutputReplacers VALUES(?,?)', [Buffer.from('ff','hex'), Buffer.alloc(0)])
+	const nativeAll = coalescedDb.all.bind(coalescedDb)
+	let sqlCalls = 0
+	coalescedDb.all = ((...args: unknown[]) => { sqlCalls++; return (nativeAll as Function)(...args) }) as typeof coalescedDb.all
+	const values = await Promise.all([
+		getReplacersByIds(coalescedDb, new LimitedMap(10), ['ff']),
+		getReplacersByIds(coalescedDb, new LimitedMap(10), ['ff','00']),
+		getReplacersByIds(coalescedDb, new LimitedMap(10), ['00']),
+	])
+	assert.equal(sqlCalls, 1)
+	assert.deepEqual(values.map(matches => matches.length), [1,1,0])
+} finally { await closeBuild(coalescedDb) }
+const bounded = new LimitedMap<string,boolean>(100)
+const firstWindow = new WindowFingerprints(singleGate, 256), secondWindow = new WindowFingerprints([{...singleGate[0], gate_i:12}], 256)
+firstWindow.remember(bounded,0,1)
+secondWindow.remember(bounded,0,1)
+assert.equal(secondWindow.seen(bounded,0,1), true)
+assert.equal(firstWindow.seen(bounded,0,1), false)
+console.log('Out-of-order jobs, cooperative queue cancellation, SQL request sharing and window-cache bounds passed')
