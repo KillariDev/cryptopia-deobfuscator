@@ -1,3 +1,4 @@
+import { config, configPath } from './config.js'
 import { existsSync } from 'fs'
 import { verboseLogging } from './logging.js'
 import { basename, dirname, resolve } from 'path'
@@ -7,7 +8,7 @@ import { outputPaths } from './storage.js'
 import { configuredWorkerCount } from './threads.js'
 import { RAINBOW_TABLE_GATES, RAINBOW_TABLE_WIRES } from './rainbowtable.js'
 
-export const WORKER_ROUND_MS = 25 * 60_000
+export const WORKER_ROUND_MS = config.timing.roundMinutes * 60_000
 export type JobCircuits = { originalCircuit: CircuitData, inputCircuit: CircuitData }
 
 export function loadJob(working: string, original: string): JobCircuits {
@@ -15,6 +16,9 @@ export function loadJob(working: string, original: string): JobCircuits {
 	if (!originalCircuit) throw new Error(`Cannot load original circuit: ${original}.json`)
 	const inputCircuit = existsSync(`${working}.json`) ? readJsonFile(`${working}.json`) as CircuitData | null : originalCircuit
 	if (!inputCircuit) throw new Error(`Cannot load working circuit: ${working}.json`)
+	for (const circuit of [originalCircuit, inputCircuit]) {
+		if (circuit.wire_count > config.validation.maximumWires) throw new Error('Circuit exceeds validation.maximumWires in solver.config.json')
+	}
 	return { originalCircuit, inputCircuit }
 }
 
@@ -24,20 +28,22 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 	const resuming = inputCircuit !== originalCircuit
 	return [
 		`Task: optimize circuit ${basename(working)}`,
+		`Settings file: ${configPath}`,
+		...Object.entries(config).map(([section, settings]) => `Settings ${section}: ${JSON.stringify(settings)}`),
 		`Mode: ${resuming ? 'resume saved circuit' : 'start from original circuit'}`,
 		`Original: ${resolve(original + '.json')} (${originalCircuit.gates.length} gates, ${originalCircuit.wire_count} wires)`,
 		`Input: ${resolve((resuming ? working : original) + '.json')} (${inputCircuit.gates.length} gates, ${inputCircuit.wire_count} wires)`,
 		`Requested working file: ${resolve(working + '.json')}`,
-		`Latest completed circuit: ${resolve(paths.latest)}`,
+		`Latest verified circuit: ${resolve(paths.latest)}`,
 		`Progress checkpoints: ${resolve(dirname(paths.progress(inputCircuit.gates.length)))}`,
 		`Worker snapshots: ${resolve(dirname(paths.worker(0)))}`,
 		`Worker limit: ${configuredWorkerCount()} (${process.env.OPTIMIZER_WORKERS === undefined ? 'automatic CPU-based limit' : 'OPTIMIZER_WORKERS override'}); actual count depends on circuit size`,
 		`Worker round budget: ${WORKER_ROUND_MS / 60_000} minutes (checked between optimization steps)`,
-		`Rainbow table: ${resolve(`canonHashrainbowtable_${RAINBOW_TABLE_WIRES}_${RAINBOW_TABLE_GATES}.db`)} (${RAINBOW_TABLE_WIRES} wires, up to ${RAINBOW_TABLE_GATES} gates)`,
-		`Logging: ${verboseLogging() ? 'verbose' : 'summaries every 30 seconds (OPTIMIZER_VERBOSE=1 enables details)'}`,
-		'Optimization: heavy phase; randomized subset and slice sizes from 2 to 199',
-		'Validation: 20 random inputs at startup/checkpoints; probabilistic replacements use 202 inputs',
-		'Folders are created automatically. Completed rounds are saved; Ctrl+C stops the job.',
+		`Rainbow table: ${resolve(config.files.databaseDirectory, `canonHashrainbowtable_${RAINBOW_TABLE_WIRES}_${RAINBOW_TABLE_GATES}.db`)} (${RAINBOW_TABLE_WIRES} wires, up to ${RAINBOW_TABLE_GATES} gates)`,
+		`Logging: ${verboseLogging() ? 'verbose' : `summaries every ${config.timing.summarySeconds} seconds (OPTIMIZER_VERBOSE=1 enables details)`}`,
+		`Optimization: probabilistic=${config.search.probabilistic}; subset sizes ${config.search.subsetMinimum}-${config.search.subsetMaximum}; slice sizes ${config.search.sliceMinimum}-${config.search.sliceMaximum}`,
+		`Validation: ${config.validation.checkpointInputs} random inputs at startup/checkpoints; probabilistic replacements use ${config.validation.probabilisticInputs} inputs`,
+		`Checkpoints: every ${config.timing.summarySeconds} seconds when gates decrease; rounds finish after ${config.timing.improvedRoundMinutes} minutes with reductions, otherwise use the ${config.timing.roundMinutes}-minute budget. Stop requests are checked between steps. Ctrl+C stops the job.`,
 	].join('\n')
 }
 

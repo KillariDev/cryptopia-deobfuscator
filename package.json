@@ -6,8 +6,8 @@
 	"main": "index.js",
 	"scripts": {
 		"test": "npx tsc && node --max-old-space-size=16384 dist/test.js",
-		"optimize": "npx tsc && node --max-old-space-size=16384 dist/index.js",
-		"optimize-prof": "npx tsc && node --prof --max-old-space-size=16384 dist/index.js"
+		"optimize": "npx tsc && node dist/launch.js",
+		"optimize-prof": "npx tsc && node dist/launch.js --profile"
 	},
 	"keywords": [],
 	"author": "",

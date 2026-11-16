@@ -153,13 +153,14 @@ export const mapVariablesToIndexes = (gates: Gate[]) => {
 	return [...new Set(gates.flatMap((gate) => getVars(gate)))].sort()
 }
 export const mapCircuit = (gates: Gate[], indexMapping: number[]) => {
+	const inverse = new Map(indexMapping.map((wire, index) => [wire, index]))
 	return gates.map((gate) => {
-		const a = indexMapping.indexOf(gate.a)
-		const b = indexMapping.indexOf(gate.b)
+		const a = inverse.get(gate.a) ?? -1
+		const b = inverse.get(gate.b) ?? -1
 		const newGate = {
 			a: a < 0 ? 0 : a,
 			b: b < 0 ? 0 : b,
-			target: indexMapping.indexOf(gate.target),
+			target: inverse.get(gate.target) ?? -1,
 			gate_i: gate.gate_i
 		}
 		return newGate
@@ -454,43 +455,46 @@ class SortedArray {
 }
 
 
-const getAllFutureDependencies = (futureDependsCache: Map<number, number[]>, currentNode: DependencyNode, subsetSet: Set<number>, maxNodeNumber: number, gates: Gate[]) => {
-	const cache = futureDependsCache.get(currentNode.lineNumber)
-	if (cache) return cache
-	if (currentNode.dependOnFutureLine === -1) return []
-	if (currentNode.dependOnFutureLine >= maxNodeNumber) return []
-	const currentGate = gates[currentNode.lineNumber]
-	const vars = getVars(currentGate)
-	const target = vars[0]
-	const rest = vars.slice(1)
-	const depends: number[] = []
-	for (let index = currentNode.dependOnFutureLine; index < maxNodeNumber; index++) {
-		if (subsetSet.has(index)) continue
-		const futureLine = gates[index]
-		const futureVars = getVars(futureLine)
-		const futureTarget = futureVars[0]
-		if (futureVars.includes(target) || rest.includes(futureTarget)) {
-			depends.push(index)
-		}
+export type WireAccessIndex = { accesses: Map<number, number[]>, writes: Map<number, number[]> }
+export function indexWireAccesses(gates: Gate[]): WireAccessIndex {
+	const accesses = new Map<number, number[]>(), writes = new Map<number, number[]>()
+	const add = (map: Map<number, number[]>, wire: number, line: number) => {
+		const list = map.get(wire)
+		if (list) list.push(line)
+		else map.set(wire, [line])
 	}
-	futureDependsCache.set(currentNode.lineNumber, depends)
-	return depends
+	gates.forEach((gate, line) => {
+		for (const wire of new Set(getVars(gate))) add(accesses, wire, line)
+		add(writes, gate.target, line)
+	})
+	return { accesses, writes }
 }
 
-function needToAddAsWell(dependantMap: Map<number, number[]>, subset: number[], subsetSet: Set<number>, node: number, maxNodeNumber: number, nodes: DependencyNode[], gates: Gate[]): { pastDepend: number[], addNode: number } {
-	const futureDependsCache = new Map<number, number[]>()
+// Only the last conflicting future line is consumed by subset selection.
+function lastUnselected(lines: number[] = [], after: number, before: number, subset: Set<number>) {
+	let low = 0, high = lines.length
+	while (low < high) {
+		const mid = (low + high) >>> 1
+		if (lines[mid] < before) low = mid + 1
+		else high = mid
+	}
+	for (let i = low - 1; i >= 0 && lines[i] > after; i--) {
+		if (!subset.has(lines[i])) return lines[i]
+	}
+	return -1
+}
+
+function needToAddAsWell(dependantMap: Map<number, number[]>, subsetSet: Set<number>, node: number, maxNodeNumber: number, gates: Gate[], access: WireAccessIndex): { pastDepend: number[], addNode: number } {
 	let currentNode = node
-	while(true) {
-		const requirements = getAllFutureDependencies(futureDependsCache, nodes[currentNode], subsetSet, maxNodeNumber, gates)
-		if (requirements.length === 0) {
-			const depends = dependantMap.get(currentNode) || []
-			return {
-				pastDepend: depends.filter((x) => !subset.includes(x) && x < maxNodeNumber),
-				addNode: currentNode
-			}
-		} else {
-			currentNode = requirements[requirements.length - 1]
+	while (true) {
+		const [target, ...controls] = getVars(gates[currentNode])
+		let last = lastUnselected(access.accesses.get(target), currentNode, maxNodeNumber, subsetSet)
+		for (const wire of controls) last = Math.max(last, lastUnselected(access.writes.get(wire), currentNode, maxNodeNumber, subsetSet))
+		if (last === -1) return {
+			pastDepend: (dependantMap.get(currentNode) ?? []).filter(x => !subsetSet.has(x) && x < maxNodeNumber),
+			addNode: currentNode,
 		}
+		currentNode = last
 	}
 }
 
@@ -498,7 +502,9 @@ export const dependencyGraphToMap = (nodes: DependencyNode[]) => {
 	const dependantMap = new Map<number, number[]>()
 	for (const node of nodes) {
 		for (const depend of node.dependOnPastLines) {
-			dependantMap.set(depend, [...dependantMap.get(depend) ?? [], node.lineNumber])
+			const list = dependantMap.get(depend)
+			if (list) list.push(node.lineNumber)
+			else dependantMap.set(depend, [node.lineNumber])
 		}
 	}
 	return dependantMap
@@ -509,6 +515,7 @@ export function* findConvexSubsets(N: number, gates: Gate[]): Generator<number[]
 	if (N === 0) return
 	const nodes = createDependencyGraph(gates)
 	const dependantMap = dependencyGraphToMap(nodes)
+	const access = indexWireAccesses(gates)
 
 	function shuffle(array: DependencyNode[]) {
 		let currentIndex = array.length;
@@ -529,12 +536,12 @@ export function* findConvexSubsets(N: number, gates: Gate[]): Generator<number[]
 
 	const revesedNodes = shuffle(nodes.slice())
 	for (const node of revesedNodes) {
-		const currentSubset = dependencySort(dependantMap, node, N, nodes, gates)
+		const currentSubset = dependencySort(dependantMap, node, N, nodes, gates, access)
 		if (currentSubset.length >= N) yield currentSubset
 	}
 }
 
-export const dependencySort = (dependantMap: Map<number, number[]>, node: DependencyNode, maxLength: number, nodes: DependencyNode[], gates: Gate[]) => {
+export const dependencySort = (dependantMap: Map<number, number[]>, node: DependencyNode, maxLength: number, nodes: DependencyNode[], gates: Gate[], access = indexWireAccesses(gates)) => {
 	const currentSubset: number[] = []
 	const currentSubsetSet = new Set<number>()
 	let nonExploredDepenencies = new SortedArray()
@@ -545,7 +552,7 @@ export const dependencySort = (dependantMap: Map<number, number[]>, node: Depend
 		const candidate = nonExploredDepenencies.popMin()
 		if (candidate === undefined) break
 		if (currentSubsetSet.has(candidate)) continue
-		const needToAdd = needToAddAsWell(dependantMap, currentSubset, currentSubsetSet, candidate, node.lineNumber, nodes, gates)
+		const needToAdd = needToAddAsWell(dependantMap, currentSubsetSet, candidate, node.lineNumber, gates, access)
 		if (needToAdd.pastDepend.length > 0) {
 			nonExploredDepenencies.add([candidate, ...needToAdd.pastDepend]) //push us pack with the new deps
 			continue

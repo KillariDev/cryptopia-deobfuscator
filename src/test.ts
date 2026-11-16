@@ -194,3 +194,166 @@ try {
 	else process.env.OPTIMIZER_VERBOSE = previousVerbose
 }
 console.log('Performance and correctness regressions passed')
+
+// Compare indexed subset selection to the former forward scans.
+const { referenceDependencySort } = await import('./test-reference.js')
+const { dependencySort, dependencyGraphToMap, indexWireAccesses, mapCircuit, mapVariablesToIndexes } = await import('./utils.js')
+const { findMatchingOperation } = await import('./processing.js')
+for (let trial = 0; trial < 60; trial++) {
+	const gates = makeGates(50, 8)
+	const nodes = createDependencyGraph(gates)
+	const map = dependencyGraphToMap(nodes)
+	const access = indexWireAccesses(gates)
+	for (const node of nodes) for (const size of [2, 8, 30]) {
+		assert.deepEqual(dependencySort(map, node, size, nodes, gates, access), referenceDependencySort(map, node, size, nodes, gates))
+	}
+	const mapping = mapVariablesToIndexes(gates)
+	const referenceMapping = gates.map(gate => ({ a: Math.max(0, mapping.indexOf(gate.a)), b: Math.max(0, mapping.indexOf(gate.b)), target: mapping.indexOf(gate.target), gate_i: gate.gate_i }))
+	assert.deepEqual(mapCircuit(gates, mapping), referenceMapping)
+	// Enumerate every pair independently, preserving the original match ordering.
+	const matches: { gateIndex1: number, gateIndex2: number, matchingVariable: number }[] = []
+	for (let i = 0; i < gates.length; i++) for (let j = i + 1; j < gates.length; j++) {
+		if (gates[i].target !== gates[j].target) continue
+		const a = getVars(gates[i]), b = getVars(gates[j])
+		if (gates[i].gate_i === 15 && gates[j].gate_i === 15) { matches.push({ gateIndex1: i, gateIndex2: j, matchingVariable: a[0] }); continue }
+		if (a.length !== b.length) continue
+		for (const [x,y] of [[1,1],[1,2],[2,1],[2,2]]) {
+			if (a[x] !== undefined && a[x] === b[y]) { matches.push({ gateIndex1: i, gateIndex2: j, matchingVariable: a[x] }); break }
+		}
+	}
+	assert.deepEqual(findMatchingOperation(gates), matches[0])
+}
+for (const wires of [8, 64]) {
+	// Identity outputs reveal the exact fixed test inputs without changing the seed.
+	const inputs: boolean[][] = []
+	assert.equal(areCircuitsProbabilisticallyTheSame(inputs, [], [], 202, wires), true)
+	for (let trial = 0; trial < 20; trial++) {
+		const old = makeGates(20, wires)
+		const candidate = trial % 2 ? old : makeGates(20, wires)
+		for (const attempts of [0, 1, 31, 32, 33, 202]) {
+			const expected = inputs.slice(0, attempts).every(input => JSON.stringify(evalCircuit(old, input)) === JSON.stringify(evalCircuit(candidate, input)))
+			assert.equal(areCircuitsProbabilisticallyTheSame([], old, candidate, attempts, wires), expected)
+		}
+	}
+	// Ensure rejection can happen after the initial scalar input has passed.
+	const control = inputs[0].findIndex((value, wire) => inputs.slice(1).some(input => input[wire] !== value))
+	assert.ok(control >= 0)
+	const candidate = [{ a: control, b: 0, target: (control + 1) % wires, gate_i: inputs[0][control] ? 12 : 3 }]
+	assert.equal(areCircuitsProbabilisticallyTheSame([], [], candidate, 1, wires), true)
+	assert.equal(areCircuitsProbabilisticallyTheSame([], [], candidate, 202, wires), false)
+}
+assert.equal(findMatchingOperation([]), undefined)
+const copyDir = await mkdtemp(join(tmpdir(), 'deobfuscator-copies-'))
+try {
+	const { writeCircuitCopies } = await import('./storage.js')
+	const paths = [join(copyDir, 'progress', 'checkpoint.json'), join(copyDir, 'latest.json')]
+	let serialized = 0
+	const gate = { ...singleGate[0], get a() { serialized++; return singleGate[0].a } }
+	writeCircuitCopies([...paths, paths[0]], 4, [gate])
+	assert.equal(serialized, 1)
+	assert.equal(readFileSync(paths[0], 'utf8'), readFileSync(paths[1], 'utf8'))
+} finally { await rm(copyDir, { recursive: true, force: true }) }
+console.log('Additional candidate and dependency regressions passed')
+
+// Repeated native database initialization and shutdown must not race.
+const workerDir = await mkdtemp(join(tmpdir(), 'deobfuscator-lifecycle-'))
+try {
+	process.chdir(workerDir)
+	for (let i = 0; i < 5; i++) {
+		const pool = new WorkerPool(1)
+		try { assert.deepEqual(await pool.run([], 4), []) }
+		finally { await pool.close() }
+	}
+} finally {
+	process.chdir(originalCwd)
+	await rm(workerDir, { recursive: true, force: true })
+}
+
+const { formatWorkerActivity, shouldFinishReducedRound } = await import('./logging.js')
+const status = { activity: { passes: 3, subsets: 120, checks: 900, improvements: 4, stage: 'searching' as const }, updatedAtMs: 5_000, done: false }
+const detail = formatWorkerActivity([status, { updatedAtMs: 0, done: true }], 10_000, 25 * 60_000)
+assert.match(detail, /3 passes, 120 subsets visited, 900 optimization checks, 4 improving rewrites/)
+assert.match(detail, /1 searching/)
+assert.match(detail, /1 completed/)
+assert.match(detail, /5s ago/)
+assert.equal(shouldFinishReducedRound(299_999, 100, 99), false)
+assert.equal(shouldFinishReducedRound(300_000, 100, 99), true)
+assert.equal(shouldFinishReducedRound(600_000, 100, 100), false)
+const { ReductionCheckpoint } = await import('./storage.js')
+const writes: number[] = []
+const checkpoint = new ReductionCheckpoint(3, gates => { writes.push(gates.length) })
+const candidate = [singleGate[0], singleGate[0], singleGate[0]]
+assert.equal(checkpoint.saveIfReduced(candidate), false)
+assert.equal(checkpoint.saveIfReduced(candidate.slice(0, 2)), true)
+assert.equal(checkpoint.saveIfReduced(candidate.slice(0, 2)), false)
+assert.equal(checkpoint.saveIfReduced(candidate.slice(0, 1)), true)
+assert.deepEqual(writes, [2, 1])
+let fail = true
+const retryCheckpoint = new ReductionCheckpoint(3, () => { if (fail) throw new Error('verification failed') })
+assert.throws(() => retryCheckpoint.saveIfReduced([]), /verification failed/)
+assert.equal(retryCheckpoint.hasSaved, false)
+fail = false
+assert.equal(retryCheckpoint.saveIfReduced([]), true)
+const stopDirectory = await mkdtemp(join(tmpdir(), 'deobfuscator-stop-'))
+const stoppedPool = new WorkerPool(1)
+try {
+	process.chdir(stopDirectory)
+	const signal = new Int32Array(new SharedArrayBuffer(4))
+	Atomics.store(signal, 0, 1)
+	const activities: string[] = []
+	const result = await stoppedPool.run(singleGate, 4, (_, activity) => { if (activity) activities.push(activity.stage) }, signal.buffer as SharedArrayBuffer)
+	assert.deepEqual(result, singleGate)
+	assert.ok(activities.includes('searching'))
+	assert.ok(activities.includes('verifying'))
+} finally {
+	await stoppedPool.close()
+	process.chdir(originalCwd)
+	await rm(stopDirectory, { recursive: true, force: true })
+}
+console.log('Detailed progress, reduction checkpoints and round-stop regressions passed')
+
+const { defaults, parseConfig, config } = await import('./config.js')
+assert.deepEqual(parseConfig({}), defaults)
+assert.deepEqual(parseConfig(JSON.parse(readFileSync(new URL('../solver.config.json', import.meta.url), 'utf8'))), defaults)
+const custom = parseConfig({ timing: { summarySeconds: 10, improvedRoundMinutes: 2 }, workers: { maximum: 3 }, logging: { verbose: true } })
+assert.equal(custom.timing.summarySeconds, 10)
+assert.equal(custom.workers.maximum, 3)
+assert.equal(custom.database.wires, 4)
+assert.equal(defaults.timing.summarySeconds, 30)
+for (const invalid of [{ files: { working: 'job.json' } }, { files: { original: 'source.json' } }, null, [], { typo: {} }, { timing: { typo: 5 } }, { workers: { maximum: 0 } }, { workers: { maximum: 1.5 } }, { timing: { summarySeconds: '30' } }, { search: { subsetMinimum: 100, subsetMaximum: 2 } }, { timing: { improvedRoundMinutes: 30 } }, { files: { workerDirectory: '../elsewhere' } }, JSON.parse('{"__proto__":{}}')]) {
+	assert.throws(() => parseConfig(invalid))
+}
+// Worker configuration is carried in workerData, independent of its cwd.
+const configFixture = new URL('data:text/javascript,' + encodeURIComponent(`
+import { parentPort, workerData } from 'node:worker_threads';
+parentPort.on('message', () => parentPort.postMessage({gates:[{a:workerData.solverConfig.timing.summarySeconds,b:0,target:0,gate_i:0}]}));
+`))
+const configPool = new WorkerPool(1, configFixture)
+try { assert.equal((await configPool.run([], 1))[0].a, config.timing.summarySeconds) }
+finally { await configPool.close() }
+console.log('JSON configuration regressions passed')
+
+const { execFileSync, spawnSync } = await import('node:child_process')
+const { fileURLToPath } = await import('node:url')
+const configDir = await mkdtemp(join(tmpdir(), 'deobfuscator-config-'))
+try {
+	const { writeFileSync } = await import('node:fs')
+	const customPath = join(configDir, 'custom.json')
+	writeFileSync(customPath, JSON.stringify({ timing: { improvedRoundMinutes: 2, summarySeconds: 10 }, files: { dataDirectory: 'custom-data' }, search: { sliceMinimum: 3 } }))
+	const script = `
+		import {config} from ${JSON.stringify(new URL('./config.js', import.meta.url).href)};
+		import {outputPaths} from ${JSON.stringify(new URL('./storage.js', import.meta.url).href)};
+		import {shouldFinishReducedRound} from ${JSON.stringify(new URL('./logging.js', import.meta.url).href)};
+		console.log(JSON.stringify({seconds:config.timing.summarySeconds, path:outputPaths('task').latest, finish:shouldFinishReducedRound(120000, 10, 9)}));
+	`
+	const result = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, OPTIMIZER_CONFIG: customPath }, encoding: 'utf8' }))
+	assert.equal(result.seconds, 10)
+	assert.equal(result.path, join('custom-data', 'latest.json'))
+	assert.equal(result.finish, true)
+	const launch = spawnSync(process.execPath, [fileURLToPath(new URL('./launch.js', import.meta.url)), 'only-one-argument'], { encoding: 'utf8' })
+	assert.equal(launch.status, 1)
+	assert.match(launch.stderr, /Usage:/)
+	const missingInputs = spawnSync(process.execPath, [fileURLToPath(new URL('./launch.js', import.meta.url))], { encoding: 'utf8' })
+	assert.equal(missingInputs.status, 1)
+	assert.match(missingInputs.stderr, /Usage:/)
+} finally { await rm(configDir, { recursive: true, force: true }) }

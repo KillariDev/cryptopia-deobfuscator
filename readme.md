@@ -25,6 +25,8 @@ This will read circuit `data/latest.json` in. If the file does not exist, it cop
 
 At startup, the tool prints the task, original and resume inputs, gate and wire counts, output locations, worker limit, round budget, rainbow-table settings, and validation settings before initializing the database.
 
+Every 30 seconds, if worker snapshots contain fewer gates than the last saved circuit, the coordinator verifies the combined circuit and saves it. After five minutes, rounds with gate reductions ask all workers to finish between optimization steps; rounds without reductions retain the 25-minute budget.
+
 The process saves progress checkpoints to `data/progress/<name>.solved-<gate-count>.json` and the most recent completed circuit to `data/latest.json`. Worker snapshots are stored in `data/worker/<name>_worker<index>.json`, updated before and after each worker job. Output folders are created automatically. You can exit from the program and run the command again to restart. The optimizer runs forever, so you need to exit from program with "ctrl c".
 ## Worker configuration
 
@@ -32,7 +34,7 @@ Use Node.js 22 or newer. The optimizer keeps a pool of workers alive across
 rounds, retaining their bounded lookup caches and SQLite connections. Circuit
 chunks are exchanged through worker messages; the files in `data/worker/` are
 snapshots for inspection, not the worker communication mechanism. Completed
-rounds still save verified checkpoints.
+rounds also save verified checkpoints.
 
 By default, the pool uses up to 24 workers, capped by Node's available CPU count.
 Each worker has its own caches, so reduce concurrency if memory or database I/O
@@ -55,8 +57,12 @@ already-invalid checkpoint.
 
 The default output summarizes each round every 30 seconds: completed worker
 chunks, candidate gate count, gates removed, removal rate, and elapsed time.
-Workers report their most recent completed optimization step; candidate counts
-are provisional until the completed round passes checkpoint verification.
+Workers report search passes, subsets visited, optimization checks, improving
+rewrites, and their current stage. Each summary includes aggregate activity,
+time-budget usage, and the age of the oldest active report. Time-budget usage
+is not a percentage of the search space explored. Reduced circuit snapshots
+are sent from completed optimization steps; counts remain provisional until
+the coordinator verifies and saves the combined checkpoint.
 Startup details, checkpoint saves, and errors remain visible. Individual
 replacement, shuffle timeout, and database insertion details are suppressed.
 
@@ -68,3 +74,46 @@ npm run optimize -- data/latest.json data/obfuscated.json
 ```
 
 On bash, use `OPTIMIZER_VERBOSE=1 npm run optimize -- data/latest.json data/obfuscated.json`.
+
+## Candidate evaluation
+
+The solver stops gate-pair searches at the first applicable match and builds
+adjacency lists without copying existing entries. Candidate windows share their
+wire mappings between optimization passes when the circuit has not changed.
+Probabilistic checks keep the same 202 inputs: the first input is tested
+individually for quick rejection, and the remaining inputs use packed batches.
+Subset selection uses per-wire access indexes shared for the current graph.
+Completed checkpoints are verified and serialized once, then the same payload
+is written to both the progress file and `data/latest.json`. Randomized verification guarantees are unchanged.
+
+## JSON settings
+
+Edit `solver.config.json` in the repository root, then restart the solver.
+Provide the working and original circuit filenames for each job:
+
+```bash
+npm run optimize -- data/latest.json data/obfuscated.json
+```
+
+These job-specific inputs are command-line arguments, not JSON settings.
+Startup prints the configuration file and effective settings. Changes apply
+on the next run, not during a run.
+
+- `files`: output root, latest filename, worker/progress subdirectories, and rainbow database directory. Relative paths use the current working directory.
+- `runtime.heapMegabytes`: Node heap limit used by `optimize` and `optimize-prof`.
+- `workers`: CPU-based concurrency cap, minimum chunk size, and maximum chunk fraction.
+- `timing`: round budget and improved-round target in minutes; summary/checkpoint, worker-report, database-log and standalone-save intervals in seconds. The summary interval also controls checking the improved-round target.
+- `logging.verbose`: enable detailed diagnostics.
+- `validation`: checkpoint test inputs, probabilistic test inputs, and maximum supported circuit wires. Fewer inputs reduce verification confidence.
+- `search`: probabilistic/variable elimination switches, maximum wires for exhaustive checks, inclusive subset/slice ranges, internal chunk sizing, and shuffle passes.
+- `cache`: per-worker lookup/processed cache capacities and shuffle cache capacity.
+- `database`: rainbow circuit wire/gate limits, query/insert batch sizes, and generation flush settings. Changing wire/gate limits selects a different database and may require building it.
+
+Settings omitted from a section use the defaults. Unknown keys, invalid types,
+and unsupported ranges fail at startup. The checked-in file lists all options.
+Algorithm constants such as 32-bit packing and gate truth tables remain fixed.
+
+`OPTIMIZER_CONFIG` selects another JSON file. `OPTIMIZER_WORKERS` overrides the
+worker cap with an exact worker limit, and `OPTIMIZER_VERBOSE=1`/`0` overrides
+verbose logging. These environment variables remain optional. Workers receive
+the coordinator's parsed configuration, so all workers use the same settings.
