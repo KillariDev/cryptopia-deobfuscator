@@ -13,11 +13,18 @@ export const outputPaths = (problemName: string, dataDirectory = 'data') => {
 }
 
 export const writeCircuit = (filename: string, wires: number, gates: Gate[]) => {
-	mkdirSync(dirname(filename), { recursive: true })
-	writeFileSync(filename, convertToOriginal(wires, gates), 'utf8')
+	writeCircuitCopies([filename], wires, gates)
 }
 
 export const prepareOutputDirectories = (dataDirectory = 'data') => {
 	mkdirSync(join(dataDirectory, 'worker'), { recursive: true })
 	mkdirSync(join(dataDirectory, 'progress'), { recursive: true })
+}
+
+export const writeCircuitCopies = (filenames: string[], wires: number, gates: Gate[]) => {
+	const payload = convertToOriginal(wires, gates)
+	for (const filename of new Set(filenames)) {
+		mkdirSync(dirname(filename), { recursive: true })
+		writeFileSync(filename, payload, 'utf8')
+	}
 }

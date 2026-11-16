@@ -68,3 +68,15 @@ npm run optimize -- data/latest.json data/obfuscated.json
 ```
 
 On bash, use `OPTIMIZER_VERBOSE=1 npm run optimize -- data/latest.json data/obfuscated.json`.
+
+## Candidate evaluation
+
+The solver stops gate-pair searches at the first applicable match and builds
+adjacency lists without copying existing entries. Candidate windows share their
+wire mappings between optimization passes when the circuit has not changed.
+Probabilistic checks keep the same 202 inputs: the first input is tested
+individually for quick rejection, and the remaining inputs use packed batches.
+Subset selection uses per-wire access indexes shared for the current graph.
+Completed checkpoints are verified and serialized once, then the same payload
+is written to both the progress file and `data/latest.json`. Save frequency and
+randomized verification guarantees are unchanged.

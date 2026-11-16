@@ -194,3 +194,77 @@ try {
 	else process.env.OPTIMIZER_VERBOSE = previousVerbose
 }
 console.log('Performance and correctness regressions passed')
+
+// Compare indexed subset selection to the former forward scans.
+const { referenceDependencySort } = await import('./test-reference.js')
+const { dependencySort, dependencyGraphToMap, indexWireAccesses, mapCircuit, mapVariablesToIndexes } = await import('./utils.js')
+const { findMatchingOperation } = await import('./processing.js')
+for (let trial = 0; trial < 60; trial++) {
+	const gates = makeGates(50, 8)
+	const nodes = createDependencyGraph(gates)
+	const map = dependencyGraphToMap(nodes)
+	const access = indexWireAccesses(gates)
+	for (const node of nodes) for (const size of [2, 8, 30]) {
+		assert.deepEqual(dependencySort(map, node, size, nodes, gates, access), referenceDependencySort(map, node, size, nodes, gates))
+	}
+	const mapping = mapVariablesToIndexes(gates)
+	const referenceMapping = gates.map(gate => ({ a: Math.max(0, mapping.indexOf(gate.a)), b: Math.max(0, mapping.indexOf(gate.b)), target: mapping.indexOf(gate.target), gate_i: gate.gate_i }))
+	assert.deepEqual(mapCircuit(gates, mapping), referenceMapping)
+	// Enumerate every pair independently, preserving the original match ordering.
+	const matches: { gateIndex1: number, gateIndex2: number, matchingVariable: number }[] = []
+	for (let i = 0; i < gates.length; i++) for (let j = i + 1; j < gates.length; j++) {
+		if (gates[i].target !== gates[j].target) continue
+		const a = getVars(gates[i]), b = getVars(gates[j])
+		if (gates[i].gate_i === 15 && gates[j].gate_i === 15) { matches.push({ gateIndex1: i, gateIndex2: j, matchingVariable: a[0] }); continue }
+		if (a.length !== b.length) continue
+		for (const [x,y] of [[1,1],[1,2],[2,1],[2,2]]) {
+			if (a[x] !== undefined && a[x] === b[y]) { matches.push({ gateIndex1: i, gateIndex2: j, matchingVariable: a[x] }); break }
+		}
+	}
+	assert.deepEqual(findMatchingOperation(gates), matches[0])
+}
+for (const wires of [8, 64]) {
+	// Identity outputs reveal the exact fixed test inputs without changing the seed.
+	const inputs: boolean[][] = []
+	assert.equal(areCircuitsProbabilisticallyTheSame(inputs, [], [], 202, wires), true)
+	for (let trial = 0; trial < 20; trial++) {
+		const old = makeGates(20, wires)
+		const candidate = trial % 2 ? old : makeGates(20, wires)
+		for (const attempts of [0, 1, 31, 32, 33, 202]) {
+			const expected = inputs.slice(0, attempts).every(input => JSON.stringify(evalCircuit(old, input)) === JSON.stringify(evalCircuit(candidate, input)))
+			assert.equal(areCircuitsProbabilisticallyTheSame([], old, candidate, attempts, wires), expected)
+		}
+	}
+	// Ensure rejection can happen after the initial scalar input has passed.
+	const control = inputs[0].findIndex((value, wire) => inputs.slice(1).some(input => input[wire] !== value))
+	assert.ok(control >= 0)
+	const candidate = [{ a: control, b: 0, target: (control + 1) % wires, gate_i: inputs[0][control] ? 12 : 3 }]
+	assert.equal(areCircuitsProbabilisticallyTheSame([], [], candidate, 1, wires), true)
+	assert.equal(areCircuitsProbabilisticallyTheSame([], [], candidate, 202, wires), false)
+}
+assert.equal(findMatchingOperation([]), undefined)
+const copyDir = await mkdtemp(join(tmpdir(), 'deobfuscator-copies-'))
+try {
+	const { writeCircuitCopies } = await import('./storage.js')
+	const paths = [join(copyDir, 'progress', 'checkpoint.json'), join(copyDir, 'latest.json')]
+	let serialized = 0
+	const gate = { ...singleGate[0], get a() { serialized++; return singleGate[0].a } }
+	writeCircuitCopies([...paths, paths[0]], 4, [gate])
+	assert.equal(serialized, 1)
+	assert.equal(readFileSync(paths[0], 'utf8'), readFileSync(paths[1], 'utf8'))
+} finally { await rm(copyDir, { recursive: true, force: true }) }
+console.log('Additional candidate and dependency regressions passed')
+
+// Repeated native database initialization and shutdown must not race.
+const workerDir = await mkdtemp(join(tmpdir(), 'deobfuscator-lifecycle-'))
+try {
+	process.chdir(workerDir)
+	for (let i = 0; i < 5; i++) {
+		const pool = new WorkerPool(1)
+		try { assert.deepEqual(await pool.run([], 4), []) }
+		finally { await pool.close() }
+	}
+} finally {
+	process.chdir(originalCwd)
+	await rm(workerDir, { recursive: true, force: true })
+}
