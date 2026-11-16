@@ -1,0 +1,23 @@
+import { mkdirSync, writeFileSync } from 'fs'
+import { basename, dirname, join } from 'path'
+import { Gate } from './types.js'
+import { convertToOriginal } from './utils.js'
+
+export const outputPaths = (problemName: string, dataDirectory = 'data') => {
+	const name = basename(problemName)
+	return {
+		latest: join(dataDirectory, 'latest.json'),
+		progress: (gateCount: number) => join(dataDirectory, 'progress', `${name}.solved-${gateCount}.json`),
+		worker: (index: number) => join(dataDirectory, 'worker', `${name}_worker${index}.json`),
+	}
+}
+
+export const writeCircuit = (filename: string, wires: number, gates: Gate[]) => {
+	mkdirSync(dirname(filename), { recursive: true })
+	writeFileSync(filename, convertToOriginal(wires, gates), 'utf8')
+}
+
+export const prepareOutputDirectories = (dataDirectory = 'data') => {
+	mkdirSync(join(dataDirectory, 'worker'), { recursive: true })
+	mkdirSync(join(dataDirectory, 'progress'), { recursive: true })
+}

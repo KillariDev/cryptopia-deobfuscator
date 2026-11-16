@@ -1,11 +1,12 @@
-import * as fs from 'fs'
 import sqlite3 from 'sqlite3'
-import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, convertToOriginal, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, hashGatesRange, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, readJsonFile, remove, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
-import { CircuitData, Gate } from './types.js'
+import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, hashGatesRange, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, remove, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
+import { Gate } from './types.js'
 import { getReplacersByIds } from './rainbowtable.js'
 import { LimitedMap } from './limitedMap.js'
 import { WorkerPool, configuredWorkerCount } from './threads.js'
 import { createDependencyGraph } from './lineswapper.js'
+import { outputPaths, prepareOutputDirectories, writeCircuit } from './storage.js'
+import { JobCircuits, loadJob, WORKER_ROUND_MS } from './job.js'
 
 const removeVariableFromGate = (gate: Gate, isA: boolean) => {
 	const newGate = isA ? { ...gate, a: 0 } : { ...gate, b: 0 }
@@ -340,7 +341,7 @@ const save = (filename: string, gates: Gate[], wires: number, originalGates: Gat
 	logTimed(`Saving a version with ${ gates.length } gates to ${ filename } (${ Math.floor(gates.length/originalGates.length*100) }% of original)`)
 	logTimed(`Average gate complexity: ${ gates.flatMap((gate) => getVars(gate).length).reduce((a, c) => a + c, 0) / gates.length }`)
 	verifyCircuit(originalGates, gates, wires, 20)
-	fs.writeFileSync(filename, convertToOriginal(wires, gates), 'utf8')
+	writeCircuit(filename, wires, gates)
 }
 
 export function shuffleRows(gates: Gate[], times: number) {
@@ -531,7 +532,7 @@ export const createOptimizerCaches = () => ({
 	processedGatesCache: new LimitedMap<string, boolean>(1000000),
 })
 
-export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, rainbowTableWires: number, caches = createOptimizerCaches(), roundDurationMs = 25 * 60_000) => {
+export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, rainbowTableWires: number, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS) => {
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	optimizedVersion = gateSimplifier(optimizedVersion)
@@ -584,8 +585,9 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 				const timeDiffMins = (endTime - lastSaved) / 60000
 				if (timeDiffMins >= 1) {
 					logTimed(`Total Removed Gates Since last save: ${ gatesRemoved }`)
-					const filename = `${ problemName }.solved-${ optimizedVersion.length }.json`
+					const filename = outputPaths(problemName).progress(optimizedVersion.length)
 					save(filename, optimizedVersion, wires, originalGates)
+					save(outputPaths(problemName).latest, optimizedVersion, wires, originalGates)
 					lastSaved = endTime
 					prevSavedLength = optimizedVersion.length
 				}
@@ -594,7 +596,7 @@ export const optimize = async (db: sqlite3.Database, originalGates: Gate[], wire
 	}
 }
 
-export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: string) => {
+export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: string, circuits: JobCircuits = loadJob(pathToFileWithoutExt, original)) => {
 	const splitArrayIntoApproximatelyChunks = (arr: Gate[], n: number): Gate[][] => {
 		if (n <= 0) throw new Error('Number of chunks must be greater than 0')
 		if (n > arr.length) throw new Error('Number of chunks cannot exceed array length')
@@ -620,9 +622,8 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		return result
 	}
 
-	const originalCircuit = readJsonFile(`${ original }.json`) as CircuitData
+	const { originalCircuit, inputCircuit } = circuits
 	const originalGates: Gate[] = originalCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
-	const inputCircuit = fs.existsSync(`${ pathToFileWithoutExt }.json`) ? readJsonFile(`${ pathToFileWithoutExt }.json`) as CircuitData : originalCircuit
 	const gates: Gate[] = inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
 	logTimed('current wire_count', inputCircuit.wire_count)
 	logTimed('current gate_count', inputCircuit.gates.length)
@@ -632,6 +633,8 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	verifyCircuit(originalGates, gates, originalCircuit.wire_count, 20)
 	const nMaxWorkers = configuredWorkerCount()
 	const pool = new WorkerPool(nMaxWorkers)
+	const paths = outputPaths(pathToFileWithoutExt)
+	prepareOutputDirectories()
 	let currentGates = gates.slice()
 	try {
 		while(currentGates.length > 0) {
@@ -641,10 +644,16 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const workersSize = getRandomNumberInRange(100, currentGates.length/2)
 			const nWorkers = Math.max(1, Math.min(Math.floor(currentGates.length / workersSize), nMaxWorkers, currentGates.length || 1))
 			const approxGates = splitArrayIntoApproximatelyChunks(currentGates, nWorkers)
-			currentGates = (await Promise.all(approxGates.map(dataChunk => pool.run(dataChunk, inputCircuit.wire_count)))).flat()
-			const filename = `${ pathToFileWithoutExt }.solved-${ currentGates.length }.json`
+			currentGates = (await Promise.all(approxGates.map(async (dataChunk, index) => {
+				const workerFile = paths.worker(index)
+				writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
+				const result = await pool.run(dataChunk, inputCircuit.wire_count)
+				writeCircuit(workerFile, inputCircuit.wire_count, result)
+				return result
+			}))).flat()
+			const filename = paths.progress(currentGates.length)
 			save(filename, currentGates, inputCircuit.wire_count, originalGates)
-			save('data/latest.json', currentGates, inputCircuit.wire_count, originalGates)
+			save(paths.latest, currentGates, inputCircuit.wire_count, originalGates)
 			const gatesRemoved = nPrevGates - currentGates.length
 			const endTime = performance.now()
 			const timeDiffMins = (endTime - lastIterationTime) / 60000
