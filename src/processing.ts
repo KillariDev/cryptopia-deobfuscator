@@ -317,33 +317,22 @@ export const massOptimizeStep = async (db: sqlite3.Database, ioIdentifierCache: 
 			const mappedGates = cached?.mappedGates ?? mapCircuit(sliceGates, variableIndexMapping)
 			const allOutputs = calculateAllOutputsArray(mappedGates, RAINBOW_TABLE_ALL_INPUTS)
 			const ioIdentifier = ioHash(allOutputs)
-			queries.push({ gatesHash, ioIdentifier: ioIdentifier, start, end: end, variableIndexMapping, mappedGates })
+			queries.push({ gatesHash, ioIdentifier, start, end, variableIndexMapping, mappedGates })
 		}
 	}
 	const rainbowMatches = await getReplacersByIds(db, ioIdentifierCache, queries.map((x) => x.ioIdentifier))
 	const rainbowMap = new Map<String, Gate[]>()
 	rainbowMatches.forEach((entry) => { rainbowMap.set(entry.ioIdentifier, entry.gates) })
 	let currentIndex = 0
-	for (let query of queries) {
+	for (const query of queries) {
 		const match = rainbowMap.get(query.ioIdentifier)
-		if (match === undefined) {
+		if (!match || match.flatMap(getVars).some(wire => wire >= query.variableIndexMapping.length) || !isReplacementSimpler(match, query.mappedGates)) {
 			processedGatesCache.set(query.gatesHash, true)
 			continue
 		}
-		const isSimpler = isReplacementSimpler(match, query.mappedGates)
-		if (!isSimpler) {
-			processedGatesCache.set(query.gatesHash, true)
-			continue
-		}
-		if (query.start >= currentIndex) {
-			currentIndex = query.end
-			const replacement: Gate[] = reverseMapCircuit(match, query.variableIndexMapping)
-			replacements.push({
-				start: query.start,
-				end: query.end - 1,
-				replacement: replacement
-			})
-		}
+		if (query.start < currentIndex) continue
+		currentIndex = query.end
+		replacements.push({ start: query.start, end: query.end - 1, replacement: reverseMapCircuit(match, query.variableIndexMapping) })
 	}
 	if (replacements.length === 0) {
 		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return { gates: candidate, changed: true } }

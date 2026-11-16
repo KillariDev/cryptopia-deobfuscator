@@ -130,3 +130,6 @@ dist
 .pnp.*
 rainbowtable.db
 /data
+
+# Generated rainbow databases and SQLite sidecars
+/rainbow_*.db*

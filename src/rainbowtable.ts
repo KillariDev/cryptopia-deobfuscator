@@ -1,246 +1,81 @@
-import { formatGenerationProgress, sequenceSpace, generationDuration, generationETA, SequenceProgress, SemanticProgress } from './generation-progress.js'
-import { semanticCircuits, canonicalCircuits, decodeGates, encodeGates } from './semantic.js'
 import { join } from 'path'
-import { config } from './config.js'
 import sqlite3 from 'sqlite3'
-import { logVerbose } from './logging.js'
-import { InputOutputReplacer, Gate } from './types.js'
-import { evalCircuit, generateCombinations, getVars, ioHash, isReplacementSimpler, logTimed, toBatches } from './utils.js'
+import { config } from './config.js'
+import { Gate, InputOutputReplacer } from './types.js'
+import { encodeGates, decodeGates } from './semantic.js'
 import { LimitedMap } from './limitedMap.js'
+import { isReplacementSimpler, logTimed } from './utils.js'
+import { runSQL, allSQL, insertRows } from './sql.js'
+import { generateOnDisk } from './disk-generation.js'
+import { GenerationEstimator, formatGenerationProgress, generationDuration, SemanticProgress } from './generation-progress.js'
 
 export const RAINBOW_TABLE_WIRES = config.database.wires
 export const RAINBOW_TABLE_GATES = config.database.gates
-
-const compact = config.database.format === 'compact'
-const keyToSql = (key: string) => compact ? Buffer.from(key, 'hex') : key
-const rowKey = (key: string | Buffer) => Buffer.isBuffer(key) ? key.toString('hex') : key
-const gatesToBinary = (gates: Gate[]) => encodeGates(gates).toString('latin1')
-const binaryToGates = decodeGates
-export const databaseFilename = (wires: number, maxGates: number) => join(config.files.databaseDirectory, `canonHashrainbowtable_${wires}_${maxGates}${compact ? '.compact' : ''}.db`)
+export const databaseFilename = (wires: number, gates: number) => join(config.files.databaseDirectory, `rainbow_${wires}_${gates}.db`)
+const keyToSql = (key: string) => Buffer.from(key, 'hex')
+const rowKey = (key: Buffer) => key.toString('hex')
 const readyDatabases = new WeakMap<sqlite3.Database, Promise<void>>()
 export const databaseReady = (db: sqlite3.Database) => readyDatabases.get(db) ?? Promise.resolve()
-const tuneDatabase = (db: sqlite3.Database) => {
+export const getRainbowTable = (wires: number, gates: number) => {
+	const db = new sqlite3.Database(databaseFilename(wires, gates))
 	readyDatabases.set(db, new Promise<void>((resolve, reject) => {
 		db.once('error', reject)
 		db.run(`PRAGMA mmap_size=${config.database.memoryMapBytes}`, error => error ? reject(error) : resolve())
 	}))
 	return db
 }
+export const isEmpty = async (db: sqlite3.Database) => !(await allSQL(db, 'SELECT 1 FROM InputOutputReplacers LIMIT 1')).length
 
-// Create table if not exists
-const createTable = (db: sqlite3.Database) => {
-	return new Promise<void>((resolve, reject) => {
-		db.run(`
-			CREATE TABLE IF NOT EXISTS InputOutputReplacers (
-				ioIdentifier ${compact ? 'BLOB' : 'TEXT'} PRIMARY KEY,
-				replacerGates ${compact ? 'BLOB' : 'TEXT'} NOT NULL
-			) ${compact ? 'WITHOUT ROWID' : ''};
-		`, (err: unknown) => {
-			if (err) {
-				reject(err)
-			} else {
-				resolve()
-			}
-		})
-	})
-}
-
-export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string, InputOutputReplacer>) => {
-    // Fetch all existing entries in a single query
-	logVerbose(`getting old entries`)
-
-	const ios = Array.from(replacers.keys())
-
-	const chunkSize = config.database.queryBatchSize
-
-	const dbPromises: Promise<{ ioIdentifier: string, replacerGates: string }[]>[] = []
-	for (let i = 0; i < ios.length; i += chunkSize) {
-		const chunk = ios.slice(i, Math.min(i + chunkSize, ios.length))
-		dbPromises.push(new Promise<{ ioIdentifier: string, replacerGates: string }[]>((resolve, reject) => {
-			db.all('SELECT ioIdentifier, replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk.map(keyToSql), (err: unknown, rows: any[]) => {
-				if (err) {
-					reject(err)
-				} else {
-					rows.forEach(row => { row.ioIdentifier = rowKey(row.ioIdentifier) })
-					const results = rows.map((row: any) => {
-						if (row === undefined) return undefined
-						return { ioIdentifier: row.ioIdentifier, replacerGates: row.replacerGates }
-					}).filter((x): x is { ioIdentifier: string, replacerGates: string } => x !== undefined)
-					resolve(results)
-				}
-			})
-		}))
+export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string, InputOutputReplacer>, withinTransaction = false) => {
+	const best = new Map<string, Gate[]>()
+	for (const { ioIdentifier, replacerGates } of replacers.values()) {
+		const prior = best.get(ioIdentifier)
+		if (!prior || isReplacementSimpler(replacerGates, prior)) best.set(ioIdentifier, replacerGates)
 	}
-	const existingEntries = (await Promise.all(dbPromises)).flat()
-	const existingEntriesMap = new Map<string, { ioIdentifier: string, replacerGates: string }>()
-	existingEntries.forEach((entry) => {
-		existingEntriesMap.set(entry.ioIdentifier, entry)
-	})
-
-	logVerbose(`comparing...`)
-	// Iterate over the replacers to decide which ones to insert or replace
-	let insertAmount = 0
-	let insertThese: [string,string][] = []
-	for (const [ioIdentifier, replacer] of replacers) {
-		const existingEntry = existingEntriesMap.get(ioIdentifier)
-		if (!existingEntry || isReplacementSimpler(replacer.replacerGates, binaryToGates(existingEntry.replacerGates))) {
-			// If the new entry is better, insert or replace it
-			const replacerGatesJson = gatesToBinary(replacer.replacerGates)
-			insertAmount++
-			insertThese.push([ioIdentifier, replacerGatesJson])
-		}
-	}
-	logVerbose(`inserting: ${ insertAmount }`)
-	const insertChunkSize = config.database.insertBatchSize
-	for (let i = 0; i < insertThese.length; i += insertChunkSize) {
-		logVerbose('inserting...')
-		const chunk = insertThese.slice(i, Math.min(i + insertChunkSize, insertThese.length))
-
+	const ids = [...best.keys()]
+	for (let offset = 0; offset < ids.length; offset += config.database.insertBatchSize) {
+		const transactionIds = ids.slice(offset, offset + config.database.insertBatchSize)
+		if (!withinTransaction) await runSQL(db, 'BEGIN IMMEDIATE')
 		try {
-			await new Promise<void>((resolve, reject) => {
-				db.run('BEGIN TRANSACTION', (err) => {
-					if (err) {
-						reject(err)
-					} else {
-						resolve()
-					}
-				})
-			})
-			const stmt = db.prepare('INSERT OR REPLACE INTO InputOutputReplacers (ioIdentifier, replacerGates) VALUES (?, ?)')
-			for (const insert of chunk) {
-				await new Promise<void>((resolve, reject) => {
-					stmt.run(keyToSql(insert[0]), compact ? Buffer.from(insert[1], 'latin1') : insert[1], (err: unknown) => {
-						if (err) {
-							reject(err)
-						} else {
-							resolve()
-						}
-					})
-				})
+			const existing = new Map<string, Gate[]>()
+			for (let i = 0; i < transactionIds.length; i += config.database.queryBatchSize) {
+				const chunk = transactionIds.slice(i, i + config.database.queryBatchSize)
+				const rows = await allSQL<{ ioIdentifier: Buffer, replacerGates: Buffer }>(db, 'SELECT ioIdentifier,replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk.map(keyToSql))
+				for (const row of rows) existing.set(rowKey(row.ioIdentifier), decodeGates(row.replacerGates))
 			}
-			// Finalize the statement and commit the transaction
-			await new Promise<void>((resolve, reject) => {
-				stmt.finalize((err) => {
-					if (err) {
-						reject(err)
-					} else {
-						db.run('COMMIT', (err) => {
-							if (err) {
-								reject(err)
-							} else {
-								logVerbose(`Replacers stored successfully.`)
-								resolve()
-							}
-						})
-					}
-				})
-			})
-		} catch (err) {
-			console.error(err)
-			await new Promise<void>((_resolve, reject) => {
-				db.run('ROLLBACK', (err) => {
-					if (err) {
-						reject(err)
-					} else {
-						reject(err)
-					}
-				})
-			})
-			throw err
+			const inserts: unknown[][] = []
+			for (const id of transactionIds) {
+				const gates = best.get(id)!
+				if (!existing.has(id) || isReplacementSimpler(gates, existing.get(id)!)) inserts.push([keyToSql(id), encodeGates(gates)])
+			}
+			await insertRows(db, 'INSERT OR REPLACE INTO InputOutputReplacers VALUES ', inserts, '', config.database.queryBatchSize)
+			if (!withinTransaction) await runSQL(db, 'COMMIT')
+		} catch (error) { if (!withinTransaction) await runSQL(db, 'ROLLBACK'); throw error }
+	}
+}
+
+
+export const getReplacersByIds = async (db: sqlite3.Database, cache: LimitedMap<string, Gate[] | null>, identifiers: string[]) => {
+	const results: { ioIdentifier: string, gates: Gate[] }[] = []
+	const missing: string[] = []
+	for (const id of new Set(identifiers)) {
+		const hit = cache.get(id)
+		if (hit === undefined) missing.push(id)
+		else if (hit !== null) results.push({ ioIdentifier: id, gates: hit })
+	}
+	for (let i = 0; i < missing.length; i += config.database.queryBatchSize) {
+		const chunk = missing.slice(i, i + config.database.queryBatchSize)
+		const rows = await allSQL<{ ioIdentifier: Buffer, replacerGates: Buffer }>(db, 'SELECT ioIdentifier,replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk.map(keyToSql))
+		const found = new Set<string>()
+		for (const row of rows) {
+			const id = rowKey(row.ioIdentifier), gates = decodeGates(row.replacerGates)
+			found.add(id); cache.set(id, gates); results.push({ ioIdentifier: id, gates })
 		}
+		for (const id of chunk) if (!found.has(id)) cache.set(id, null)
 	}
-	logVerbose(`finalized`)
+	return results
 }
-
-export const getReplacerById = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, ioIdentifier: string) => {
-	const cacheHit = ioIdentifierCache.get(ioIdentifier)
-	if (cacheHit !== undefined) {
-		if (cacheHit === null) return null
-		return cacheHit
-	}
-	return new Promise<Gate[] | null>((resolve, reject) => {
-		db.get('SELECT * FROM InputOutputReplacers WHERE ioIdentifier = ?', [keyToSql(ioIdentifier)], (err: unknown, row: any) => {
-			if (err) {
-				reject(err)
-			} else {
-				if (row) {
-					row.ioIdentifier = rowKey(row.ioIdentifier)
-					const replacerGates = binaryToGates(row.replacerGates)
-					ioIdentifierCache.set(row.ioIdentifier, replacerGates)
-					resolve(replacerGates)
-				} else {
-					ioIdentifierCache.set(ioIdentifier, null)
-					resolve(null)
-				}
-			}
-		})
-	})
-}
-
-export const getReplacersByIds = async (db: sqlite3.Database, ioIdentifierCache: LimitedMap<string, Gate[] | null>, ioIdentifiers: string[]) => {
-    const cacheHits: { ioIdentifier: string, gates: Gate[] }[] = []
-    const missingIdentifiers = new Set<string>()
-    // Check cache first
-    for (const ioIdentifier of ioIdentifiers) {
-        const cacheHit = ioIdentifierCache.get(ioIdentifier)
-        if (cacheHit !== undefined) {
-            if (cacheHit !== null) {
-                cacheHits.push({ ioIdentifier, gates: cacheHit })
-            }
-        } else {
-            missingIdentifiers.add(ioIdentifier)
-        }
-    }
-    // If there are no missing identifiers, return the cache hits
-    if (missingIdentifiers.size === 0) return cacheHits
-
-    const identifiers = [...missingIdentifiers]
-    const chunkSize = config.database.queryBatchSize
-    const dbPromises: Promise<{ ioIdentifier: string, gates: Gate[] }[]>[] = []
-
-    // Query the database for the missing identifiers in chunks
-    for (let i = 0; i < identifiers.length; i += chunkSize) {
-        const chunk = identifiers.slice(i, i + chunkSize)
-        dbPromises.push(new Promise<{ ioIdentifier: string, gates: Gate[] }[]>((resolve, reject) => {
-            db.all('SELECT ioIdentifier, replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk.map(keyToSql), (err: unknown, rows: any[]) => {
-                if (err) {
-                    reject(err)
-                } else {
-                    rows.forEach(row => { row.ioIdentifier = rowKey(row.ioIdentifier) })
-                    const found = new Set(rows.map((row: any) => row.ioIdentifier))
-                    for (const id of chunk) {
-                        if (!found.has(id)) ioIdentifierCache.set(id, null)
-                    }
-                    const results = rows.map((row: any) => {
-                        const gates = binaryToGates(row.replacerGates)
-                        ioIdentifierCache.set(row.ioIdentifier, gates)
-                        return { ioIdentifier: row.ioIdentifier, gates }
-                    }).filter((x): x is { ioIdentifier: string, gates: Gate[] } => x !== undefined)
-                    resolve(results)
-                }
-            })
-        }))
-    }
-
-    // Wait for all database queries to complete
-    const dbResults = (await Promise.all(dbPromises)).flat()
-
-    // Add cache hits to dbResults
-    const allResults = [...cacheHits, ...dbResults]
-    return allResults
-}
-
-export const isEmpty = async (db: sqlite3.Database) => {
-	return new Promise<boolean>((resolve, reject) => {
-		db.get('SELECT 1 FROM InputOutputReplacers LIMIT 1', (err: unknown, row: any) => {
-			if (err) {
-				reject(err)
-				return
-			}
-			resolve(row === undefined)
-		})
-	})
-}
+export const getReplacerById = async (db: sqlite3.Database, cache: LimitedMap<string, Gate[] | null>, id: string) => (await getReplacersByIds(db, cache, [id]))[0]?.gates ?? null
 
 export function* generateAllGates(wires: number): Generator<Gate, undefined, unknown> {
 	for (let gate_i = 0; gate_i < 16; gate_i++) {
@@ -289,125 +124,43 @@ export function* generateAllGates(wires: number): Generator<Gate, undefined, unk
 }
 
 
-const FLUSH_SIZE = config.database.flushEntries
 
-const flushIfNeeded = async (db: sqlite3.Database, rainbowMap: Map<string, InputOutputReplacer>) => {
-	if (rainbowMap.size < FLUSH_SIZE) return
-	logVerbose(`FLUSHING! entries:${ rainbowMap.size }`)
-	await storeReplacers(db, rainbowMap)
-
-	rainbowMap.clear()
-	logVerbose('FLUSHING DONE')
-}
-
-export const getRainbowTable = (wires: number, maxGates: number) => {
-	const filename = databaseFilename(wires, maxGates)
-	const db = tuneDatabase(new sqlite3.Database(filename))
-	return db
-}
-
-export function collectVariables(gates: Gate[]) {
-	const variables: number[] = []
-	const variableSet = new Set<number>()
-	gates.forEach((gate) => {
-		const gateVariables = getVars(gate)
-		gateVariables.forEach((variable) => {
-			if (!variableSet.has(variable)) {
-				variableSet.add(variable)
-				variables.push(variable)
-			}
-		})
-	})
-	return variables
-}
-
-export const createRainbowTable = async (wires: number, maxGates: number) => {
-	const filename = databaseFilename(wires, maxGates)
-	const db = tuneDatabase(new sqlite3.Database(filename))
+export const createRainbowTable = async (wires: number, gates: number) => {
+	const db = getRainbowTable(wires, gates)
 	await databaseReady(db)
-	await createTable(db)
-	const get = (sql: string) => new Promise<any>((resolve, reject) => db.get(sql, (error, row) => error ? reject(error) : resolve(row)))
-	const run = (sql: string) => new Promise<void>((resolve, reject) => db.run(sql, error => error ? reject(error) : resolve()))
-	await run('CREATE TABLE IF NOT EXISTS GenerationStatus (id INTEGER PRIMARY KEY, complete INTEGER NOT NULL)')
-	const status = await get('SELECT complete FROM GenerationStatus WHERE id=1')
-	if (!await isEmpty(db) && status?.complete !== 0) {
-		logTimed(`using rainbowtable ${ filename }`)
-		return db
-	}
-	await run('INSERT OR REPLACE INTO GenerationStatus VALUES (1, 0)')
-	logTimed(`creating rainbow table. Wires: ${ wires } Gates: ${ maxGates }`)
-	let rainbowMap = new Map<string, InputOutputReplacer>()
-	const combinations = generateCombinations(wires)
-	const addgates = (gates: Gate[]) => {
-		const ioId = ioHash(combinations.flatMap((input) => evalCircuit(gates, input)))
-		const old = rainbowMap.get(ioId)
-		const newEntry = { ioIdentifier: ioId, replacerGates: gates }
-		if (old === undefined || isReplacementSimpler(newEntry.replacerGates, old.replacerGates)) {
-			rainbowMap.set(ioId, newEntry)
-		}
-	}
-	const allGates = Array.from(generateAllGates(wires))
-	logTimed(`different gates: ${ allGates.length }`)
-	const started = performance.now()
-	let lastReport = started
-	let sequence: SequenceProgress | undefined = config.database.semanticGeneration ? undefined : { covered: 0n, total: sequenceSpace(allGates.length, maxGates)[maxGates], examined: 0, evaluated: 0, pruned: 0n }
-	let semantic: SemanticProgress | undefined
-	let layerStarted = started, lastDepth = -1
-	let writing = false
-	let lastCovered = 0n, lastSample = started, samples = 0
-	const report = (force = false) => {
-		const now = performance.now()
-		if (!force && now - lastReport < config.timing.databaseLogSeconds * 1000) return
-		lastReport = now
-		// Layer ETA uses time within this depth, rather than previous depths.
-		const elapsed = semantic && !sequence ? now - layerStarted : now - started
-		let eta = 'learning processing speed'
-		if (sequence) {
-			const advance = sequence.covered - lastCovered
-			if (sequence.covered >= sequence.total) eta = '0s'
-			else if (!force && samples > 0) eta = advance > 0n ? generationETA(advance, sequence.total - sequence.covered + advance, now - lastSample) : 'unavailable (no progress in the last interval)'
-			if (!force) samples++
-			lastCovered = sequence.covered
-			lastSample = now
-		}
-		logTimed(formatGenerationProgress(sequence, semantic, rainbowMap.size, elapsed, writing, now - started, eta))
-	}
-	const persist = async (final = false) => {
-		if (!final && rainbowMap.size < FLUSH_SIZE) return
-		writing = true
-		try {
-			if (final) await storeReplacers(db, rainbowMap)
-			else await flushIfNeeded(db, rainbowMap)
-		} finally { writing = false }
-	}
-	report(true)
-	const timer = setInterval(() => report(), config.timing.databaseLogSeconds * 1000)
 	try {
-		if (config.database.semanticGeneration) {
-			for (const gates of semanticCircuits(wires, maxGates, allGates, config.database.generationStates, progress => {
-				if (progress.depth !== lastDepth) { lastDepth = progress.depth; layerStarted = performance.now() }
-				semantic = progress
-				report()
-			})) {
-				addgates(gates)
-				if (rainbowMap.size >= FLUSH_SIZE) await persist()
-			}
-		} else {
-			for (const gates of canonicalCircuits(allGates, maxGates, progress => { sequence = progress; report() })) {
-				addgates(gates)
-				// Avoid an async hop for every candidate; flush only when full.
-				if (rainbowMap.size >= FLUSH_SIZE) await persist()
-			}
+		await runSQL(db, 'CREATE TABLE IF NOT EXISTS InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
+		await runSQL(db, 'CREATE TABLE IF NOT EXISTS GenerationStatus(id INTEGER PRIMARY KEY,complete INTEGER NOT NULL)')
+		if ((await allSQL<{ complete: number }>(db, 'SELECT complete FROM GenerationStatus WHERE id=1'))[0]?.complete === 1) {
+			logTimed(`Using rainbow table ${databaseFilename(wires, gates)}`)
+			return db
+		}
+		await runSQL(db, 'INSERT OR REPLACE INTO GenerationStatus VALUES(1,0)')
+		const catalog = [...generateAllGates(wires)]
+		logTimed(`Generating rainbow table: ${wires} wires, up to ${gates} gates, ${catalog.length} gate choices`)
+		const started = performance.now(), estimator = new GenerationEstimator(config.database.etaWindowSamples, config.database.etaWarmupSamples, config.database.etaSmoothing)
+		let lastReport = started, current: SemanticProgress | undefined
+		const report = (force = false) => {
+			const now = performance.now()
+			if (!force && now - lastReport < config.timing.databaseLogSeconds * 1000) return
+			lastReport = now
+			logTimed(formatGenerationProgress(current, now - started, current ? estimator.update(current, now) : 'learning processing speed'))
 		}
 		report(true)
-		logTimed('Rainbow search complete; writing final entries (database write time is additional).')
-		await persist(true)
-		await run('INSERT OR REPLACE INTO GenerationStatus VALUES (1, 1)')
-		logTimed(`Rainbow generation complete in ${generationDuration(performance.now() - started)}.`)
-	} catch (error) {
-		await new Promise<void>(resolve => db.close(() => resolve()))
-		throw error
-	} finally { clearInterval(timer) }
-
-	return db
+		const timer = setInterval(() => report(), config.timing.databaseLogSeconds * 1000)
+		try {
+			await generateOnDisk(db, wires, gates, catalog, {
+				readRows: config.database.queryBatchSize, stageRows: config.database.generationBatchRows,
+				parameterLimit: config.database.queryBatchSize, stateLimit: config.database.generationStates,
+				keepState: config.database.keepGenerationState,
+			}, entries => storeReplacers(db, entries, true), progress => {
+				const newLayer = current?.depth !== progress.depth
+				current = progress
+				report(newLayer)
+			})
+			await runSQL(db, 'INSERT OR REPLACE INTO GenerationStatus VALUES(1,1)')
+			logTimed(`Rainbow generation complete in ${generationDuration(performance.now() - started)}.`)
+		} finally { clearInterval(timer) }
+		return db
+	} catch (error) { await new Promise<void>(resolve => db.close(() => resolve())); throw error }
 }

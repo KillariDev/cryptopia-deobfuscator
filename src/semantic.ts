@@ -1,4 +1,3 @@
-import * as generationProgressHelpers from './generation-progress.js'
 import { Gate } from './types.js'
 import { calculateAllOutputsArray, generateCombinations, getVars, isReplacementSimpler } from './utils.js'
 
@@ -9,8 +8,9 @@ export function truthKey(outputs: boolean[]) {
 }
 export const functionKey = (gates: Gate[], wires: number) => truthKey(calculateAllOutputsArray(gates, generateCombinations(wires))).toString('hex')
 export const encodeGates = (gates: Gate[]) => Buffer.from(gates.flatMap(g => [g.a, g.b, (g.gate_i << 4) | g.target]))
-export function decodeGates(value: string | Buffer): Gate[] {
-	const bytes = typeof value === 'string' ? Buffer.from(value, 'latin1') : value
+export function decodeGates(value: Buffer): Gate[] {
+	if (!Buffer.isBuffer(value)) throw new Error('Rainbow gate payload must be binary')
+	const bytes = value
 	if (bytes.length % 3) throw new Error('Invalid gate payload')
 	return Array.from({ length: bytes.length / 3 }, (_, i) => ({ a: bytes[i * 3], b: bytes[i * 3 + 1], target: bytes[i * 3 + 2] & 15, gate_i: bytes[i * 3 + 2] >>> 4 }))
 }
@@ -99,30 +99,4 @@ export function meetInMiddle(gates: Gate[], wires: number, catalog: Gate[], maxD
 		frontier = next
 	}
 	return undefined
-}
-
-/** Invalid first-use numbering can never be repaired by appending more gates. */
-export function* canonicalCircuits(catalog: Gate[], maximumDepth: number, onProgress?: (progress: import('./generation-progress.js').SequenceProgress) => void): Generator<Gate[]> {
-	const { sequenceSpace } = generationProgressHelpers
-	const sizes = sequenceSpace(catalog.length, maximumDepth)
-	const total = sizes[maximumDepth]
-	let covered = 0n, pruned = 0n, examined = 0, evaluated = 0
-	const stack = [{ gates: [] as Gate[], depth: 0 }]
-	while (stack.length) {
-		const { gates, depth } = stack.pop()!
-		examined++
-		const wires = [...new Set(gates.flatMap(getVars))]
-		if (!wires.every((wire, index) => wire === index)) {
-			const skipped = sizes[maximumDepth - depth]
-			covered += skipped
-			pruned += skipped
-		} else {
-			covered++
-			evaluated++
-			yield gates
-			if (depth < maximumDepth) for (const gate of catalog) stack.push({ gates: [...gates, gate], depth: depth + 1 })
-		}
-		if (examined % 1024 === 0) onProgress?.({ covered, total, examined, evaluated, pruned })
-	}
-	onProgress?.({ covered, total, examined, evaluated, pruned })
 }

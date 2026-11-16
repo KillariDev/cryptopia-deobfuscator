@@ -1,4 +1,3 @@
-import { config } from './config.js'
 import * as fs from 'fs'
 import { createHash } from 'crypto'
 import { DependencyNode, Gate } from './types.js'
@@ -151,7 +150,7 @@ export const simplifyGate = (gate: Gate): Gate => {
 }
 
 export const mapVariablesToIndexes = (gates: Gate[]) => {
-	return [...new Set(gates.flatMap((gate) => getVars(gate)))].sort()
+	return [...new Set(gates.flatMap((gate) => getVars(gate)))].sort((a, b) => a - b)
 }
 export const mapCircuit = (gates: Gate[], indexMapping: number[]) => {
 	const inverse = new Map(indexMapping.map((wire, index) => [wire, index]))
@@ -298,12 +297,9 @@ export const hashNumberArray = (array: number[]): string => {
 }
 
 export function ioHash(mapping: boolean[]) {
-	if (config.database.format === 'compact') {
-		const bytes = Buffer.alloc(Math.ceil(mapping.length / 8))
-		mapping.forEach((value, i) => { if (value) bytes[i >>> 3] |= 1 << (i & 7) })
-		return bytes.toString('hex')
-	}
-	return hashBooleanArrays(mapping)
+	const bytes = Buffer.alloc(Math.ceil(mapping.length / 8))
+	mapping.forEach((value, i) => { if (value) bytes[i >>> 3] |= 1 << (i & 7) })
+	return bytes.toString('hex')
 }
 
 export const toBatches = (array: Gate[], batchSize: number): Gate[][] => {

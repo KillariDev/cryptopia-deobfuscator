@@ -107,7 +107,7 @@ on the next run, not during a run.
 - `validation`: checkpoint test inputs, probabilistic test inputs, and maximum supported circuit wires. Fewer inputs reduce verification confidence.
 - `search`: probabilistic/variable elimination switches, maximum wires for exhaustive checks, inclusive subset/slice ranges, internal chunk sizing, and shuffle passes.
 - `cache`: per-worker lookup/processed cache capacities and shuffle cache capacity.
-- `database`: rainbow circuit wire/gate limits, query/insert batch sizes, and generation flush settings. Changing wire/gate limits selects a different database and may require building it.
+- `database`: rainbow circuit wire/gate limits, query/insert batch sizes, disk generation bounds, and ETA smoothing settings. Changing wire/gate limits selects a different database and may require building it.
 
 Settings omitted from a section use the defaults. Unknown keys, invalid types,
 and unsupported ranges fail at startup. The checked-in file lists all options.
@@ -145,66 +145,70 @@ Improved rounds use the five-minute target by default; otherwise the default is
 partial time-budget percentage. Routine report age and internal search counters
 are shown only in verbose mode. Delayed worker updates produce a warning.
 
-## Compact lookup database and migration
+## Rainbow table generation
 
-`database.format` accepts `"legacy"` (the default) or `"compact"`. Compact databases
-use exact packed truth-table BLOB keys, binary gate payloads, and `WITHOUT ROWID`.
-For four wires a key contains the complete mapping, without SHA hashing. Database
-filenames include `.compact` so changing the format cannot overwrite a legacy
-file. `database.memoryMapBytes` configures SQLite mmap on each connection; set it
-to `0` to disable mapping. SQLite may cap or disable mapping depending on its build.
+There is one table format and one generator. Tables are named
+`rainbow_<wires>_<gates>.db` under `files.databaseDirectory`. If the selected table
+does not exist, the solver generates it; a completed table is used as-is.
+Interrupted builds resume automatically. There is no migration, rebuild command,
+format selector, or compatibility mode for older hash tables.
 
-To convert an existing table, keep `database.wires` set to the source's wire count:
+The table uses exact packed truth-table BLOB keys, binary gate payloads and
+`WITHOUT ROWID`. For four wires a key holds the complete mapping. Generation
+and lookup use the same fixed wire labels, with input wires numbered in numeric
+order. All functions reachable within the configured gate catalog/depth remain
+eligible; generation does not discard functions based on a sequence's first-use
+wire order. Lookup does not borrow wires absent from the candidate window.
 
-```bash
-npm run migrate-db -- canonHashrainbowtable_4_5.db canonHashrainbowtable_4_5.compact.db
-```
+Generation expands truth tables incrementally, breadth-first by function.
+Equal-depth alternatives retain used-wire/read-cost metadata needed to choose
+shorter continuations correctly. Frontiers, visited functions and committed
+progress live in SQLite. Each bounded batch writes its results and advances
+its frontier in the same transaction, so a failed/interrupted batch can be retried.
+Database inserts use multi-row statements, not a JavaScript await for every row.
 
-Migration opens the source read-only, streams batches, recomputes each entry's
-truth table, verifies its original SHA key, and writes a new compact database.
-It refuses existing destinations and known-incomplete generations. A `.building`
-file is renamed only after completion; a failed migration removes that temporary
-file. Stop a running table generator before migration. Large databases require
-additional disk space and migration time. After success, set `database.format`
-to `"compact"`. No migration is performed automatically.
+Generation settings:
 
-## Semantic generation and bounded synthesis
+- `database.queryBatchSize`: maximum frontier rows read per batch and the SQL parameter budget (at most 900).
+- `database.generationBatchRows`: maximum candidate rows staged in JavaScript before a bulk SQL write.
+- `database.generationStates`: optional distinct-function limit; `0` means unlimited disk-backed generation. Hitting a limit rolls back the current batch; increase the limit or set it to `0`, then restart to resume.
+- `database.keepGenerationState`: retain working tables after completion for inspection. By default they are dropped; SQLite may retain freed pages in the database file.
+- `database.memoryMapBytes`: mmap setting per connection; `0` disables mapping. SQLite can cap or disable mmap depending on its build.
 
-`database.semanticGeneration` (opt-in; default `false`) builds new tables breadth-first by distinct labeled
-functions, retaining used-wire/read-cost metadata for equal-depth alternatives.
-`database.generationStates` bounds both retained states and frontier entries;
-reaching a limit raises an error rather than treating a partial table as complete.
-Generation completion is recorded in the database. An interrupted build is
-recomputed on the next attempt, reusing stored entries; it does not resume the
-in-memory frontier. Existing completed databases are reused without rebuilding.
+Only build one copy of a particular table at a time. Disk requirements can still
+be substantial; bounded RAM does not make the search space small. Completed
+layers and partially processed layers are resumable without recomputing their
+committed work. A smaller `database.gates` value builds a smaller library; enable
+bounded on-demand synthesis for uncommon windows instead of precomputing every
+larger replacement. Changing wire/gate limits selects a different table filename.
+
+### Stable generation progress
+
+Updates follow `timing.databaseLogSeconds`. They show depth, the current layer's
+completion percentage, functions indexed on disk and elapsed time for this run.
+The layer ETA warms up for `database.etaWarmupSamples` reports, uses a rolling
+median over `database.etaWindowSamples` rates, then smooths that rate with
+`database.etaSmoothing` (lower values react more slowly). Layer changes reset the
+estimate. Work committed before a restart contributes to percentage completion
+but is not treated as work performed during the new timing sample.
+
+An ETA is still approximate. Future layer sizes depend on deduplication, so an
+overall ETA is explicitly unavailable rather than extrapolated from unstable
+sequence-space coverage. Stalls are labeled as waiting for progress after the
+sampling window fills with zero rates. Completion is logged after final writes.
+
+## Bounded local synthesis
 
 The `synthesis` section controls additional local optimizers:
 
-- `templates` enables structural identities and target/control-safe pair merging before database lookup. Successful exact rewrites are learned as wire-normalized templates, admitted only after exhaustive verification. `templateEntries` bounds the learned cache.
-- `smt` enables Z3-backed counterexample-guided synthesis. Candidate gate fields are symbolic; failing exhaustive inputs are added until a replacement is proven locally equivalent. `timeoutMs` bounds search after WASM initialization; loading Z3 and cleanup add overhead. The WASM helper threads are cleaned up after each attempt.
-- `meetInMiddle` enables bounded bidirectional search for small bijective functions, using self-inverse gates whose targets do not occur as controls. Non-bijective targets are rejected.
-- `equalitySaturation` enables a bounded circuit-sequence equality graph. Prefix nodes share exact semantic equivalence classes; commuting alternatives and template reductions are explored without discarding the original, then the cheapest discovered circuit is selected. This is a local bounded engine, not whole-program Boolean-expression saturation.
+- `templates` enables target/control-safe structural identities and pair merging before lookup. Exact rewrites are learned as normalized templates only after exhaustive verification; `templateEntries` bounds the cache.
+- `smt` enables Z3 counterexample-guided synthesis. Candidate gate fields are symbolic; counterexamples refine them until local equivalence is proven. `timeoutMs` bounds search after WASM startup, and helper threads are cleaned up after every attempt.
+- `meetInMiddle` searches small bijective functions bidirectionally using self-inverse gates with targets separate from controls.
+- `equalitySaturation` explores bounded equivalent circuit sequences through commuting alternatives and templates, then selects the cheapest discovered circuit.
 
-SMT, meet-in-the-middle and equality saturation are opt-in and default to `false`.
-They run only after ordinary local search fails. `maximumWires` (at most four),
-`maximumWindowGates`, `maximumReplacementGates`, `attemptEvery`, `states` and
-`timeoutMs` limit their scope and cost. Timed-out attempts are cached as failed
-heuristic attempts, not proofs of impossibility. Optional synthesis is serialized
-per worker. All returned replacements are checked exhaustively before use and
-can become reusable templates. Global checkpoint verification remains probabilistic.
-
-### Rainbow generation progress
-
-Generation reports use `timing.databaseLogSeconds`. Legacy enumeration shows
-percentage of the configured sequence space accounted for, approximate remaining
-search time, buffered functions and elapsed time. Invalid first-use wire prefixes
-are skipped with their entire subtree and included in coverage; pruning preserves
-the same accepted circuits as filtering only at the leaves. Buffered functions
-are not a count of total processed sequences or total database rows.
-
-The ETA learns from reporting intervals and uses recent coverage throughput;
-pruning, deduplication and disk writes can change the rate, so it is an estimate.
-Writing phases are labeled separately; write duration is not predicted. Semantic
-generation shows depth, progress and ETA within the current layer. Its overall
-ETA is explicitly unavailable because future deduplicated frontier sizes are not
-known. Completion is reported only after the final database write succeeds.
+SMT, meet-in-the-middle and equality saturation remain opt-in. Scope is limited
+by `maximumWires`, `maximumWindowGates`, `maximumReplacementGates`, `attemptEvery`,
+`states` and `timeoutMs`. Optional synthesis runs after ordinary local search
+fails and is serialized per worker. Returned replacements are exhaustively
+checked. Timeouts are heuristic failed attempts, not proofs of impossibility.
+Global checkpoint verification remains probabilistic.
