@@ -1,0 +1,390 @@
+{
+  "date": "2026-11-17",
+  "writerRuntimeSha256": "3835c8ab9b034070f3fb2596c6196f42e6ad69cb19d6e1079c811c40c752ac54",
+  "selectedDefaults": {
+    "generationSqlParameters": 8192,
+    "generationPreparedInserts": true,
+    "generationSortStaging": false,
+    "generationStatementCacheEntries": 8
+  },
+  "limitations": [
+    "Same-process staging fixtures on a shared host, with fresh temporary tables; three repetitions per variant.",
+    "Staging timings include sorting and initial preparation, exclude setup/fixture generation/commit/validation/finalization.",
+    "The 200k study compared five variants; the 500k study also tested 16384-parameter batches.",
+    "Whole-generation comparisons use fresh processes, one expansion worker, automatic compaction, three repetitions; validation is outside creation timing.",
+    "No production 4-variable/5-gate build or cold-disk throughput measured."
+  ],
+  "stagingStudies": [
+    {
+      "sourceRevision": "7769e23a82020fe2c9e9baa828f3729633d43413",
+      "workingTreeDirty": true,
+      "node": "v24.22.3",
+      "cpu": "AMD Ryzen 9 5900X 12-Core Processor",
+      "settings": {
+        "tables": [
+          {
+            "wires": 3,
+            "gates": 6
+          },
+          {
+            "wires": 4,
+            "gates": 5
+          },
+          {
+            "wires": 5,
+            "gates": 2
+          }
+        ],
+        "queryBatchSize": 900,
+        "lookupBatchMilliseconds": 0,
+        "statementCacheEntries": 16,
+        "sharedTables": true,
+        "sharedTableBytes": 33554432,
+        "sharedTableMaximumRows": 100000,
+        "memoryMapBytes": 268435456,
+        "generationStates": 0,
+        "generationBatchRows": 3000,
+        "generationReadRows": 4096,
+        "generationSqlParameters": 8192,
+        "generationPreparedInserts": true,
+        "generationSortStaging": false,
+        "generationStatementCacheEntries": 8,
+        "generationCacheMegabytes": 256,
+        "generationTempStore": "file",
+        "generationJournalMode": "wal",
+        "generationSynchronous": "full",
+        "generationWorkers": 8,
+        "generationQueueBatches": 2,
+        "generationMinimumWork": 100000,
+        "etaWindowSamples": 5,
+        "etaWarmupSamples": 3,
+        "etaSmoothing": 0.2,
+        "etaMaximumSlowdown": 4
+      },
+      "groups": [
+        {
+          "variant": "reference",
+          "parameters": 900,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "digest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "samplesMs": [
+            1412.3708120000001,
+            1364.8498579999996,
+            1450.879288
+          ],
+          "medianMs": 1412.3708120000001,
+          "statementStats": null
+        },
+        {
+          "variant": "prepared-small",
+          "parameters": 900,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "digest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "samplesMs": [
+            1499.7330519999996,
+            1267.5577130000001,
+            1300.8702510000003
+          ],
+          "medianMs": 1300.8702510000003,
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 1134,
+            "peakCached": 3
+          }
+        },
+        {
+          "variant": "unprepared-large",
+          "parameters": 8192,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "digest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "samplesMs": [
+            1043.5855000000001,
+            1327.0149099999999,
+            1067.3098390000014
+          ],
+          "medianMs": 1067.3098390000014,
+          "statementStats": null
+        },
+        {
+          "variant": "prepared-large",
+          "parameters": 8192,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "digest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "samplesMs": [
+            1001.6097120000004,
+            1418.9222809999992,
+            1173.9930520000016
+          ],
+          "medianMs": 1173.9930520000016,
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        },
+        {
+          "variant": "prepared-large-sorted",
+          "parameters": 8192,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "digest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "samplesMs": [
+            1125.1981730000007,
+            1114.7973700000002,
+            1197.120175
+          ],
+          "medianMs": 1125.1981730000007,
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        }
+      ]
+    },
+    {
+      "sourceRevision": "7769e23a82020fe2c9e9baa828f3729633d43413",
+      "workingTreeDirty": true,
+      "node": "v24.22.3",
+      "cpu": "AMD Ryzen 9 5900X 12-Core Processor",
+      "settings": {
+        "tables": [
+          {
+            "wires": 3,
+            "gates": 6
+          },
+          {
+            "wires": 4,
+            "gates": 5
+          },
+          {
+            "wires": 5,
+            "gates": 2
+          }
+        ],
+        "queryBatchSize": 900,
+        "lookupBatchMilliseconds": 0,
+        "statementCacheEntries": 16,
+        "sharedTables": true,
+        "sharedTableBytes": 33554432,
+        "sharedTableMaximumRows": 100000,
+        "memoryMapBytes": 268435456,
+        "generationStates": 0,
+        "generationBatchRows": 3000,
+        "generationReadRows": 4096,
+        "generationSqlParameters": 8192,
+        "generationPreparedInserts": true,
+        "generationSortStaging": false,
+        "generationStatementCacheEntries": 8,
+        "generationCacheMegabytes": 256,
+        "generationTempStore": "file",
+        "generationJournalMode": "wal",
+        "generationSynchronous": "full",
+        "generationWorkers": 8,
+        "generationQueueBatches": 2,
+        "generationMinimumWork": 100000,
+        "etaWindowSamples": 5,
+        "etaWarmupSamples": 3,
+        "etaSmoothing": 0.2,
+        "etaMaximumSlowdown": 4
+      },
+      "groups": [
+        {
+          "variant": "reference",
+          "parameters": 900,
+          "candidateRows": 500000,
+          "distinctStateMasks": 459013,
+          "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e",
+          "samplesMs": [
+            3960.7830519999998,
+            3573.910578999996,
+            3486.2881250000064
+          ],
+          "medianMs": 3573.910578999996,
+          "statementStats": null
+        },
+        {
+          "variant": "prepared-small",
+          "parameters": 900,
+          "candidateRows": 500000,
+          "distinctStateMasks": 459013,
+          "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e",
+          "samplesMs": [
+            3623.5057050000005,
+            2997.1088509999972,
+            3034.311950000003
+          ],
+          "medianMs": 3034.311950000003,
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 2834,
+            "peakCached": 3
+          }
+        },
+        {
+          "variant": "unprepared-large",
+          "parameters": 8192,
+          "candidateRows": 500000,
+          "distinctStateMasks": 459013,
+          "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e",
+          "samplesMs": [
+            2873.00446,
+            2858.9904800000004,
+            3286.9345310000062
+          ],
+          "medianMs": 2873.00446,
+          "statementStats": null
+        },
+        {
+          "variant": "prepared-large",
+          "parameters": 8192,
+          "candidateRows": 500000,
+          "distinctStateMasks": 459013,
+          "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e",
+          "samplesMs": [
+            2752.694526999998,
+            2755.447607000002,
+            3251.1702430000005
+          ],
+          "medianMs": 2755.447607000002,
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 334,
+            "peakCached": 3
+          }
+        },
+        {
+          "variant": "prepared-large-sorted",
+          "parameters": 8192,
+          "candidateRows": 500000,
+          "distinctStateMasks": 459013,
+          "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e",
+          "samplesMs": [
+            3058.5944139999992,
+            3007.1121159999966,
+            3200.9011549999996
+          ],
+          "medianMs": 3058.5944139999992,
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 334,
+            "peakCached": 3
+          }
+        },
+        {
+          "variant": "prepared-wide",
+          "parameters": 16384,
+          "candidateRows": 500000,
+          "distinctStateMasks": 459013,
+          "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e",
+          "samplesMs": [
+            2825.917609,
+            2820.805618999999,
+            2935.7280979999923
+          ],
+          "medianMs": 2825.917609,
+          "statementStats": {
+            "statementsPrepared": 2,
+            "executions": 167,
+            "peakCached": 2
+          }
+        },
+        {
+          "variant": "prepared-wide-sorted",
+          "parameters": 16384,
+          "candidateRows": 500000,
+          "distinctStateMasks": 459013,
+          "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e",
+          "samplesMs": [
+            3043.6406800000004,
+            3669.906568999999,
+            2771.5216729999956
+          ],
+          "medianMs": 3043.6406800000004,
+          "statementStats": {
+            "statementsPrepared": 2,
+            "executions": 167,
+            "peakCached": 2
+          }
+        }
+      ]
+    }
+  ],
+  "endToEnd": {
+    "variants": [
+      {
+        "name": "reference",
+        "root": "/tmp/cryptopia-staging-reference",
+        "revision": "7769e23a82020fe2c9e9baa828f3729633d43413",
+        "workingTreeDirty": null,
+        "runtimeSha256": "ebf180da1b921f30e96cabdf4d25d593881ba2f380c575dcb0ee177da9beb96e"
+      },
+      {
+        "name": "current",
+        "root": "/workspace/cryptopia-deobfuscator",
+        "revision": "7769e23a82020fe2c9e9baa828f3729633d43413",
+        "workingTreeDirty": true,
+        "runtimeSha256": "963037d27c9493da02b4eb9a206e97914735382e1eb8251cbb80e4cb8bdd76df"
+      }
+    ],
+    "trials": 12,
+    "groups": [
+      {
+        "wires": 3,
+        "gates": 4,
+        "variants": {
+          "reference": {
+            "samplesMs": [
+              2647.065009,
+              2501.8345360000003,
+              2351.249333
+            ],
+            "medianMs": 2501.8345360000003,
+            "rows": 38016,
+            "digest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+          },
+          "current": {
+            "samplesMs": [
+              2277.460301,
+              2331.9358669999997,
+              2237.8627
+            ],
+            "medianMs": 2277.460301,
+            "rows": 38016,
+            "digest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+          }
+        }
+      },
+      {
+        "wires": 4,
+        "gates": 3,
+        "variants": {
+          "reference": {
+            "samplesMs": [
+              15788.134011,
+              15867.54015,
+              14170.444951000001
+            ],
+            "medianMs": 15788.134011,
+            "rows": 832167,
+            "digest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+          },
+          "current": {
+            "samplesMs": [
+              13671.686886,
+              14577.470863999999,
+              12317.719219
+            ],
+            "medianMs": 13671.686886,
+            "rows": 832167,
+            "digest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+          }
+        }
+      }
+    ]
+  }
+}

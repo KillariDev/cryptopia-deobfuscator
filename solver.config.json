@@ -117,7 +117,11 @@
     "generationTempStore": "file",
     "generationJournalMode": "wal",
     "generationSynchronous": "full",
-    "etaMaximumSlowdown": 4
+    "etaMaximumSlowdown": 4,
+    "generationSqlParameters": 8192,
+    "generationPreparedInserts": true,
+    "generationSortStaging": false,
+    "generationStatementCacheEntries": 8
   },
   "synthesis": {
     "templates": true,
@@ -168,6 +172,9 @@
     ],
     "dedupCandidateFunctions": 2000,
     "dedupMasksPerFunction": 4,
-    "dedupOutputName": "dedup-benchmark.json"
+    "dedupOutputName": "dedup-benchmark.json",
+    "stagingRows": 200000,
+    "stagingOutputName": "staging-benchmark.json",
+    "stagingWideSqlParameters": 16384
   }
 }
