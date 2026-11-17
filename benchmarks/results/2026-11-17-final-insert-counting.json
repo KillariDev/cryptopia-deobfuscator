@@ -1,0 +1,1824 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-17",
+  "baseRevision": "e0ac39c",
+  "defaultEnabled": false,
+  "completeBuilds": [
+    {
+      "stagingWriters": 1,
+      "wires": 3,
+      "gates": 4,
+      "rows": 38016,
+      "digest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "medianSeconds": 1.605009504,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 1795.696649,
+              "cpuMs": 2095.547,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 22.31035300000002,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 6.709483000000034,
+                  "calls": 3
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 11.425462000000039,
+                  "calls": 3
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 6.489765000000034,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.308079999999734,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.2449889999999755,
+                  "calls": 6
+                },
+                {
+                  "name": "final membership/count",
+                  "ms": 61.289904999999976,
+                  "calls": 3
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 86.27161599999988,
+                  "calls": 3
+                }
+              ],
+              "peakDatabaseBytes": 3922008,
+              "peakRssBytes": 243507200
+            },
+            {
+              "repeat": 1,
+              "generationMs": 1583.0515269999999,
+              "cpuMs": 1926.083,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 24.199324000000004,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 7.068303000000014,
+                  "calls": 3
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 14.821587999999991,
+                  "calls": 3
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 6.446138000000076,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.1943280000001408,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.305899000000096,
+                  "calls": 6
+                },
+                {
+                  "name": "final membership/count",
+                  "ms": 57.394402000000014,
+                  "calls": 3
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 75.74850100000026,
+                  "calls": 3
+                }
+              ],
+              "peakDatabaseBytes": 6790368,
+              "peakRssBytes": 247644160
+            },
+            {
+              "repeat": 2,
+              "generationMs": 1605.009504,
+              "cpuMs": 1927.579,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 21.777768000000137,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 6.849146000000047,
+                  "calls": 3
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 10.78940100000004,
+                  "calls": 3
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 6.643287999999998,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.4990279999997398,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.3983390000000213,
+                  "calls": 6
+                },
+                {
+                  "name": "final membership/count",
+                  "ms": 60.52317800000003,
+                  "calls": 3
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 79.34867900000017,
+                  "calls": 3
+                }
+              ],
+              "peakDatabaseBytes": 3922008,
+              "peakRssBytes": 248102912
+            }
+          ]
+        },
+        {
+          "variant": "count-inserts",
+          "medianSeconds": 1.7430184899999999,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 1743.01849,
+              "cpuMs": 2124.953,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 29.619380000000007,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 6.812651999999986,
+                  "calls": 3
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 11.80370099999999,
+                  "calls": 3
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.227872000000019,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.3273959999999079,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.3524749999997425,
+                  "calls": 6
+                },
+                {
+                  "name": "arm final counter",
+                  "ms": 1.002783999999906,
+                  "calls": 3
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 118.4524909999999,
+                  "calls": 3
+                },
+                {
+                  "name": "read final count",
+                  "ms": 0.7605149999997138,
+                  "calls": 3
+                },
+                {
+                  "name": "disarm final counter",
+                  "ms": 0.7299290000000838,
+                  "calls": 3
+                }
+              ],
+              "peakDatabaseBytes": 3922008,
+              "peakRssBytes": 242593792
+            },
+            {
+              "repeat": 1,
+              "generationMs": 1781.0023979999999,
+              "cpuMs": 2164.317,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 24.824779999999933,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 6.75271800000003,
+                  "calls": 3
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 10.68374799999998,
+                  "calls": 3
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 6.777003000000036,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.4891049999998103,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.3832929999999948,
+                  "calls": 6
+                },
+                {
+                  "name": "arm final counter",
+                  "ms": 0.878540000000271,
+                  "calls": 3
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 116.945608,
+                  "calls": 3
+                },
+                {
+                  "name": "read final count",
+                  "ms": 0.6900110000000268,
+                  "calls": 3
+                },
+                {
+                  "name": "disarm final counter",
+                  "ms": 0.5755960000003597,
+                  "calls": 3
+                }
+              ],
+              "peakDatabaseBytes": 6790368,
+              "peakRssBytes": 248225792
+            },
+            {
+              "repeat": 2,
+              "generationMs": 1655.982219,
+              "cpuMs": 2006.8,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 24.497768000000093,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 6.556584000000015,
+                  "calls": 3
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 11.27210999999997,
+                  "calls": 3
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 6.408705999999938,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.3114009999999041,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.2513899999997875,
+                  "calls": 6
+                },
+                {
+                  "name": "arm final counter",
+                  "ms": 0.7717839999997977,
+                  "calls": 3
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 110.73506699999984,
+                  "calls": 3
+                },
+                {
+                  "name": "read final count",
+                  "ms": 0.7347839999999906,
+                  "calls": 3
+                },
+                {
+                  "name": "disarm final counter",
+                  "ms": 0.6760829999997213,
+                  "calls": 3
+                }
+              ],
+              "peakDatabaseBytes": 3922008,
+              "peakRssBytes": 249294848
+            }
+          ]
+        }
+      ],
+      "pairedRatios": [
+        0.9706642215825619,
+        1.1250438584113125,
+        1.0317585128766937
+      ],
+      "variants": [
+        {
+          "name": "count-candidates",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "countFinal": false,
+          "revision": "e0ac39c90ef67d42afc7bc6f9bb7793b948df799",
+          "workingTreeDirty": true,
+          "runtimeSha256": "442d5057e4e451e933c2685ca20ed107a41cb38fda6ce4dd258d3d031ca6ea1a"
+        },
+        {
+          "name": "count-inserts",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "countFinal": true,
+          "revision": "e0ac39c90ef67d42afc7bc6f9bb7793b948df799",
+          "workingTreeDirty": true,
+          "runtimeSha256": "442d5057e4e451e933c2685ca20ed107a41cb38fda6ce4dd258d3d031ca6ea1a"
+        }
+      ]
+    },
+    {
+      "stagingWriters": 1,
+      "wires": 4,
+      "gates": 3,
+      "rows": 832167,
+      "digest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "medianSeconds": 9.664512628,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 9854.915915000001,
+              "cpuMs": 10942.062,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 37.01036699999976,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 5.573079000000007,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 11.379645999999994,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.808190999998615,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.3290600000020731,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.1520440000006715,
+                  "calls": 6
+                },
+                {
+                  "name": "final membership/count",
+                  "ms": 955.5672230000009,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 1079.7980889999972,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1251102720
+            },
+            {
+              "repeat": 1,
+              "generationMs": 9664.512628,
+              "cpuMs": 10728.191,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 32.50004999999945,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 5.814290999999997,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 10.687296000000032,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 9.140301999999537,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.4412479999996037,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.119598999999596,
+                  "calls": 6
+                },
+                {
+                  "name": "final membership/count",
+                  "ms": 874.7895109999981,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 1041.8855689999987,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1259233280
+            },
+            {
+              "repeat": 2,
+              "generationMs": 9538.010207,
+              "cpuMs": 10533.334,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 33.521825999999606,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 5.9486459999999965,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 11.583213,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.616395000001688,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.381651999998553,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.2111789999992482,
+                  "calls": 6
+                },
+                {
+                  "name": "final membership/count",
+                  "ms": 880.2253560000008,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 1058.083678,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1234259968
+            }
+          ]
+        },
+        {
+          "variant": "count-inserts",
+          "medianSeconds": 9.519819241,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 9519.819241000001,
+              "cpuMs": 10656.325,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 37.98140600000126,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 5.664025999999993,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 10.936464999999998,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.674951999999081,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.3027990000010021,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.2947869999994026,
+                  "calls": 6
+                },
+                {
+                  "name": "arm final counter",
+                  "ms": 1.6356650000006994,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 1747.5388860000007,
+                  "calls": 4
+                },
+                {
+                  "name": "read final count",
+                  "ms": 1.0834439999989627,
+                  "calls": 4
+                },
+                {
+                  "name": "disarm final counter",
+                  "ms": 0.9942139999993742,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1250201600
+            },
+            {
+              "repeat": 1,
+              "generationMs": 9474.434274000001,
+              "cpuMs": 10564.91,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 39.596148000000085,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 5.9782550000000185,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 11.116951,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.400450999998199,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.3234110000011583,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.244535999999684,
+                  "calls": 6
+                },
+                {
+                  "name": "arm final counter",
+                  "ms": 1.1547950000008314,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 1744.1775319999992,
+                  "calls": 4
+                },
+                {
+                  "name": "read final count",
+                  "ms": 1.030046000000766,
+                  "calls": 4
+                },
+                {
+                  "name": "disarm final counter",
+                  "ms": 0.8453899999994974,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1260445696
+            },
+            {
+              "repeat": 2,
+              "generationMs": 10133.243074,
+              "cpuMs": 11136.956,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 40.951914999998564,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 6.403874999999999,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 12.467714999999998,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.727583000000692,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.244639000000717,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.1591949999977658,
+                  "calls": 6
+                },
+                {
+                  "name": "arm final counter",
+                  "ms": 4.084822000000713,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 1857.4490140000003,
+                  "calls": 4
+                },
+                {
+                  "name": "read final count",
+                  "ms": 1.0607949999994162,
+                  "calls": 4
+                },
+                {
+                  "name": "disarm final counter",
+                  "ms": 0.8943109999991066,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1239859200
+            }
+          ]
+        }
+      ],
+      "pairedRatios": [
+        0.9659970032326755,
+        0.9803323394239969,
+        1.0624063986179377
+      ],
+      "variants": [
+        {
+          "name": "count-candidates",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "countFinal": false,
+          "revision": "e0ac39c90ef67d42afc7bc6f9bb7793b948df799",
+          "workingTreeDirty": true,
+          "runtimeSha256": "442d5057e4e451e933c2685ca20ed107a41cb38fda6ce4dd258d3d031ca6ea1a"
+        },
+        {
+          "name": "count-inserts",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "countFinal": true,
+          "revision": "e0ac39c90ef67d42afc7bc6f9bb7793b948df799",
+          "workingTreeDirty": true,
+          "runtimeSha256": "442d5057e4e451e933c2685ca20ed107a41cb38fda6ce4dd258d3d031ca6ea1a"
+        }
+      ]
+    },
+    {
+      "stagingWriters": 2,
+      "wires": 4,
+      "gates": 3,
+      "rows": 832167,
+      "digest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "medianSeconds": 9.07802061,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 9525.794163,
+              "cpuMs": 12783.286,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 35.96365900000066,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 6.143333999999982,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 10.183284000000015,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.783053000001843,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.467924999999184,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.2386470000006113,
+                  "calls": 6
+                },
+                {
+                  "name": "final membership/count",
+                  "ms": 755.7764860000007,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 866.3288759999996,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1277341696
+            },
+            {
+              "repeat": 1,
+              "generationMs": 9078.02061,
+              "cpuMs": 12242.006,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 37.11750300000011,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 5.625222999999977,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 11.729436000000021,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.551914000000522,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.3628000000002771,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.2752500000018188,
+                  "calls": 6
+                },
+                {
+                  "name": "final membership/count",
+                  "ms": 736.5229730000024,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 883.2157969999985,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1280630784
+            },
+            {
+              "repeat": 2,
+              "generationMs": 8902.857184999999,
+              "cpuMs": 11910.516,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 44.40105500000024,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 5.42387800000003,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 9.850004000000013,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.875681000000185,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.4299459999994042,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.1383879999996793,
+                  "calls": 6
+                },
+                {
+                  "name": "final membership/count",
+                  "ms": 763.2855789999999,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 848.6642200000006,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1257127936
+            }
+          ]
+        },
+        {
+          "variant": "count-inserts",
+          "medianSeconds": 9.905282038,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 11218.060829,
+              "cpuMs": 14030.19,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 39.05359700000014,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 9.354475000000008,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 12.082104999999956,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.727238000001051,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.4888070000003495,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.1399570000008623,
+                  "calls": 6
+                },
+                {
+                  "name": "arm final counter",
+                  "ms": 1.4279209999976956,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 1558.268242,
+                  "calls": 4
+                },
+                {
+                  "name": "read final count",
+                  "ms": 1.0712740000021768,
+                  "calls": 4
+                },
+                {
+                  "name": "disarm final counter",
+                  "ms": 0.8925120000017159,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1268789248
+            },
+            {
+              "repeat": 1,
+              "generationMs": 9589.913839,
+              "cpuMs": 13019.278,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 38.03702500000085,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 5.427190000000024,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 12.056992999999977,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.540166000000852,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.6219390000007934,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.1704589999997381,
+                  "calls": 6
+                },
+                {
+                  "name": "arm final counter",
+                  "ms": 1.287663000000066,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 1559.8699749999987,
+                  "calls": 4
+                },
+                {
+                  "name": "read final count",
+                  "ms": 1.264370999998846,
+                  "calls": 4
+                },
+                {
+                  "name": "disarm final counter",
+                  "ms": 0.9061530000003586,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1272311808
+            },
+            {
+              "repeat": 2,
+              "generationMs": 9905.282038,
+              "cpuMs": 13324.149,
+              "operations": [
+                {
+                  "name": "input lookup",
+                  "ms": 43.75582599999956,
+                  "calls": 6
+                },
+                {
+                  "name": "insert seen",
+                  "ms": 5.109456999999992,
+                  "calls": 2
+                },
+                {
+                  "name": "update frontier",
+                  "ms": 10.132025000000027,
+                  "calls": 2
+                },
+                {
+                  "name": "consume frontier",
+                  "ms": 7.553017999998076,
+                  "calls": 6
+                },
+                {
+                  "name": "update checkpoint",
+                  "ms": 1.323429999998865,
+                  "calls": 6
+                },
+                {
+                  "name": "update layer",
+                  "ms": 1.2109720000005098,
+                  "calls": 6
+                },
+                {
+                  "name": "arm final counter",
+                  "ms": 1.239823000000797,
+                  "calls": 4
+                },
+                {
+                  "name": "final lookup",
+                  "ms": 1552.452921999999,
+                  "calls": 4
+                },
+                {
+                  "name": "read final count",
+                  "ms": 1.3310209999999643,
+                  "calls": 4
+                },
+                {
+                  "name": "disarm final counter",
+                  "ms": 0.929302000000007,
+                  "calls": 4
+                }
+              ],
+              "peakDatabaseBytes": 70751880,
+              "peakRssBytes": 1305411584
+            }
+          ]
+        }
+      ],
+      "pairedRatios": [
+        1.177650979754852,
+        1.056388198594319,
+        1.1125958590786942
+      ],
+      "variants": [
+        {
+          "name": "count-candidates",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "countFinal": false,
+          "revision": "e0ac39c90ef67d42afc7bc6f9bb7793b948df799",
+          "workingTreeDirty": true,
+          "runtimeSha256": "442d5057e4e451e933c2685ca20ed107a41cb38fda6ce4dd258d3d031ca6ea1a"
+        },
+        {
+          "name": "count-inserts",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "countFinal": true,
+          "revision": "e0ac39c90ef67d42afc7bc6f9bb7793b948df799",
+          "workingTreeDirty": true,
+          "runtimeSha256": "442d5057e4e451e933c2685ca20ed107a41cb38fda6ce4dd258d3d031ca6ea1a"
+        }
+      ]
+    }
+  ],
+  "queryCases": [
+    {
+      "population": 10000,
+      "knownFraction": 0,
+      "mode": "equal-cost hits",
+      "digest": "5f9193f7b1d565073b9f984daa1cd7ee4b5f5b1a2ede1539efbf0acf4ce66a51",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            10.00755700000002,
+            10.665636999999947,
+            10.102290999999923
+          ],
+          "medianMs": 10.102290999999923
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            6.795679000000064,
+            7.215198999999984,
+            6.870533999999907
+          ],
+          "medianMs": 6.870533999999907
+        }
+      ]
+    },
+    {
+      "population": 10000,
+      "knownFraction": 0,
+      "mode": "insert/improve",
+      "digest": "45bf99fe8e37ae0f7b667f04a8bed9892a534254d1f38a2785d0faa632323f9a",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            11.125717000000009,
+            11.219992999999988,
+            11.506354999999985
+          ],
+          "medianMs": 11.219992999999988
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            9.301271999999983,
+            9.682782000000032,
+            10.051793999999973
+          ],
+          "medianMs": 9.682782000000032
+        }
+      ]
+    },
+    {
+      "population": 10000,
+      "knownFraction": 0.5,
+      "mode": "equal-cost hits",
+      "digest": "145c200022783cbd613904e7d6dd1fa24ca84b777d0805886938f3430edb2f20",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            12.640407000000096,
+            12.335230000000138,
+            9.916631999999936
+          ],
+          "medianMs": 12.335230000000138
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            9.304613999999901,
+            9.839068999999881,
+            7.798534999999902
+          ],
+          "medianMs": 9.304613999999901
+        }
+      ]
+    },
+    {
+      "population": 10000,
+      "knownFraction": 0.5,
+      "mode": "insert/improve",
+      "digest": "419ef91dcadcc6d8fe402063fa00155833d6f8769c48ae2b2700f28eb11a186e",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            10.092802000000006,
+            9.200889999999958,
+            9.641847999999982
+          ],
+          "medianMs": 9.641847999999982
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            11.504594999999995,
+            8.210022999999978,
+            11.532217000000173
+          ],
+          "medianMs": 11.504594999999995
+        }
+      ]
+    },
+    {
+      "population": 10000,
+      "knownFraction": 0.9,
+      "mode": "equal-cost hits",
+      "digest": "bd0c558bf65e5ca88a876ad32281af7a791ff8119012977e3a48da3b2132f3ff",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            8.451594999999998,
+            8.682605000000194,
+            9.238342999999986
+          ],
+          "medianMs": 8.682605000000194
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            6.713076000000001,
+            7.078903000000082,
+            10.190314000000171
+          ],
+          "medianMs": 7.078903000000082
+        }
+      ]
+    },
+    {
+      "population": 10000,
+      "knownFraction": 0.9,
+      "mode": "insert/improve",
+      "digest": "34ff6a5033a8c7fb3e0de296b577027f77b68d85032dcafaf608b5e81c8b35ec",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            8.843055999999933,
+            9.620306999999912,
+            9.374647000000095
+          ],
+          "medianMs": 9.374647000000095
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            7.065175999999838,
+            9.517884000000095,
+            7.114375000000109
+          ],
+          "medianMs": 7.114375000000109
+        }
+      ]
+    },
+    {
+      "population": 100000,
+      "knownFraction": 0,
+      "mode": "equal-cost hits",
+      "digest": "bafb3afaa9138d3b13822386fb72e19d3a35933f43858916e1ee57a3ecf6e09e",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            10.7584310000002,
+            11.027890999999727,
+            10.766171000000213
+          ],
+          "medianMs": 10.766171000000213
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            7.092424000000392,
+            7.703809999999976,
+            7.420568000000003
+          ],
+          "medianMs": 7.420568000000003
+        }
+      ]
+    },
+    {
+      "population": 100000,
+      "knownFraction": 0,
+      "mode": "insert/improve",
+      "digest": "3a92ef6af7d8acf3c8f7053d2b982aca3f41281b28657cd271a53a88ae51bdb4",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            12.474296000000322,
+            11.90932500000008,
+            11.772337999999763
+          ],
+          "medianMs": 11.90932500000008
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            11.482514000000265,
+            9.934094000000186,
+            9.713002999999844
+          ],
+          "medianMs": 9.934094000000186
+        }
+      ]
+    },
+    {
+      "population": 100000,
+      "knownFraction": 0.5,
+      "mode": "equal-cost hits",
+      "digest": "ef716fa2b7118712d912efe2081ac742cecf28ef78f9a93f0fa978c34bf9cc89",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            10.760021000000052,
+            10.492377999999917,
+            9.996854999999869
+          ],
+          "medianMs": 10.492377999999917
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            7.890973999999915,
+            7.118579999999838,
+            7.377997999999934
+          ],
+          "medianMs": 7.377997999999934
+        }
+      ]
+    },
+    {
+      "population": 100000,
+      "knownFraction": 0.5,
+      "mode": "insert/improve",
+      "digest": "ec3bb15393e208cfb88f32dbf1ad28cd44ee69f3415a3c39bc2af9384758f945",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            11.20844199999965,
+            11.173538999999892,
+            10.87393400000019
+          ],
+          "medianMs": 11.173538999999892
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            8.201571999999942,
+            8.98484899999994,
+            8.654764000000341
+          ],
+          "medianMs": 8.654764000000341
+        }
+      ]
+    },
+    {
+      "population": 100000,
+      "knownFraction": 0.9,
+      "mode": "equal-cost hits",
+      "digest": "f1012810c1749385e5554e3eaf1cd1065a78607560580aecbf96297f8105f285",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            9.840720000000147,
+            10.282040000000052,
+            10.024506000000656
+          ],
+          "medianMs": 10.024506000000656
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            7.042393000000175,
+            8.259347000000162,
+            6.935516000000462
+          ],
+          "medianMs": 7.042393000000175
+        }
+      ]
+    },
+    {
+      "population": 100000,
+      "knownFraction": 0.9,
+      "mode": "insert/improve",
+      "digest": "0520b902f793d9cd08a5796f891607cba137dde985b86753937fb2c7d9f6b3d2",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            10.13736199999994,
+            9.553034999999909,
+            11.615589
+          ],
+          "medianMs": 10.13736199999994
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            7.583173999999872,
+            8.065918000000238,
+            7.581616000000395
+          ],
+          "medianMs": 7.583173999999872
+        }
+      ]
+    },
+    {
+      "population": 1000000,
+      "knownFraction": 0,
+      "mode": "equal-cost hits",
+      "digest": "b060d9f201c36ae58bd83ec3c9eb00a5eb84d380befe73f3cec384f3aa25a556",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            10.762316000000283,
+            10.909931999999571,
+            11.264819999999418
+          ],
+          "medianMs": 10.909931999999571
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            7.242903000000297,
+            7.467394999999669,
+            7.876533999999992
+          ],
+          "medianMs": 7.467394999999669
+        }
+      ]
+    },
+    {
+      "population": 1000000,
+      "knownFraction": 0,
+      "mode": "insert/improve",
+      "digest": "bb5238f5c4b2d31e940b911c1842edd083d3d3d93242164d9fe67731cbfaa347",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            12.837441000000581,
+            13.009830999999394,
+            12.691144999999779
+          ],
+          "medianMs": 12.837441000000581
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            10.640840000000026,
+            10.894202999999834,
+            10.120695999999953
+          ],
+          "medianMs": 10.640840000000026
+        }
+      ]
+    },
+    {
+      "population": 1000000,
+      "knownFraction": 0.5,
+      "mode": "equal-cost hits",
+      "digest": "91f8169c66bcfb3edb24efc10622212853126bd835da47ea1a7206e3f092413c",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            21.122918000000936,
+            18.918923000001087,
+            20.015106000000742
+          ],
+          "medianMs": 20.015106000000742
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            12.483914999998888,
+            13.007090999999491,
+            12.303406999999424
+          ],
+          "medianMs": 12.483914999998888
+        }
+      ]
+    },
+    {
+      "population": 1000000,
+      "knownFraction": 0.5,
+      "mode": "insert/improve",
+      "digest": "bad4881c7ee841a2bf0782c14a6387f8d152cb8510ee20b51b267e021d10f0fd",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            21.148564999999508,
+            20.919772000000194,
+            19.263098999999784
+          ],
+          "medianMs": 20.919772000000194
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            13.600569000000178,
+            13.975864000000001,
+            13.139482000000498
+          ],
+          "medianMs": 13.600569000000178
+        }
+      ]
+    },
+    {
+      "population": 1000000,
+      "knownFraction": 0.9,
+      "mode": "equal-cost hits",
+      "digest": "427183b43ee4c011d3012b192d3d209fc4ba46589714b5acb3a98d503cc7383e",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            27.59595300000001,
+            26.190381000000343,
+            25.38796000000002
+          ],
+          "medianMs": 26.190381000000343
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            16.645800000000236,
+            19.865084000000934,
+            14.876446999998734
+          ],
+          "medianMs": 16.645800000000236
+        }
+      ]
+    },
+    {
+      "population": 1000000,
+      "knownFraction": 0.9,
+      "mode": "insert/improve",
+      "digest": "de30816c4f84a0243cda13cda7ed457af7b085eab60c082eb4c2e09e77a47fa3",
+      "groups": [
+        {
+          "variant": "count-candidates",
+          "samplesMs": [
+            25.458856999999625,
+            27.689197000001514,
+            24.575730999998996
+          ],
+          "medianMs": 25.458856999999625
+        },
+        {
+          "variant": "count-inserts",
+          "samplesMs": [
+            13.984223999999813,
+            15.137086000000636,
+            15.219771000000037
+          ],
+          "medianMs": 15.137086000000636
+        }
+      ]
+    }
+  ],
+  "queryRuntimeSha256": "73d1d9d7f1c190f62b6bcbf647cb0c0ce980e7e01b7ab3667e2ef58cd919f44b",
+  "queryPlans": [
+    {
+      "population": 10000,
+      "insertMembership": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+        }
+      ],
+      "oldCount": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE c"
+        },
+        {
+          "id": 8,
+          "parent": 2,
+          "notused": 0,
+          "detail": "SCAN BuildCandidates"
+        },
+        {
+          "id": 35,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCAN c"
+        },
+        {
+          "id": 39,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 43,
+          "parent": 39,
+          "notused": 0,
+          "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+        },
+        {
+          "id": 53,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 57,
+          "parent": 53,
+          "notused": 0,
+          "detail": "SEARCH o USING PRIMARY KEY (ioIdentifier=?)"
+        }
+      ],
+      "oldMerge": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-2)"
+        },
+        {
+          "id": 9,
+          "parent": 3,
+          "notused": 0,
+          "detail": "SCAN BuildCandidates"
+        },
+        {
+          "id": 50,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCAN (subquery-2)"
+        }
+      ]
+    },
+    {
+      "population": 100000,
+      "insertMembership": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+        }
+      ],
+      "oldCount": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE c"
+        },
+        {
+          "id": 8,
+          "parent": 2,
+          "notused": 0,
+          "detail": "SCAN BuildCandidates"
+        },
+        {
+          "id": 35,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCAN c"
+        },
+        {
+          "id": 39,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 43,
+          "parent": 39,
+          "notused": 0,
+          "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+        },
+        {
+          "id": 53,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 57,
+          "parent": 53,
+          "notused": 0,
+          "detail": "SEARCH o USING PRIMARY KEY (ioIdentifier=?)"
+        }
+      ],
+      "oldMerge": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-2)"
+        },
+        {
+          "id": 9,
+          "parent": 3,
+          "notused": 0,
+          "detail": "SCAN BuildCandidates"
+        },
+        {
+          "id": 50,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCAN (subquery-2)"
+        }
+      ]
+    },
+    {
+      "population": 1000000,
+      "insertMembership": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+        }
+      ],
+      "oldCount": [
+        {
+          "id": 2,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE c"
+        },
+        {
+          "id": 8,
+          "parent": 2,
+          "notused": 0,
+          "detail": "SCAN BuildCandidates"
+        },
+        {
+          "id": 35,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCAN c"
+        },
+        {
+          "id": 39,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 43,
+          "parent": 39,
+          "notused": 0,
+          "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+        },
+        {
+          "id": 53,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 57,
+          "parent": 53,
+          "notused": 0,
+          "detail": "SEARCH o USING PRIMARY KEY (ioIdentifier=?)"
+        }
+      ],
+      "oldMerge": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CO-ROUTINE (subquery-2)"
+        },
+        {
+          "id": 9,
+          "parent": 3,
+          "notused": 0,
+          "detail": "SCAN BuildCandidates"
+        },
+        {
+          "id": 50,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SCAN (subquery-2)"
+        }
+      ]
+    }
+  ],
+  "node": "v24.22.3",
+  "platform": "linux",
+  "queryControls": {
+    "functions": 5000,
+    "masks": 4,
+    "cacheMegabytes": 8,
+    "repeats": 3
+  },
+  "limitations": [
+    "Shared host, three repeats, no production 4/5 table built",
+    "Complete-build timing includes setup and final compaction; query-only trials exclude setup, validation and commit",
+    "No consistent complete-build improvement, so the optimization stays disabled by default",
+    "Cost-improving upserts are retained in both strategies"
+  ]
+}

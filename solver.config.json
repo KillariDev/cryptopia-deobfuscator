@@ -134,7 +134,8 @@
     "generationStagingWriters": 1,
     "etaTrendWindowSamples": 60,
     "etaTrendMinimumSamples": 10,
-    "etaTrendMinimumWorkGrowth": 0.25
+    "etaTrendMinimumWorkGrowth": 0.25,
+    "generationCountFinalInserts": false
   },
   "synthesis": {
     "templates": true,
@@ -193,6 +194,8 @@
     "mergeOutputName": "merge-benchmark.json",
     "generationStagingComparison": false,
     "generationPrefetchComparison": false,
-    "generationWriterComparison": false
+    "generationWriterComparison": false,
+    "generationFinalComparison": false,
+    "finalLookupOutputName": "final-lookup-benchmark.json"
   }
 }

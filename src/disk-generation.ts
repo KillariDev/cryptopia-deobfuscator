@@ -1,3 +1,5 @@
+import { GenerationOperations } from './generation-operations.js'
+import { installFinalCounter, removeFinalCounter, startFinalCounterSQL, readFinalCounterSQL, stopFinalCounterSQL } from './generation-final-lookup.js'
 import { WriterUtilization } from './generation-utilization.js'
 import { GenerationPrefetch, GenerationActivity } from './generation-prefetch.js'
 import { ShardedStagingWriter } from './generation-shards.js'
@@ -20,7 +22,7 @@ type Meta = { signature: string, depth: number, processed: number, total: number
 type Parent = Omit<Entry, 'state'> & { state: Uint8Array }
 type PreparedBatch = { batch: Entry[], depth: number, expansion?: GenerationPrefetch<ExpansionChunk<Parent>> }
 type Entry = { id: number, state: Buffer, mask: number, reads: number, gates: Buffer }
-export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, appendStaging?: boolean, compactBindings?: boolean, stagingWriters?: number, stagingDirectory?: string, stagingCacheMegabytes?: number, aggregateMerge?: boolean, directInputMerge?: boolean, prefetch?: boolean, prefetchMegabytes?: number, onActivity?: (read: () => GenerationActivity) => void, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
+export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, appendStaging?: boolean, compactBindings?: boolean, stagingWriters?: number, stagingDirectory?: string, stagingCacheMegabytes?: number, aggregateMerge?: boolean, countFinalInserts?: boolean, directInputMerge?: boolean, prefetch?: boolean, prefetchMegabytes?: number, onActivity?: (read: () => GenerationActivity) => void, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
 
 /** A transaction commits output, discovered states and input consumption together. */
 export async function generateOnDisk(db: sqlite3.Database, wires: number, maximumDepth: number, catalog: Gate[], options: DiskGenerationOptions,
@@ -77,14 +79,15 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	const stagingOptions = { parameterLimit: options.parameterLimit, cacheEntries: options.statementCacheEntries ?? 8, prepared: options.preparedInserts ?? true, sort: options.sortStaging ?? false, append: options.appendStaging ?? false, compactBindings: options.compactBindings ?? false }
 	const staging = await StagingWriter.create(db, stagingOptions)
 	let shards: ShardedStagingWriter | undefined
-	const singleWriter = new WriterUtilization(1)
+	let finalCounterInstalled = false
+	const singleWriter = new WriterUtilization(1), operations = new GenerationOperations()
 	const budget = (options.prefetchMegabytes ?? 16) * 1048576
 	if (!Number.isSafeInteger(budget) || budget < 1) throw new Error('Invalid generation lookahead budget')
 	const prefetchEnabled = (options.prefetch ?? false) && workers > 1
 	let queued: PreparedBatch | undefined, consuming: PreparedBatch | undefined
 	const parentsOf = (batch: Entry[]): Parent[] => batch.map(entry => ({ ...entry, state: unpackState(entry.state, wires) }))
 	const expand = (parents: Parent[]) => expandBatch(parents, catalog.length, kernel, pool, { stageRows: options.stageRows, workers, queueBatches, minimumWork }, pending => { profile.peakPending = Math.max(profile.peakPending, pending) })
-	options.onActivity?.(() => ({ ...pool.activity, lookaheadBatches: queued ? 1 : 0, bufferedBytes: (queued?.expansion?.bufferedBytes ?? 0) + (consuming?.expansion?.bufferedBytes ?? 0), bufferLimitBytes: prefetchEnabled ? budget * 2 : 0, ...(shards?.activity ?? { ...singleWriter.snapshot(), stagingWriters: 1, activeStagingWriters: singleWriter.activeCount }) }))
+	options.onActivity?.(() => ({ ...pool.activity, operations: operations.snapshot(), lookaheadBatches: queued ? 1 : 0, bufferedBytes: (queued?.expansion?.bufferedBytes ?? 0) + (consuming?.expansion?.bufferedBytes ?? 0), bufferLimitBytes: prefetchEnabled ? budget * 2 : 0, ...(shards?.activity ?? { ...singleWriter.snapshot(), stagingWriters: 1, activeStagingWriters: singleWriter.activeCount }) }))
 	let failed = false
 	let startDepth = meta.depth, startProcessed = meta.processed
 	const report = () => {
@@ -94,7 +97,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	}
 	try {
 		if (stagingWriters > 1) shards = await ShardedStagingWriter.create(db, { ...stagingOptions, writers: stagingWriters, directory: options.stagingDirectory, cacheMegabytes: options.stagingCacheMegabytes ?? 64 })
-		logVerbose(`Generation staging: ${stagingWriters} writer(s), ${options.compactBindings ? 3 : 5} bindings per candidate${shards ? `; disposable scratch databases: ${shards.directory}` : ''}`)
+		logVerbose(`Generation staging: ${stagingWriters} writer(s), ${options.compactBindings ? 3 : 5} bindings per candidate; final lookup ${options.countFinalInserts ? 'count output inserts' : 'count candidate functions'}${shards ? `; disposable scratch databases: ${shards.directory}` : ''}`)
 		// The last expanded layer writes directly to output: no depth-maximum frontier.
 		while (meta.depth < maximumDepth) {
 			if (meta.depth !== startDepth) { startDepth = meta.depth; startProcessed = 0 }
@@ -116,6 +119,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				meta.depth = total ? next : maximumDepth + 1; meta.processed = 0; meta.total = total
 				continue
 			}
+			if (options.countFinalInserts && !finalCounterInstalled && meta.depth + 1 === maximumDepth) { finalCounterInstalled = true; await installFinalCounter(db) }
 			const priorFunctions = meta.functions
 			if (shards) await phase('staging', () => shards!.beginBatch())
 			// IMMEDIATE would reserve write locks on attached scratch databases,
@@ -133,11 +137,11 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				}
 				if (options.directInputMerge ?? true) {
 					// The read batch is the remaining depth prefix through its last id.
-					await phase('writing lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true, true), [meta!.depth, meta!.depth, batch[batch.length - 1].id]))
+					await phase('writing lookup', () => operations.measure('input lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true, true), [meta!.depth, meta!.depth, batch[batch.length - 1].id])))
 				} else {
 					await phase('staging', () => singleWriter.measure(() => staging.write(batch.map<StagingRow>(entry => [entry.state, entry.mask, entry.reads, entry.gates, usedWires(entry.mask)]))))
 					await phase('deduplicating', () => singleWriter.measure(() => staging.materialize()))
-					await phase('writing lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true), [meta!.depth]))
+					await phase('writing lookup', () => operations.measure('input lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true), [meta!.depth])))
 					await phase('staging', () => run('DELETE FROM BuildCandidates'))
 				}
 				const parents = consuming?.expansion ? undefined : parentsOf(batch)
@@ -171,20 +175,28 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				const final = meta.depth + 1 === maximumDepth
 				await phase('deduplicating', async () => {
 					if (final) {
-						meta!.functions += (await allSQL<{ count: number }>(db, countNewFinalFunctionsSQL))[0].count
+						if (options.countFinalInserts) await operations.measure('arm final counter', () => run(startFinalCounterSQL))
+						else meta!.functions += (await operations.measure('final membership/count', () => allSQL<{ count: number }>(db, countNewFinalFunctionsSQL)))[0].count
 					} else {
-						meta!.functions += await run('INSERT INTO BuildSeen SELECT state,? FROM BuildCandidates GROUP BY state ON CONFLICT(state) DO NOTHING', [meta!.depth + 1])
+						meta!.functions += await operations.measure('insert seen', () => run('INSERT INTO BuildSeen SELECT state,? FROM BuildCandidates GROUP BY state ON CONFLICT(state) DO NOTHING', [meta!.depth + 1]))
 						// CROSS JOIN keeps the bounded batch outside the primary-key probe; ordinary JOIN scans all BuildSeen.
-						await run('INSERT INTO BuildFrontier(state,mask,reads,gates,depth) ' + frontierCandidatesSQL + ' ON CONFLICT(state,mask) DO UPDATE SET reads=excluded.reads,gates=excluded.gates WHERE excluded.reads<BuildFrontier.reads', [meta!.depth + 1, meta!.depth + 1])
+						await operations.measure('update frontier', () => run('INSERT INTO BuildFrontier(state,mask,reads,gates,depth) ' + frontierCandidatesSQL + ' ON CONFLICT(state,mask) DO UPDATE SET reads=excluded.reads,gates=excluded.gates WHERE excluded.reads<BuildFrontier.reads', [meta!.depth + 1, meta!.depth + 1]))
 					}
-					if (options.stateLimit && meta!.functions > options.stateLimit) throw new Error('Disk generation state limit reached; increase database.generationStates or set it to 0')
+					if (!(final && options.countFinalInserts) && options.stateLimit && meta!.functions > options.stateLimit) throw new Error('Disk generation state limit reached; increase database.generationStates or set it to 0')
 				})
-				if (final) await phase('writing lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true), [maximumDepth]))
+				if (final) {
+					await phase('writing lookup', () => operations.measure('final lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true), [maximumDepth])))
+					if (options.countFinalInserts) await phase('deduplicating', async () => {
+						meta!.functions += (await operations.measure('read final count', () => allSQL<{ count: number }>(db, readFinalCounterSQL)))[0].count
+						await operations.measure('disarm final counter', () => run(stopFinalCounterSQL))
+						if (options.stateLimit && meta!.functions > options.stateLimit) throw new Error('Disk generation state limit reached; increase database.generationStates or set it to 0')
+					})
+				}
 				await phase('staging', () => run('DELETE FROM BuildCandidates'))
 				await phase('deduplicating', async () => {
-					await run('DELETE FROM BuildFrontier WHERE depth=? AND id<=?', [meta!.depth, batch[batch.length - 1].id])
-					await run('UPDATE BuildMeta SET processed=processed+?,functions=? WHERE id=1', [batch.length, meta!.functions])
-					await run('UPDATE BuildLayers SET processed=processed+? WHERE depth=?', [batch.length, meta!.depth])
+					await operations.measure('consume frontier', () => run('DELETE FROM BuildFrontier WHERE depth=? AND id<=?', [meta!.depth, batch[batch.length - 1].id]))
+					await operations.measure('update checkpoint', () => run('UPDATE BuildMeta SET processed=processed+?,functions=? WHERE id=1', [batch.length, meta!.functions]))
+					await operations.measure('update layer', () => run('UPDATE BuildLayers SET processed=processed+? WHERE depth=?', [batch.length, meta!.depth]))
 				})
 				await options.beforeCommit?.()
 				await phase('committing', () => run('COMMIT'))
@@ -199,6 +211,9 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 		queued?.expansion?.cancel(); consuming?.expansion?.cancel()
 		const cleanup = await Promise.allSettled([shards?.close(), staging.close(), pool.close()])
 		await Promise.allSettled([queued?.expansion?.settled, consuming?.expansion?.settled])
+		if (finalCounterInstalled) {
+			try { await removeFinalCounter(db) } catch (error) { if (!failed) throw error }
+		}
 		if (!failed) for (const result of cleanup) if (result.status === 'rejected') throw result.reason
 		profile.elapsedMs = performance.now() - started; profile.workersUsed = pool.workerCount
 		options.onProfile?.({ ...profile })

@@ -15,7 +15,8 @@
 		"benchmark:generation": "npx tsc && node dist/generation-benchmark.js",
 		"benchmark:dedup": "npx tsc && node dist/dedup-benchmark.js",
 		"benchmark:staging": "npx tsc && node dist/staging-benchmark.js",
-		"benchmark:merge": "npx tsc && node dist/merge-benchmark.js"
+		"benchmark:merge": "npx tsc && node dist/merge-benchmark.js",
+		"benchmark:final-lookup": "npx tsc && node dist/final-lookup-benchmark.js"
 	},
 	"keywords": [],
 	"author": "",

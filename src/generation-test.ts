@@ -145,6 +145,9 @@ try {
 		} finally { await close(db) }
 	}
 	for (const [index, controls] of [
+		{ countFinalInserts: true, aggregateMerge: true, directInputMerge: true },
+		{ countFinalInserts: true, stagingWriters: 2, compactBindings: true, aggregateMerge: true, directInputMerge: true },
+		{ countFinalInserts: true, stagingWriters: 4, aggregateMerge: false, directInputMerge: false },
 		{ stagingWriters: 2, compactBindings: true, directInputMerge: true },
 		{ stagingWriters: 4, compactBindings: false, directInputMerge: false },
 		{ stagingWriters: 4, compactBindings: true, directInputMerge: true },
@@ -242,7 +245,7 @@ try {
 	db = await open('final-resume.db')
 	try {
 		let failed = false, finalBatches = 0
-		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, keepState: true, stagingWriters: 4, compactBindings: true, prefetch: true, beforeCommit: async () => {
+		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, countFinalInserts: true, keepState: true, stagingWriters: 4, compactBindings: true, prefetch: true, beforeCommit: async () => {
 			const depth = (await allSQL<{ depth: number }>(db, 'SELECT depth FROM BuildMeta'))[0].depth
 			assert.equal((await allSQL<{ count: number }>(db, 'SELECT count(*) AS count FROM BuildFrontier WHERE depth=3'))[0].count, 0, 'last-depth candidates never enter the frontier')
 			if (depth === 2 && ++finalBatches === 2) { failed = true; throw new Error('final-layer interruption') }

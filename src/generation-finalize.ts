@@ -12,6 +12,8 @@ export async function finalizeGeneration(db: sqlite3.Database, onPhase?: (phase:
 		await runSQL(db, 'INSERT OR REPLACE INTO GenerationStatus VALUES(1,2)')
 		await runSQL(db, 'DROP TABLE IF EXISTS temp.BuildCandidates')
 		await runSQL(db, 'DROP TABLE IF EXISTS temp.BuildCandidateRows')
+	await runSQL(db, 'DROP TRIGGER IF EXISTS temp.CountFinalOutput')
+	await runSQL(db, 'DROP TABLE IF EXISTS temp.BuildFinalCounter')
 		for (const table of ['BuildSeen', 'BuildFrontier', 'BuildLayers']) await runSQL(db, `DROP TABLE IF EXISTS ${table}`)
 		if (costs.length) {
 			// One ordered rewrite removes all three costs, rather than three DROP COLUMN rewrites.

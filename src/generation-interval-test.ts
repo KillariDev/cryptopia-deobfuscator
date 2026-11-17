@@ -1,3 +1,4 @@
+import { GenerationOperations } from './generation-operations.js'
 import assert from 'node:assert/strict'
 import sqlite3 from 'sqlite3'
 import { WriterUtilization } from './generation-utilization.js'
@@ -88,3 +89,20 @@ assert.ok(supported.remainingMs({ depth: 4, processed, total: 10000, states: 1, 
 assert.equal(parseConfig({}).database.etaMaximumSlowdown, 1)
 for (const database of [{ etaTrendMinimumSamples: 2 }, { etaTrendWindowSamples: 5, etaTrendMinimumSamples: 10 }, { etaTrendMinimumWorkGrowth: 0 }, { etaTrendMinimumWorkGrowth: -1 }]) assert.throws(() => parseConfig({ database }))
 console.log('Interval writer overlap, committed throughput, separate import timing, idle phases and production ETA trace regressions passed')
+
+// Named SQL timings survive sampling during a query, completion and failure.
+let operationClock = 0, finish!: () => void
+const timings = new GenerationOperations(() => operationClock)
+const pending = timings.measure('final lookup', () => new Promise<void>(resolve => { finish = resolve }))
+operationClock = 1000
+const during = timings.snapshot()
+assert.deepEqual(during, [{ name: 'final lookup', ms: 1000, calls: 0 }])
+operationClock = 1500; finish(); await pending
+assert.deepEqual(during, [{ name: 'final lookup', ms: 1000, calls: 0 }], 'snapshots do not mutate after completion')
+assert.deepEqual(timings.snapshot(), [{ name: 'final lookup', ms: 1500, calls: 1 }])
+await assert.rejects(timings.measure('consume frontier', async () => { operationClock += 250; throw new Error('SQL failed') }), /SQL failed/)
+const beforeOps = { ...base, operations: during }
+const afterOps = { ...next, operations: timings.snapshot() }
+const opDelta = diagnosticDelta(beforeOps, afterOps, 0, 0, 24)
+assert.deepEqual(opDelta.operations, [{ name: 'final lookup', ms: 500, calls: 1 }, { name: 'consume frontier', ms: 250, calls: 1 }])
+assert.match(formatDiagnosticSample(opDelta).join('\n'), /Generation SQL operations .*final lookup 0.5s; consume frontier 0.3s/)
