@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-17",
+  "node": "v24.22.3",
+  "platform": "linux",
+  "variants": [
+    {
+      "name": "reference",
+      "root": "/tmp/cryptopia-diagnostics-reference",
+      "revision": "59ef0159542f96882e972eec5d42f4392c23ffa7",
+      "workingTreeDirty": null,
+      "runtimeSha256": "f2c11200b91f29ea415820a53eac900fedda3db69b3826d2731f2ecda7b46b3e"
+    },
+    {
+      "name": "serial",
+      "root": "/workspace/cryptopia-deobfuscator",
+      "prefetch": false,
+      "diagnostics": false,
+      "revision": "59ef0159542f96882e972eec5d42f4392c23ffa7",
+      "workingTreeDirty": true,
+      "runtimeSha256": "60db3d78ffe3631b53a5d0f3c2eff74ccec310b3afbfecba69a36466be5f02ba"
+    },
+    {
+      "name": "prefetch",
+      "root": "/workspace/cryptopia-deobfuscator",
+      "prefetch": true,
+      "diagnostics": false,
+      "revision": "59ef0159542f96882e972eec5d42f4392c23ffa7",
+      "workingTreeDirty": true,
+      "runtimeSha256": "60db3d78ffe3631b53a5d0f3c2eff74ccec310b3afbfecba69a36466be5f02ba"
+    },
+    {
+      "name": "prefetch-diagnostics",
+      "root": "/workspace/cryptopia-deobfuscator",
+      "prefetch": true,
+      "diagnostics": true,
+      "revision": "59ef0159542f96882e972eec5d42f4392c23ffa7",
+      "workingTreeDirty": true,
+      "runtimeSha256": "60db3d78ffe3631b53a5d0f3c2eff74ccec310b3afbfecba69a36466be5f02ba"
+    }
+  ],
+  "workers": 2,
+  "trials": 24,
+  "description": "Complete fresh builds including finalization; all coverage/cost digests matched and replacements exhaustively verified.",
+  "limitations": [
+    "Shared host; three repetitions per variant; no significance test",
+    "Production 4-wire/5-gate table not measured",
+    "Lower diagnostics timings are not evidence that logging improves throughput",
+    "Minor diagnostics initialization/finalization cleanup followed measurements"
+  ],
+  "groups": [
+    {
+      "wires": 3,
+      "gates": 4,
+      "variant": "reference",
+      "samplesSeconds": [
+        2.200462301,
+        2.0207879,
+        2.037859037
+      ],
+      "medianSeconds": 2.037859037,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+    },
+    {
+      "wires": 3,
+      "gates": 4,
+      "variant": "serial",
+      "samplesSeconds": [
+        2.132909802,
+        2.028026255,
+        1.974505656
+      ],
+      "medianSeconds": 2.028026255,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+    },
+    {
+      "wires": 3,
+      "gates": 4,
+      "variant": "prefetch",
+      "samplesSeconds": [
+        2.1129684880000004,
+        2.011274447,
+        2.141948232
+      ],
+      "medianSeconds": 2.1129684880000004,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+    },
+    {
+      "wires": 3,
+      "gates": 4,
+      "variant": "prefetch-diagnostics",
+      "samplesSeconds": [
+        2.045425495,
+        1.993090355,
+        1.9645610550000001
+      ],
+      "medianSeconds": 1.993090355,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "variant": "reference",
+      "samplesSeconds": [
+        12.975802872000001,
+        11.413609251,
+        12.756705063
+      ],
+      "medianSeconds": 12.756705063,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "variant": "serial",
+      "samplesSeconds": [
+        13.040263956999999,
+        11.985132866,
+        13.269333094
+      ],
+      "medianSeconds": 13.040263956999999,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "variant": "prefetch",
+      "samplesSeconds": [
+        11.939490946,
+        10.956612805999999,
+        12.172983853
+      ],
+      "medianSeconds": 11.939490946,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "variant": "prefetch-diagnostics",
+      "samplesSeconds": [
+        11.339704025,
+        11.092100112,
+        11.221918277
+      ],
+      "medianSeconds": 11.221918277,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+    }
+  ]
+}

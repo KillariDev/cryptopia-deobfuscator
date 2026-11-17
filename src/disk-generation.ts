@@ -1,3 +1,4 @@
+import { GenerationPrefetch, GenerationActivity } from './generation-prefetch.js'
 import { candidateMergeSQL } from './generation-merge.js'
 import { StagingWriter, StagingRow } from './generation-staging.js'
 import { frontierCandidatesSQL, countNewFinalFunctionsSQL } from './generation-dedup.js'
@@ -9,12 +10,14 @@ import { runSQL, allSQL } from './sql.js'
 import { overallGenerationWork, GenerationProfile, SemanticProgress } from './generation-progress.js'
 import { ExpansionKernel } from './generation-expansion.js'
 import { GenerationPool } from './generation-pool.js'
-import { expandBatch } from './generation-pipeline.js'
+import { expandBatch, ExpansionChunk } from './generation-pipeline.js'
 import { generationSignature, packState, unpackState, usedWires } from './generation-storage.js'
 
 type Meta = { signature: string, depth: number, processed: number, total: number, functions: number }
+type Parent = Omit<Entry, 'state'> & { state: Uint8Array }
+type PreparedBatch = { batch: Entry[], depth: number, expansion?: GenerationPrefetch<ExpansionChunk<Parent>> }
 type Entry = { id: number, state: Buffer, mask: number, reads: number, gates: Buffer }
-export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, appendStaging?: boolean, aggregateMerge?: boolean, directInputMerge?: boolean, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
+export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, appendStaging?: boolean, aggregateMerge?: boolean, directInputMerge?: boolean, prefetch?: boolean, prefetchMegabytes?: number, onActivity?: (read: () => GenerationActivity) => void, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
 
 /** A transaction commits output, discovered states and input consumption together. */
 export async function generateOnDisk(db: sqlite3.Database, wires: number, maximumDepth: number, catalog: Gate[], options: DiskGenerationOptions,
@@ -65,6 +68,13 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	const encoded = catalog.map(gate => encodeGates([gate])), kernel = new ExpansionKernel(wires, catalog), pool = new GenerationPool(workers, wires, catalog)
 	const layers = await allSQL<{ depth: number, total: number, processed: number }>(db, 'SELECT * FROM BuildLayers ORDER BY depth')
 	const staging = await StagingWriter.create(db, { parameterLimit: options.parameterLimit, cacheEntries: options.statementCacheEntries ?? 8, prepared: options.preparedInserts ?? true, sort: options.sortStaging ?? false, append: options.appendStaging ?? false })
+	const budget = (options.prefetchMegabytes ?? 16) * 1048576
+	if (!Number.isSafeInteger(budget) || budget < 1) throw new Error('Invalid generation lookahead budget')
+	const prefetchEnabled = (options.prefetch ?? false) && workers > 1
+	let queued: PreparedBatch | undefined, consuming: PreparedBatch | undefined
+	const parentsOf = (batch: Entry[]): Parent[] => batch.map(entry => ({ ...entry, state: unpackState(entry.state, wires) }))
+	const expand = (parents: Parent[]) => expandBatch(parents, catalog.length, kernel, pool, { stageRows: options.stageRows, workers, queueBatches, minimumWork }, pending => { profile.peakPending = Math.max(profile.peakPending, pending) })
+	options.onActivity?.(() => ({ ...pool.activity, lookaheadBatches: queued ? 1 : 0, bufferedBytes: (queued?.expansion?.bufferedBytes ?? 0) + (consuming?.expansion?.bufferedBytes ?? 0), bufferLimitBytes: prefetchEnabled ? budget * 2 : 0 }))
 	let failed = false
 	let startDepth = meta.depth, startProcessed = meta.processed
 	const report = () => {
@@ -78,7 +88,9 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 			if (meta.depth !== startDepth) { startDepth = meta.depth; startProcessed = 0 }
 			report()
 			if (shouldPause?.()) return false
-			const batch = await phase('reading', () => allSQL<Entry>(db, 'SELECT id,state,mask,reads,gates FROM BuildFrontier WHERE depth=? ORDER BY id LIMIT ?', [meta!.depth, options.readRows]))
+			consuming = queued; queued = undefined
+			if (consuming && consuming.depth !== meta.depth) throw new Error('Lookahead crossed a generation depth boundary')
+			const batch = consuming?.batch ?? await phase('reading', () => allSQL<Entry>(db, 'SELECT id,state,mask,reads,gates FROM BuildFrontier WHERE depth=? ORDER BY id LIMIT ?', [meta!.depth, options.readRows]))
 			if (!batch.length) {
 				const next = meta.depth + 1
 				const total = next < maximumDepth ? (await phase('reading', () => allSQL<{ count: number }>(db, 'SELECT count(*) AS count FROM BuildFrontier WHERE depth=?', [next])))[0].count : 0
@@ -95,6 +107,15 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 			const priorFunctions = meta.functions
 			await run('BEGIN IMMEDIATE')
 			try {
+				if (prefetchEnabled) {
+					// Current-depth rows after this prefix cannot be changed by expansion,
+					// which only writes the next depth. Never speculate across the barrier.
+					const upcoming = await phase('reading', () => allSQL<Entry>(db, 'SELECT id,state,mask,reads,gates FROM BuildFrontier INDEXED BY BuildFrontierDepth WHERE depth=? AND id>? ORDER BY id LIMIT ?', [meta!.depth, batch[batch.length - 1].id, options.readRows]))
+					if (upcoming.length) {
+						queued = { batch: upcoming, depth: meta.depth }
+						if (upcoming.length * catalog.length >= minimumWork) queued.expansion = new GenerationPrefetch(expand(parentsOf(upcoming)), budget, value => value.result.candidates.byteLength)
+					}
+				}
 				if (options.directInputMerge ?? true) {
 					// The read batch is the remaining depth prefix through its last id.
 					await phase('writing lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true, true), [meta!.depth, meta!.depth, batch[batch.length - 1].id]))
@@ -104,7 +125,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 					await phase('writing lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true), [meta!.depth]))
 					await phase('staging', () => run('DELETE FROM BuildCandidates'))
 				}
-				const parents = batch.map(entry => ({ ...entry, state: unpackState(entry.state, wires) }))
+				const parents = consuming?.expansion ? undefined : parentsOf(batch)
 				let candidates: StagingRow[] = []
 				const flush = async () => {
 					if (!candidates.length) return
@@ -113,7 +134,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				}
 				const expanding = () => { profile.phase = 'expanding'; profile.phaseStarted = performance.now(); options.onProfile?.({ ...profile }) }
 				expanding()
-				for await (const expanded of expandBatch(parents, catalog.length, kernel, pool, { stageRows: options.stageRows, workers, queueBatches, minimumWork }, pending => { profile.peakPending = Math.max(profile.peakPending, pending) })) {
+				for await (const expanded of (consuming?.expansion?.values() ?? expand(parents!))) {
 					const { result, parents: chunk, waitMs } = expanded
 					profile.expansionMs += result.expansionMs; profile.waitMs += waitMs
 					profile.candidates += result.attempts; profile.emitted += result.count
@@ -156,7 +177,9 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 		profile.phase = 'complete'; report()
 		return true
 	} catch (error) { failed = true; throw error } finally {
+		queued?.expansion?.cancel(); consuming?.expansion?.cancel()
 		const cleanup = await Promise.allSettled([staging.close(), pool.close()])
+		await Promise.allSettled([queued?.expansion?.settled, consuming?.expansion?.settled])
 		if (!failed) for (const result of cleanup) if (result.status === 'rejected') throw result.reason
 		profile.elapsedMs = performance.now() - started; profile.workersUsed = pool.workerCount
 		options.onProfile?.({ ...profile })

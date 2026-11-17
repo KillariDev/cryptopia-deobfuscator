@@ -35,7 +35,10 @@
     "standaloneSaveSeconds": 60
   },
   "logging": {
-    "verbose": false
+    "verbose": false,
+    "generationDiagnostics": true,
+    "generationDiagnosticsMinimumSeconds": 5,
+    "eventLoopResolutionMilliseconds": 20
   },
   "validation": {
     "checkpointInputs": 20,
@@ -124,7 +127,9 @@
     "generationStatementCacheEntries": 8,
     "generationAppendStaging": false,
     "generationAggregateMerge": true,
-    "generationDirectInputMerge": true
+    "generationDirectInputMerge": true,
+    "generationPrefetch": true,
+    "generationPrefetchMegabytes": 16
   },
   "synthesis": {
     "templates": true,
@@ -180,6 +185,7 @@
     "stagingOutputName": "staging-benchmark.json",
     "stagingWideSqlParameters": 16384,
     "mergeOutputName": "merge-benchmark.json",
-    "generationStagingComparison": false
+    "generationStagingComparison": false,
+    "generationPrefetchComparison": false
   }
 }

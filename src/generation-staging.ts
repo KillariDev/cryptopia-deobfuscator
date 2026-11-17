@@ -1,3 +1,4 @@
+import { observeSQL } from './sql-observer.js'
 import sqlite3 from 'sqlite3'
 import { allSQL, runSQL } from './sql.js'
 
@@ -29,7 +30,7 @@ export class StagingWriter {
 		if (options.append) await runSQL(db, 'CREATE TEMP TABLE IF NOT EXISTS BuildCandidateRows(id INTEGER PRIMARY KEY,state BLOB NOT NULL,mask INTEGER NOT NULL,reads INTEGER NOT NULL,gates BLOB NOT NULL,wires INTEGER NOT NULL)')
 		return new StagingWriter(db, await stagingParameterLimit(db, options.parameterLimit), options)
 	}
-	private finalize(statement: sqlite3.Statement) { return new Promise<void>((resolve, reject) => statement.finalize(error => error ? reject(error) : resolve())) }
+	private finalize(statement: sqlite3.Statement) { return observeSQL(this.db, () => new Promise<void>((resolve, reject) => statement.finalize(error => error ? reject(error) : resolve()))) }
 	write(rows: StagingRow[]): Promise<void> {
 		if (this.closing) return Promise.reject(new Error('Staging writer is closed'))
 		const task = this.tail.then(async () => {
@@ -49,15 +50,15 @@ export class StagingWriter {
 							const [oldSize, oldest] = this.statements.entries().next().value!
 							this.statements.delete(oldSize); await this.finalize(oldest)
 						}
-						statement = await new Promise<sqlite3.Statement>((resolve, reject) => {
+						statement = await observeSQL(this.db, () => new Promise<sqlite3.Statement>((resolve, reject) => {
 							const prepared = this.db.prepare(insertPrefix + Array(count).fill('(?,?,?,?,?)').join(',') + insertSuffix, error => error ? reject(error) : resolve(prepared))
-						})
+						}))
 						this.stats.statementsPrepared++
 					}
 					this.statements.set(count, statement)
 					this.stats.peakCached = Math.max(this.stats.peakCached, this.statements.size)
 					const current = statement
-					try { await new Promise<void>((resolve, reject) => current.run(params, error => error ? reject(error) : resolve())) }
+					try { await observeSQL(this.db, () => new Promise<void>((resolve, reject) => current.run(params, error => error ? reject(error) : resolve()))) }
 					catch (error) {
 						this.statements.delete(count)
 						await this.finalize(current).catch(() => {})

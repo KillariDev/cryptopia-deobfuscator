@@ -853,3 +853,58 @@ significance tests. They do not establish throughput or final size for the full
 the summary. Measurements preceded removal of the unused `insertBatchSize` knob
 and minor validation/progress-only cleanup, and preceded automatic completion compaction. The generation benchmark now includes that finalization work; measured compiled fingerprints are
 retained separately from the base git revision.
+
+## Generation diagnostics and lookahead
+
+Set `logging.verbose: true` to enable built-in interval diagnostics alongside the
+normal single completion percentage and ETA. `logging.generationDiagnostics`
+defaults to `true`; `generationDiagnosticsMinimumSeconds: 5` avoids sampling
+repeated startup messages, and `eventLoopResolutionMilliseconds: 20` controls the
+event-loop delay histogram. Normal reporting still uses `timing.databaseLogSeconds`.
+
+The three diagnostic lines report process CPU in core-equivalents (all process
+threads, including SQLite and expansion workers), main event-loop busy percentage
+and delay p95, RSS, SQL activity, interval phase times, and active/queued workers
+and lookahead buffers. Event-loop utilization is not CPU utilization. Native SQL
+profiles include SQLite I/O waits; API elapsed time also includes binding,
+scheduling, result conversion and callback delivery. Native profile events can
+arrive in another interval and have millisecond resolution, so subtracting the
+two timings does not accurately isolate JavaScript overhead. An in-flight SQL
+call contributes to API elapsed time before completion.
+
+OS I/O counters are platform dependent operation/block counters, **not bytes,
+disk utilization or latency**; cached/mapped traffic may not appear. Zero counters
+do not establish an idle disk. Diagnostic hints identify possible limits rather
+than diagnosing physical disk saturation. The histogram's configured resolution
+also contributes to the baseline delay. Expansion's older cumulative timing is
+labelled worker-time, since it measures elapsed worker work, not CPU consumption.
+
+`database.generationPrefetch: true` overlaps next-batch expansion with the current
+batch's SQLite work when multiple generation workers are enabled. It reads only
+immutable remaining rows at the same depth, shares the bounded worker pool, and
+never crosses a depth boundary or speculatively writes checkpoints. Database
+writes and commits remain serialized. Failure, cancellation and pause discard
+uncommitted lookahead; the existing checkpoint and solver table formats remain
+unchanged. Inline batches below `generationMinimumWork` are not expanded
+speculatively. This can hide CPU work behind SQL work, but cannot fill idle CPU
+cores when SQL dominates the job.
+
+`database.generationPrefetchMegabytes: 16` targets each current/next expansion
+buffer, up to 32 MiB combined by default. A single oversized chunk per buffer is
+allowed to avoid deadlock. Worker queues, parent rows, and producer/consumer chunks
+are additional bounded allocations; this setting is not a total memory cap.
+
+For complete-build comparisons set `benchmark.generationPrefetchComparison: true`
+and run `npm run benchmark:generation`. This compares serialized expansion,
+lookahead, and lookahead with verbose diagnostics. It cannot be combined with
+`generationStagingComparison`. The optional `--reference /path/to/reference`
+adds a compiled reference checkout. Each variant uses isolated settings and
+fresh databases; output equivalence and replacement validity are checked.
+
+`benchmarks/results/2026-11-17-diagnostics-prefetch.json` records 24 complete
+builds, three repetitions per variant on two fixtures, with two workers. All
+coverage/cost digests matched. On 4-wire/3-gate builds, median time was 13.04s
+without lookahead and 11.94s with it (about 8% less); 3-wire/4-gate builds were
+slightly slower with lookahead. The shared-host samples do not establish a
+universal speedup, diagnostic overhead, or production 4-wire/5-gate performance.
+Lower times with diagnostics enabled should be treated as measurement noise.
