@@ -164,7 +164,7 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 		await configureGenerationDatabase(db)
 		await runSQL(db, 'INSERT OR REPLACE INTO GenerationStatus VALUES(1,0)')
 		logTimed(`Generating rainbow table: ${wires} wires, up to ${gates} gates, ${catalog.length} gate choices`)
-		const started = performance.now(), estimator = new GenerationEstimator(config.database.etaWindowSamples, config.database.etaWarmupSamples, config.database.etaSmoothing)
+		const started = performance.now(), estimator = new GenerationEstimator(config.database.etaWindowSamples, config.database.etaWarmupSamples, config.database.etaSmoothing, config.database.etaMaximumSlowdown)
 		let lastReport = started, current: SemanticProgress | undefined
 		let profile: GenerationProfile | undefined
 		const workers = Math.min(config.database.generationWorkers, Math.max(1, availableParallelism() - 1))

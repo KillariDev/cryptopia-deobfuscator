@@ -105,7 +105,7 @@
     "etaWarmupSamples": 3,
     "etaSmoothing": 0.2,
     "lookupBatchMilliseconds": 0,
-    "generationWorkers": 4,
+    "generationWorkers": 8,
     "generationQueueBatches": 2,
     "generationMinimumWork": 100000,
     "statementCacheEntries": 16,
@@ -116,7 +116,8 @@
     "generationCacheMegabytes": 256,
     "generationTempStore": "file",
     "generationJournalMode": "wal",
-    "generationSynchronous": "full"
+    "generationSynchronous": "full",
+    "etaMaximumSlowdown": 4
   },
   "synthesis": {
     "templates": true,
