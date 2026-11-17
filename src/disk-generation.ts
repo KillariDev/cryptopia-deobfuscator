@@ -1,3 +1,4 @@
+import { candidateMergeSQL } from './generation-merge.js'
 import { StagingWriter, StagingRow } from './generation-staging.js'
 import { frontierCandidatesSQL, countNewFinalFunctionsSQL } from './generation-dedup.js'
 import sqlite3 from 'sqlite3'
@@ -13,14 +14,7 @@ import { generationSignature, packState, unpackState, usedWires } from './genera
 
 type Meta = { signature: string, depth: number, processed: number, total: number, functions: number }
 type Entry = { id: number, state: Buffer, mask: number, reads: number, gates: Buffer }
-export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
-
-const better = 'excluded.gateCount<InputOutputReplacers.gateCount OR (excluded.gateCount=InputOutputReplacers.gateCount AND (excluded.wireCount<InputOutputReplacers.wireCount OR (excluded.wireCount=InputOutputReplacers.wireCount AND excluded.readCount<InputOutputReplacers.readCount)))'
-// Rank exactly as isReplacementSimpler: gate count, distinct used wires, reads.
-const merge = `INSERT INTO InputOutputReplacers(ioIdentifier,replacerGates,gateCount,wireCount,readCount)
- SELECT state,gates,?,wires,reads FROM (
- SELECT state,gates,wires,reads,ROW_NUMBER() OVER (PARTITION BY state ORDER BY wires,reads,mask) AS preference FROM BuildCandidates
- ) WHERE preference=1 ON CONFLICT(ioIdentifier) DO UPDATE SET replacerGates=excluded.replacerGates,gateCount=excluded.gateCount,wireCount=excluded.wireCount,readCount=excluded.readCount WHERE ${better}`
+export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, appendStaging?: boolean, aggregateMerge?: boolean, directInputMerge?: boolean, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
 
 /** A transaction commits output, discovered states and input consumption together. */
 export async function generateOnDisk(db: sqlite3.Database, wires: number, maximumDepth: number, catalog: Gate[], options: DiskGenerationOptions,
@@ -70,7 +64,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	}
 	const encoded = catalog.map(gate => encodeGates([gate])), kernel = new ExpansionKernel(wires, catalog), pool = new GenerationPool(workers, wires, catalog)
 	const layers = await allSQL<{ depth: number, total: number, processed: number }>(db, 'SELECT * FROM BuildLayers ORDER BY depth')
-	const staging = await StagingWriter.create(db, { parameterLimit: options.parameterLimit, cacheEntries: options.statementCacheEntries ?? 8, prepared: options.preparedInserts ?? true, sort: options.sortStaging ?? false })
+	const staging = await StagingWriter.create(db, { parameterLimit: options.parameterLimit, cacheEntries: options.statementCacheEntries ?? 8, prepared: options.preparedInserts ?? true, sort: options.sortStaging ?? false, append: options.appendStaging ?? false })
 	let failed = false
 	let startDepth = meta.depth, startProcessed = meta.processed
 	const report = () => {
@@ -101,10 +95,15 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 			const priorFunctions = meta.functions
 			await run('BEGIN IMMEDIATE')
 			try {
-				// Merge the input layer in bulk using the same exact cost ordering.
-				await phase('staging', () => staging.write(batch.map<StagingRow>(entry => [entry.state, entry.mask, entry.reads, entry.gates, usedWires(entry.mask)])))
-				await phase('writing lookup', () => run(merge, [meta!.depth]))
-				await phase('staging', () => run('DELETE FROM BuildCandidates'))
+				if (options.directInputMerge ?? true) {
+					// The read batch is the remaining depth prefix through its last id.
+					await phase('writing lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true, true), [meta!.depth, meta!.depth, batch[batch.length - 1].id]))
+				} else {
+					await phase('staging', () => staging.write(batch.map<StagingRow>(entry => [entry.state, entry.mask, entry.reads, entry.gates, usedWires(entry.mask)])))
+					await phase('deduplicating', () => staging.materialize())
+					await phase('writing lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true), [meta!.depth]))
+					await phase('staging', () => run('DELETE FROM BuildCandidates'))
+				}
 				const parents = batch.map(entry => ({ ...entry, state: unpackState(entry.state, wires) }))
 				let candidates: StagingRow[] = []
 				const flush = async () => {
@@ -129,6 +128,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 					expanding()
 				}
 				await flush()
+				await phase('deduplicating', () => staging.materialize())
 				const final = meta.depth + 1 === maximumDepth
 				await phase('deduplicating', async () => {
 					if (final) {
@@ -140,7 +140,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 					}
 					if (options.stateLimit && meta!.functions > options.stateLimit) throw new Error('Disk generation state limit reached; increase database.generationStates or set it to 0')
 				})
-				if (final) await phase('writing lookup', () => run(merge, [maximumDepth]))
+				if (final) await phase('writing lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true), [maximumDepth]))
 				await phase('staging', () => run('DELETE FROM BuildCandidates'))
 				await phase('deduplicating', async () => {
 					await run('DELETE FROM BuildFrontier WHERE depth=? AND id<=?', [meta!.depth, batch[batch.length - 1].id])

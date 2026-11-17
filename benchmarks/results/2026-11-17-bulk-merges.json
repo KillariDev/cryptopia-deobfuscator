@@ -1,0 +1,483 @@
+{
+  "date": "2026-11-17",
+  "defaults": {
+    "generationAppendStaging": false,
+    "generationAggregateMerge": true,
+    "generationDirectInputMerge": true
+  },
+  "limitations": [
+    "Shared host; three repetitions per group. Descriptive results, not significance tests.",
+    "Staging includes writes and batch materialization; setup, commit and validation excluded.",
+    "Lookup timing includes only each merge statement, before commit and validation; same connection/page cache.",
+    "Complete generation uses fresh processes/databases, one CPU worker, automatic cleanup/compaction; post-build validation excluded.",
+    "Production 4-variable/5-gate throughput and cold-disk behavior remain unmeasured."
+  ],
+  "staging": {
+    "candidateRows": 500000,
+    "writerRuntimeSha256": "8da50e4f77690b2c648edca5913e47ca58132aab896d12a40a029e9116580e8c",
+    "groups": [
+      {
+        "variant": "reference",
+        "parameters": 900,
+        "statementStats": null,
+        "samplesMs": [
+          3972.0916680000005,
+          4188.7990909999935,
+          3797.237172000023
+        ],
+        "insertSamplesMs": [
+          3972.089378,
+          4188.795910999994,
+          3797.2330220000003
+        ],
+        "materializeSamplesMs": [
+          0.002290000000357395,
+          0.0031799999997019768,
+          0.00415000002249144
+        ],
+        "medianMs": 3972.0916680000005,
+        "rows": 459013,
+        "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e"
+      },
+      {
+        "variant": "prepared-small",
+        "parameters": 900,
+        "statementStats": {
+          "statementsPrepared": 3,
+          "executions": 2834,
+          "peakCached": 3
+        },
+        "samplesMs": [
+          4184.404048,
+          3569.781368000011,
+          3457.4874389999895
+        ],
+        "insertSamplesMs": [
+          4184.116295,
+          3569.7679070000013,
+          3457.4770889999927
+        ],
+        "materializeSamplesMs": [
+          0.28775300000052084,
+          0.013461000009556301,
+          0.010349999996833503
+        ],
+        "medianMs": 3569.781368000011,
+        "rows": 459013,
+        "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e"
+      },
+      {
+        "variant": "unprepared-large",
+        "parameters": 8192,
+        "statementStats": null,
+        "samplesMs": [
+          3370.890931,
+          3017.255885999999,
+          3129.8059619999985
+        ],
+        "insertSamplesMs": [
+          3370.8869809999997,
+          3017.2525659999956,
+          3129.8029820000083
+        ],
+        "materializeSamplesMs": [
+          0.003950000000259024,
+          0.003320000003441237,
+          0.0029799999902024865
+        ],
+        "medianMs": 3129.8059619999985,
+        "rows": 459013,
+        "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e"
+      },
+      {
+        "variant": "prepared-large",
+        "parameters": 8192,
+        "statementStats": {
+          "statementsPrepared": 3,
+          "executions": 334,
+          "peakCached": 3
+        },
+        "samplesMs": [
+          3194.6591389999994,
+          2789.0166929999978,
+          4134.233638000005
+        ],
+        "insertSamplesMs": [
+          3194.639099,
+          2788.9690709999995,
+          4134.221678000002
+        ],
+        "materializeSamplesMs": [
+          0.020039999999426072,
+          0.04762199999822769,
+          0.011960000003455207
+        ],
+        "medianMs": 3194.6591389999994,
+        "rows": 459013,
+        "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e"
+      },
+      {
+        "variant": "prepared-large-sorted",
+        "parameters": 8192,
+        "statementStats": {
+          "statementsPrepared": 3,
+          "executions": 334,
+          "peakCached": 3
+        },
+        "samplesMs": [
+          3151.837919999998,
+          3363.028284,
+          4596.226748000001
+        ],
+        "insertSamplesMs": [
+          3151.826928999999,
+          3363.009394000008,
+          4596.203257000001
+        ],
+        "materializeSamplesMs": [
+          0.010990999999194173,
+          0.018889999992097728,
+          0.02349099999992177
+        ],
+        "medianMs": 3363.028284,
+        "rows": 459013,
+        "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e"
+      },
+      {
+        "variant": "prepared-wide",
+        "parameters": 16384,
+        "statementStats": {
+          "statementsPrepared": 2,
+          "executions": 167,
+          "peakCached": 2
+        },
+        "samplesMs": [
+          3679.0110319999985,
+          3104.865718999994,
+          3453.9664690000063
+        ],
+        "insertSamplesMs": [
+          3678.995571000003,
+          3104.8509889999987,
+          3453.952078000002
+        ],
+        "materializeSamplesMs": [
+          0.01546099999541184,
+          0.01472999999532476,
+          0.014391000004252419
+        ],
+        "medianMs": 3453.9664690000063,
+        "rows": 459013,
+        "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e"
+      },
+      {
+        "variant": "prepared-wide-sorted",
+        "parameters": 16384,
+        "statementStats": {
+          "statementsPrepared": 2,
+          "executions": 167,
+          "peakCached": 2
+        },
+        "samplesMs": [
+          3579.528636999996,
+          3536.422225999995,
+          4080.245578000002
+        ],
+        "insertSamplesMs": [
+          3579.5187159999987,
+          3536.4084250000014,
+          4080.231927999994
+        ],
+        "materializeSamplesMs": [
+          0.009920999997120816,
+          0.013800999993691221,
+          0.01365000000805594
+        ],
+        "medianMs": 3579.528636999996,
+        "rows": 459013,
+        "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e"
+      },
+      {
+        "variant": "append-large",
+        "parameters": 8192,
+        "statementStats": {
+          "statementsPrepared": 3,
+          "executions": 334,
+          "peakCached": 3
+        },
+        "samplesMs": [
+          3558.4565809999986,
+          2274.6119739999995,
+          2265.412998999993
+        ],
+        "insertSamplesMs": [
+          2519.6446300000025,
+          1515.2113170000011,
+          1557.8965629999875
+        ],
+        "materializeSamplesMs": [
+          1038.811950999996,
+          759.4006569999983,
+          707.5164360000053
+        ],
+        "medianMs": 2274.6119739999995,
+        "rows": 459013,
+        "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e"
+      },
+      {
+        "variant": "append-window",
+        "parameters": 8192,
+        "statementStats": {
+          "statementsPrepared": 3,
+          "executions": 334,
+          "peakCached": 3
+        },
+        "samplesMs": [
+          3233.713542000005,
+          3506.630655000001,
+          2621.6294550000166
+        ],
+        "insertSamplesMs": [
+          2032.3990230000054,
+          1770.9760870000027,
+          1530.4742530000221
+        ],
+        "materializeSamplesMs": [
+          1201.3145189999996,
+          1735.654567999998,
+          1091.1552019999945
+        ],
+        "medianMs": 3233.713542000005,
+        "rows": 459013,
+        "digest": "a43e5295c8899045517c7d9205587afb7fdc89dda37340ac6949b5ecf6df8d9e"
+      }
+    ]
+  },
+  "merge": {
+    "groups": [
+      {
+        "variant": "window",
+        "insertMs": [
+          251.4648709999999,
+          267.35343400000056,
+          251.1324450000002
+        ],
+        "hitMs": [
+          285.17897700000003,
+          344.1844289999999,
+          277.3542300000008
+        ],
+        "medianInsertMs": 251.4648709999999,
+        "medianHitMs": 285.17897700000003,
+        "rows": 192314,
+        "digest": "7c678bd5bf9771dc558493d6cff4f737ee705cabafa314c3db75736e36c83610",
+        "plan": [
+          {
+            "id": 3,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CO-ROUTINE (subquery-2)"
+          },
+          {
+            "id": 6,
+            "parent": 3,
+            "notused": 0,
+            "detail": "CO-ROUTINE (subquery-5)"
+          },
+          {
+            "id": 9,
+            "parent": 6,
+            "notused": 0,
+            "detail": "SCAN BuildCandidates"
+          },
+          {
+            "id": 29,
+            "parent": 6,
+            "notused": 0,
+            "detail": "USE TEMP B-TREE FOR RIGHT PART OF ORDER BY"
+          },
+          {
+            "id": 54,
+            "parent": 3,
+            "notused": 0,
+            "detail": "SCAN (subquery-5)"
+          },
+          {
+            "id": 105,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN (subquery-2)"
+          }
+        ]
+      },
+      {
+        "variant": "aggregate",
+        "insertMs": [
+          158.6550940000002,
+          107.39522299999999,
+          117.99434399999973
+        ],
+        "hitMs": [
+          156.9333459999998,
+          132.8362089999996,
+          139.8955679999999
+        ],
+        "medianInsertMs": 117.99434399999973,
+        "medianHitMs": 139.8955679999999,
+        "rows": 192314,
+        "digest": "7c678bd5bf9771dc558493d6cff4f737ee705cabafa314c3db75736e36c83610",
+        "plan": [
+          {
+            "id": 3,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CO-ROUTINE (subquery-2)"
+          },
+          {
+            "id": 9,
+            "parent": 3,
+            "notused": 0,
+            "detail": "SCAN BuildCandidates"
+          },
+          {
+            "id": 50,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN (subquery-2)"
+          }
+        ]
+      }
+    ]
+  },
+  "generation": {
+    "variants": [
+      {
+        "name": "reference",
+        "root": "/tmp/cryptopia-bulk-reference",
+        "revision": "f76f7eaf5c69b649757acf71d12e3682daab050e",
+        "workingTreeDirty": null,
+        "runtimeSha256": "8e99ee4616ac5dfdcdc42382461efbd1fabde61aa8fb1f2fe574db6c90ac9406"
+      },
+      {
+        "name": "indexed",
+        "root": "/workspace/cryptopia-deobfuscator",
+        "append": false,
+        "revision": "f76f7eaf5c69b649757acf71d12e3682daab050e",
+        "workingTreeDirty": true,
+        "runtimeSha256": "4d234ad0586fffebb40a997b201fd48adcffedb72dee5a25786954d6cf1f96f5"
+      },
+      {
+        "name": "append",
+        "root": "/workspace/cryptopia-deobfuscator",
+        "append": true,
+        "revision": "f76f7eaf5c69b649757acf71d12e3682daab050e",
+        "workingTreeDirty": true,
+        "runtimeSha256": "4d234ad0586fffebb40a997b201fd48adcffedb72dee5a25786954d6cf1f96f5"
+      }
+    ],
+    "groups": [
+      {
+        "wires": 3,
+        "gates": 4,
+        "variants": {
+          "reference": {
+            "samplesMs": [
+              2183.307716,
+              2268.788695,
+              2105.3010839999997
+            ],
+            "medianMs": 2183.307716,
+            "rows": 38016,
+            "digest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+            "controls": {
+              "generationAppendStaging": null,
+              "generationAggregateMerge": null,
+              "generationDirectInputMerge": null
+            }
+          },
+          "indexed": {
+            "samplesMs": [
+              2043.9564260000002,
+              1991.549924,
+              1859.108632
+            ],
+            "medianMs": 1991.549924,
+            "rows": 38016,
+            "digest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+            "controls": {
+              "generationAppendStaging": false,
+              "generationAggregateMerge": true,
+              "generationDirectInputMerge": true
+            }
+          },
+          "append": {
+            "samplesMs": [
+              2009.14593,
+              2038.579993,
+              2082.310435
+            ],
+            "medianMs": 2038.579993,
+            "rows": 38016,
+            "digest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+            "controls": {
+              "generationAppendStaging": true,
+              "generationAggregateMerge": true,
+              "generationDirectInputMerge": true
+            }
+          }
+        }
+      },
+      {
+        "wires": 4,
+        "gates": 3,
+        "variants": {
+          "reference": {
+            "samplesMs": [
+              12532.485592,
+              15155.733074000002,
+              14236.426575
+            ],
+            "medianMs": 14236.426575,
+            "rows": 832167,
+            "digest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+            "controls": {
+              "generationAppendStaging": null,
+              "generationAggregateMerge": null,
+              "generationDirectInputMerge": null
+            }
+          },
+          "indexed": {
+            "samplesMs": [
+              11870.940237,
+              13476.939702,
+              13999.858420999999
+            ],
+            "medianMs": 13476.939702,
+            "rows": 832167,
+            "digest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+            "controls": {
+              "generationAppendStaging": false,
+              "generationAggregateMerge": true,
+              "generationDirectInputMerge": true
+            }
+          },
+          "append": {
+            "samplesMs": [
+              14791.535068,
+              14020.229674,
+              13498.974743
+            ],
+            "medianMs": 14020.229674,
+            "rows": 832167,
+            "digest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+            "controls": {
+              "generationAppendStaging": true,
+              "generationAggregateMerge": true,
+              "generationDirectInputMerge": true
+            }
+          }
+        }
+      }
+    ]
+  }
+}

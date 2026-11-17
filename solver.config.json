@@ -121,7 +121,10 @@
     "generationSqlParameters": 8192,
     "generationPreparedInserts": true,
     "generationSortStaging": false,
-    "generationStatementCacheEntries": 8
+    "generationStatementCacheEntries": 8,
+    "generationAppendStaging": false,
+    "generationAggregateMerge": true,
+    "generationDirectInputMerge": true
   },
   "synthesis": {
     "templates": true,
@@ -175,6 +178,8 @@
     "dedupOutputName": "dedup-benchmark.json",
     "stagingRows": 200000,
     "stagingOutputName": "staging-benchmark.json",
-    "stagingWideSqlParameters": 16384
+    "stagingWideSqlParameters": 16384,
+    "mergeOutputName": "merge-benchmark.json",
+    "generationStagingComparison": false
   }
 }

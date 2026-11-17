@@ -19,7 +19,7 @@ try {
 	await runSQL(db, generationLookupSchema)
 	await runSQL(db, 'CREATE TABLE GenerationStatus(id INTEGER PRIMARY KEY,complete INTEGER NOT NULL)')
 	await runSQL(db, 'INSERT INTO GenerationStatus VALUES(1,0)')
-	await generateOnDisk(db, 2, 3, [...generateAllGates(2)], { readRows: 20, stageRows: 100, parameterLimit: 900, stateLimit: 0, keepState: true, workers: 1 })
+	await generateOnDisk(db, 2, 3, [...generateAllGates(2)], { readRows: 20, stageRows: 100, parameterLimit: 900, stateLimit: 0, keepState: true, workers: 1, appendStaging: true })
 	const output = () => allSQL(db, 'SELECT ioIdentifier,replacerGates FROM InputOutputReplacers ORDER BY ioIdentifier')
 	const expected = await output()
 	// Make build-only space substantial enough to verify physical reclamation.
@@ -45,7 +45,7 @@ try {
 	await assert.rejects(finalizeGeneration(db), /injected finalization failure/)
 	assert.equal((await allSQL<{ complete: number }>(db, 'SELECT complete FROM GenerationStatus'))[0].complete, 2)
 	assert.equal((await allSQL(db, 'PRAGMA table_info(InputOutputReplacers)')).length, 2)
-	assert.equal((await allSQL(db, "SELECT name FROM sqlite_temp_master WHERE name='BuildCandidates'")).length, 0)
+	assert.equal((await allSQL(db, "SELECT name FROM sqlite_temp_master WHERE name IN ('BuildCandidates','BuildCandidateRows')")).length, 0)
 	assert.deepEqual(await output(), expected)
 	db.run = nativeRun
 	await closeRainbowTable(db)

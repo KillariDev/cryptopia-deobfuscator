@@ -10,21 +10,47 @@ try {
 	const suffix = ' ON CONFLICT(state,mask) DO UPDATE SET reads=excluded.reads,gates=excluded.gates WHERE excluded.reads<BuildCandidates.reads'
 	await insertRows(db, 'INSERT INTO BuildCandidates VALUES ', rows, suffix, 900)
 	const expected = await allSQL(db, 'SELECT * FROM BuildCandidates ORDER BY state,mask')
-	for (const prepared of [false, true]) for (const sort of [false, true]) for (const limit of [10, 900, 8192]) {
+	for (const prepared of [false, true]) for (const sort of [false, true]) for (const append of [false, true]) for (const limit of [10, 900, 8192]) {
 		await runSQL(db, 'DELETE FROM BuildCandidates')
-		const writer = await StagingWriter.create(db, { prepared, sort, parameterLimit: limit, cacheEntries: 2 })
+		const writer = await StagingWriter.create(db, { prepared, sort, append, parameterLimit: limit, cacheEntries: 2 })
 		try {
 			await runSQL(db, 'BEGIN')
 			// Concurrent calls must serialize bindings; sorting must preserve equal-key ties.
 			await Promise.all([writer.write(rows.slice(0, 100)), writer.write(rows.slice(100, 200)), writer.write(rows.slice(200))])
+			await writer.materialize()
 			await runSQL(db, 'COMMIT')
 			assert.deepEqual(await allSQL(db, 'SELECT * FROM BuildCandidates ORDER BY state,mask'), expected)
 			assert.ok(writer.stats.peakCached <= 2)
 			if (prepared) assert.ok(writer.stats.statementsPrepared < writer.stats.executions || limit > 500)
 		} finally { await writer.close() }
 		await assert.rejects(writer.write(rows), /closed/)
+		await assert.rejects(writer.materialize(), /closed/)
 		await writer.close() // idempotent
 	}
+	const appended = await StagingWriter.create(db, { prepared: true, sort: false, append: true, parameterLimit: 900, cacheEntries: 2 })
+	try {
+		for (const maximum of [0x7fffffff, 0x80000000]) {
+			await runSQL(db, 'DELETE FROM BuildCandidates')
+			for (const [offset, reads, gate] of [[2, 0xffffffff, 1], [1, 0xfffffffe, 2], [0, 0xfffffffe, 3]]) await runSQL(db, 'INSERT INTO BuildCandidateRows VALUES (?,?,?,?,?,?)', [maximum - offset, Buffer.from([88]), 1, reads, Buffer.from([gate]), 1])
+			await appended.materialize()
+			const winner = (await allSQL<{ reads: number, gates: Buffer }>(db, 'SELECT reads,gates FROM BuildCandidates'))[0]
+			assert.equal(winner.reads, 0xfffffffe)
+			assert.deepEqual(winner.gates, Buffer.from([2]), 'int64-boundary and wide-rowid paths preserve first cheapest tie')
+		}
+		await runSQL(db, 'DELETE FROM BuildCandidates')
+		await runSQL(db, 'BEGIN')
+		await appended.write([[Buffer.from([77]), 1, -1, Buffer.from([7]), 1]])
+		await assert.rejects(appended.materialize(), /CHECK constraint/)
+		await runSQL(db, 'ROLLBACK')
+		assert.equal((await allSQL(db, 'SELECT * FROM BuildCandidateRows')).length, 0)
+		assert.equal((await allSQL(db, 'SELECT * FROM BuildCandidates')).length, 0)
+		await runSQL(db, 'BEGIN')
+		await appended.write([[Buffer.from([77]), 1, 1, Buffer.from([7]), 1]])
+		await appended.materialize()
+		await runSQL(db, 'COMMIT')
+		assert.equal((await allSQL(db, 'SELECT * FROM BuildCandidates')).length, 1)
+	} finally { await appended.close() }
+
 	const eviction = await StagingWriter.create(db, { prepared: true, sort: false, parameterLimit: 900, cacheEntries: 1 })
 	try {
 		for (const count of [1, 2, 3, 1]) await eviction.write(rows.slice(0, count))
