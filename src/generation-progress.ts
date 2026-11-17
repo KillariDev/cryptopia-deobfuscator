@@ -1,5 +1,5 @@
 export type GenerationProfile = { phase: 'reading' | 'staging' | 'deduplicating' | 'writing lookup' | 'committing' | 'importing scratch' | 'expanding' | 'cleaning up' | 'compacting' | 'complete', phaseActive: boolean, phaseStarted: number, stagingMs: number, dedupMs: number, outputMs: number, commitMs: number, importMs: number, committedParents: number, elapsedMs: number, expansionMs: number, writeMs: number, readMs: number, waitMs: number, candidates: number, emitted: number, batches: number, workersUsed: number, peakPending: number }
-export type SemanticProgress = { depth: number, processed: number, total: number, states: number, processedThisRun?: number, disk?: boolean, overallDone?: number, overallTotal?: number, overallEstimated?: boolean, complete?: boolean }
+export type SemanticProgress = { depth: number, processed: number, total: number, states?: number, processedThisRun?: number, disk?: boolean, overallDone?: number, overallTotal?: number, overallEstimated?: boolean, complete?: boolean }
 export function progressPercent(done: bigint, total: bigint) {
 	if (total <= 0n) return '0.00%'
 	if (done >= total) return '100.00%'

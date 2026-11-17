@@ -77,7 +77,11 @@ Shared-host, warm-cache fixtures are not production disk benchmarks. Keep the
 workload, worker count, cache settings and validation controls with the results,
 and verify full-job behavior before changing defaults.
 
-`database.generationCountFinalInserts` selects insert-time function counting.
+`database.generationCountFinalInserts` selects insert-time function counting when
+`database.generationStates` is nonzero. Unlimited jobs skip final-function counting
+entirely; their progress percentage and ETA use committed parent work. Enabling a
+state limit on resume reconstructs the exact count once before enforcing the limit.
+The counting-comparison benchmark sets a permissive limit to exercise both paths.
 Both strategies retain upserts that improve an existing circuit's cost. With
 insert-time counting, the final lookup timer includes the trigger's membership
 checks; compare total elapsed time instead of expecting the same phase split.
@@ -95,7 +99,10 @@ Keep the default unless a comparison on your workload supports changing it.
 `database.generationCandidateCacheMegabytes` controls fixed typed-array storage
 for an exact, same-depth candidate cache; `0` disables it. It rejects repeated
 function/wire-mask keys only when their read cost cannot improve an earlier row.
-Hash collisions evict entries, never reject a different key. The cache resets at
+On the final layer it also rejects a different mask with strictly worse wire/read
+cost for the same function; equal-cost masks remain eligible for SQL tie selection.
+Intermediate layers retain mask alternatives needed for later expansion. Hash
+collisions evict entries, never reject a different key. The cache resets at
 depth changes and starts empty on resume; it does not replace saved database state.
 The configured budget covers retained typed-array payloads, not other job buffers.
 
@@ -121,3 +128,23 @@ and baseline variants on 3/4 and 4/3 tables. Combined medians were 0.84s versus
 staging writers with insert-time counting enabled, 4/3 medians were 6.78s versus
 10.17s. Three shared-host samples per variant do not establish production 4/5
 throughput. Streaming alone did not consistently help; the combined pipeline did.
+
+
+## Final-layer SQL reductions
+
+Final expansion with multiple staging writers merges each function-disjoint shard
+straight into the main lookup, avoiding a copy into the main temporary candidate
+table. Scratch transactions must finish first; output and frontier consumption still
+commit together in the main transaction. Scratch files remain disposable on restart.
+No database format change or regeneration is required for unfinished current-format
+tables. Unlimited checkpoints mark their untracked function count explicitly; this
+is distinct from saved work and does not affect resumability.
+
+
+[Recorded complete-build comparisons](results/2026-11-17-final-generation-work.json)
+against main cover three alternating repeats per variant for 3/4 and 4/3 tables,
+with two staging writers, two expansion workers and identical unlimited settings.
+All 12 builds passed exhaustive replacement checks and matched semantic/cost
+digests. Median times were 1.22s versus 1.36s on 3/4 and 6.68s versus 6.95s on
+4/3. Every paired trial improved, with substantial timing variation. These small
+fixtures measure the combined changes and do not predict production 4/5 speedups.

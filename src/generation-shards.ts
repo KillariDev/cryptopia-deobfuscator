@@ -108,6 +108,12 @@ export class ShardedStagingWriter {
 		for (const result of results) if (result.status === 'rejected') throw result.reason
 		this.readyToImport = true
 	}
+	/** Completed function-disjoint sources can be merged directly on the final layer. */
+	consumeSources() {
+		if (this.closing || !this.readyToImport) throw new Error('No committed staging batch to consume')
+		this.readyToImport = false
+		return this.shards.map(shard => `${shard.alias}.BuildCandidates`)
+	}
 	async importBatch() {
 		if (this.closing || !this.readyToImport) throw new Error('No committed staging batch to import')
 		this.readyToImport = false

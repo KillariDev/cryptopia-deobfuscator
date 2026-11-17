@@ -20,6 +20,7 @@ import { GenerationPool } from './generation-pool.js'
 import { expandBatch, ExpansionChunk } from './generation-pipeline.js'
 import { generationSignature, packState, unpackState, usedWires } from './generation-storage.js'
 
+// functions=-1 means final-layer counting was intentionally disabled.
 type Meta = { signature: string, depth: number, processed: number, total: number, functions: number }
 type Parent = Omit<Entry, 'state'> & { state: Uint8Array }
 type PreparedBatch = { batch: Entry[], depth: number, expansion?: GenerationPrefetch<ExpansionChunk<Parent>> }
@@ -76,6 +77,14 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 		} catch (error) { await run('ROLLBACK'); throw error }
 		meta = { signature, depth: 0, processed: 0, total: 1, functions: 1 }
 	}
+	// Recover an exact union only when a resumed job enables the safety limit.
+	// BuildSeen also contains pending shorter circuits not yet written to output.
+	if (options.stateLimit && meta.functions < 0) {
+		meta.functions = (await allSQL<{ count: number }>(db, 'SELECT (SELECT count(*) FROM BuildSeen) + (SELECT count(*) FROM InputOutputReplacers o WHERE NOT EXISTS (SELECT 1 FROM BuildSeen s WHERE s.state=o.ioIdentifier)) AS count'))[0].count
+		await run('UPDATE BuildMeta SET functions=? WHERE id=1', [meta.functions])
+	}
+	if (options.stateLimit && meta.functions > options.stateLimit) throw new Error('Disk generation state limit reached; increase database.generationStates or set it to 0')
+	const trackFinal = options.stateLimit > 0
 	const encoded = catalog.map(gate => encodeGates([gate])), kernel = new ExpansionKernel(wires, catalog), pool = new GenerationPool(workers, wires, catalog)
 	const layers = await allSQL<{ depth: number, total: number, processed: number }>(db, 'SELECT * FROM BuildLayers ORDER BY depth')
 	const stagingOptions = { parameterLimit: options.parameterLimit, cacheEntries: options.statementCacheEntries ?? 8, prepared: options.preparedInserts ?? true, sort: options.sortStaging ?? false, append: options.appendStaging ?? false, compactBindings: options.compactBindings ?? false }
@@ -98,14 +107,14 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	const report = () => {
 		profile.elapsedMs = performance.now() - started; profile.workersUsed = pool.workerCount
 		options.onProfile?.({ ...profile })
-		onProgress?.({ depth: meta!.depth, processed: meta!.processed, total: meta!.total, states: meta!.functions, complete: profile.phase === 'complete', ...overallGenerationWork(layers, maximumDepth, meta!.depth > maximumDepth, catalog.length), processedThisRun: meta!.processed - startProcessed, disk: true })
+		onProgress?.({ depth: meta!.depth, processed: meta!.processed, total: meta!.total, states: meta!.functions < 0 ? undefined : meta!.functions, complete: profile.phase === 'complete', ...overallGenerationWork(layers, maximumDepth, meta!.depth > maximumDepth, catalog.length), processedThisRun: meta!.processed - startProcessed, disk: true })
 	}
 	try {
 		if (stagingWriters > 1) shards = await ShardedStagingWriter.create(db, { ...stagingOptions, writers: stagingWriters, directory: options.stagingDirectory, cacheMegabytes: options.stagingCacheMegabytes ?? 64 })
-		logVerbose(`Generation staging: ${stagingWriters} writer(s), ${options.compactBindings ? 3 : 5} bindings per candidate; final lookup ${options.countFinalInserts ? 'count output inserts' : 'count candidate functions'}${shards ? `; disposable scratch databases: ${shards.directory}` : ''}`)
+		logVerbose(`Generation staging: ${stagingWriters} writer(s), ${options.compactBindings ? 3 : 5} bindings per candidate; final lookup ${!trackFinal ? 'counting disabled (no state limit)' : options.countFinalInserts ? 'count output inserts' : 'count candidate functions'}${shards ? `; disposable scratch databases: ${shards.directory}` : ''}`)
 		// The last expanded layer writes directly to output: no depth-maximum frontier.
 		while (meta.depth < maximumDepth) {
-			candidateCache.beginDepth(meta.depth)
+			candidateCache.beginDepth(meta.depth, meta.depth + 1 === maximumDepth)
 			if (meta.depth !== startDepth) { startDepth = meta.depth; startProcessed = 0 }
 			report()
 			if (shouldPause?.()) return false
@@ -125,7 +134,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				meta.depth = total ? next : maximumDepth + 1; meta.processed = 0; meta.total = total
 				continue
 			}
-			if (options.countFinalInserts && !finalCounterInstalled && meta.depth + 1 === maximumDepth) { finalCounterInstalled = true; await installFinalCounter(db) }
+			if (trackFinal && options.countFinalInserts && !finalCounterInstalled && meta.depth + 1 === maximumDepth) { finalCounterInstalled = true; await installFinalCounter(db) }
 			const priorFunctions = meta.functions
 			if (shards) await phase('staging', () => shards!.beginBatch())
 			// IMMEDIATE would reserve write locks on attached scratch databases,
@@ -181,15 +190,18 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				}
 				await flush()
 				if (stageStream) await phase('staging', () => stageStream!.finish())
+				const final = meta.depth + 1 === maximumDepth
+				let sources = ['BuildCandidates']
 				if (shards) {
 					await phase('staging', () => shards!.materialize())
-					await phase('importing scratch', () => shards!.importBatch())
+					if (final) sources = shards.consumeSources()
+					else await phase('importing scratch', () => shards!.importBatch())
 				} else await phase('deduplicating', () => singleWriter.measure(() => staging.materialize()))
-				const final = meta.depth + 1 === maximumDepth
 				await phase('deduplicating', async () => {
 					if (final) {
-						if (options.countFinalInserts) await operations.measure('arm final counter', () => run(startFinalCounterSQL))
-						else meta!.functions += (await operations.measure('final membership/count', () => allSQL<{ count: number }>(db, countNewFinalFunctionsSQL)))[0].count
+						if (!trackFinal) meta!.functions = -1
+						else if (options.countFinalInserts) await operations.measure('arm final counter', () => run(startFinalCounterSQL))
+						else for (const source of sources) meta!.functions += (await operations.measure('final membership/count', () => allSQL<{ count: number }>(db, countNewFinalFunctionsSQL.replaceAll('BuildCandidates', source))))[0].count
 					} else {
 						meta!.functions += await operations.measure('insert seen', () => run('INSERT INTO BuildSeen SELECT state,? FROM BuildCandidates GROUP BY state ON CONFLICT(state) DO NOTHING', [meta!.depth + 1]))
 						// CROSS JOIN keeps the bounded batch outside the primary-key probe; ordinary JOIN scans all BuildSeen.
@@ -198,8 +210,8 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 					if (!(final && options.countFinalInserts) && options.stateLimit && meta!.functions > options.stateLimit) throw new Error('Disk generation state limit reached; increase database.generationStates or set it to 0')
 				})
 				if (final) {
-					await phase('writing lookup', () => operations.measure('final lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true), [maximumDepth])))
-					if (options.countFinalInserts) await phase('deduplicating', async () => {
+					for (const source of sources) await phase('writing lookup', () => operations.measure('final lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true, false, `SELECT state,mask,reads,gates,wires FROM ${source}`), [maximumDepth])))
+					if (trackFinal && options.countFinalInserts) await phase('deduplicating', async () => {
 						meta!.functions += (await operations.measure('read final count', () => allSQL<{ count: number }>(db, readFinalCounterSQL)))[0].count
 						await operations.measure('disarm final counter', () => run(stopFinalCounterSQL))
 						if (options.stateLimit && meta!.functions > options.stateLimit) throw new Error('Disk generation state limit reached; increase database.generationStates or set it to 0')
