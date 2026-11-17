@@ -222,8 +222,8 @@ The packed/direct build format requires fresh tables; existing files are never c
 
 Settings under `database`:
 
-- `generationWorkers: 4`: maximum CPU slots, capped at available CPUs minus one (minimum one). A value of `1` runs the same optimized expansion in the writer process without worker threads. Threads start lazily and persist for the table build.
-- `generationQueueBatches: 2`: maximum outstanding tasks per CPU slot, including running tasks and completed results awaiting consumption. Together with `generationBatchRows`, this bounds expansion buffering; the writer can additionally retain one staging buffer and the current `generationReadRows` frontier rows.
+- `generationWorkers: 8`: maximum CPU slots, capped at available CPUs minus one (minimum one). A value of `1` runs the same optimized expansion in the writer process without worker threads. Threads start lazily and persist for the table build.
+- `generationQueueBatches: 2`: maximum outstanding tasks per CPU slot, including running tasks and completed results awaiting consumption. Together with `generationBatchRows`, this bounds pending expansion buffering; the writer can additionally retain one yielded expansion result and one staging buffer and the current `generationReadRows` frontier rows.
 - `generationMinimumWork: 100000`: batches below this many raw candidate expansions run inline. This avoids worker startup and message overhead for small tables and small layers. Lower it to exercise parallel expansion on smaller batches.
 
 A task contains at most `generationBatchRows` raw expansions. SQLite's temporary
@@ -243,6 +243,25 @@ worker-seconds are not job wall time. These measurements help identify whether
 CPU expansion or database work limits a build. Extra CPU workers cannot eliminate
 a database bottleneck, and the defaults are conservative rather than a promise
 of linear speedup. Full 4-wire/5-gate build throughput has not been benchmarked.
+
+### CPU utilization during generation
+
+`database.generationWorkers` defaults to eight expansion slots, capped at available
+CPUs minus one. More slots can help CPU-limited expansion; they do not parallelize
+SQLite staging, global deduplication, lookup writes or commits. Batches below
+`generationMinimumWork` intentionally run inline. The queue refills before yielding
+a result to the writer so new expansion work can overlap staging that result;
+pending tasks remain bounded by workers × `generationQueueBatches`, plus the
+result currently owned by the writer.
+
+To diagnose low utilization, enable `logging.verbose` and inspect phase timings.
+High writer wait for expansion suggests expansion is limiting throughput. Dominant
+staging/deduplication/lookup times suggest the single writer; these elapsed timings
+combine SQL computation and I/O, so disk active time/latency and per-core CPU usage
+are needed to distinguish them. Low aggregate CPU alone does not establish a disk
+bottleneck. The default cap is eight; compare smaller values when writer time dominates, and
+keep the setting that improves completed input-row throughput. Existing small/mid-size
+benchmarks did not establish a consistent advantage for four workers over one.
 
 ### Multiple tables
 
@@ -305,15 +324,28 @@ all input totals are known and the percentage uses those measured totals. With
 direct final-layer writing, there is no separate final frontier-draining phase.
 This is a work percentage, not an exact fraction of elapsed runtime.
 
-The single ETA multiplies estimated remaining input work by the current layer's
-observed processing time per row. It warms up for `database.etaWarmupSamples`
-reports, uses a rolling median over `database.etaWindowSamples`, then smooths the
-rate with `database.etaSmoothing`. Layer transitions reset speed learning because
-processing cost can change. Estimates remain approximate, especially early on.
-Per-layer totals and committed progress survive a restart; speed samples relearn
-without counting pre-restart work as new processing. Stalls are labeled as
-waiting for progress. `100.00%` is reported after cleanup and compaction succeed.
-Phase timings and other internal counters appear only with verbose logging.
+The single ETA uses a conservative recent rate: the slower of a smoothed median
+and the recent lower throughput quartile. This reacts to sustained slowdowns
+without allowing one isolated slow interval to dominate once four samples exist.
+After five samples, a robust pairwise fit estimates increasing per-row cost
+against logarithmic processed work and integrates that trend over remaining work.
+`database.etaMaximumSlowdown: 4` bounds the forecast average cost relative to the
+current conservative cost; set it to `1` to disable trend extrapolation. This cap
+limits unstable early extrapolation, not the actual slowdown a build can suffer.
+
+Speed estimates warm up for `database.etaWarmupSamples` reports, retain
+`database.etaWindowSamples` samples and smooth the median using
+`database.etaSmoothing`. A sample window below five disables the trend fit.
+Layer transitions reset speed learning because processing cost can change.
+Future layer sizes are still projected, so their ETA carries `(rough)`; it is not
+a calibrated confidence bound. This model cannot foresee cache exhaustion, a
+change in disk contention, different costs in unseen layers, or final compaction
+time. It reduces constant-speed optimism rather than guaranteeing a deadline.
+Per-layer work survives restart, while speed/trend samples relearn without
+counting pre-restart work as new processing. Stalls are labeled as waiting for
+progress. `100.00%` is reported after cleanup and compaction succeed. Normal
+updates still contain one overall percentage and one ETA; internal timings
+appear only with verbose logging.
 
 ### Automatic cleanup and compaction
 

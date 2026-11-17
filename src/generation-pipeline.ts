@@ -39,8 +39,9 @@ export async function* expandBatch<T extends ExpansionParent>(entries: T[], gate
 	while (pending.length) {
 		const job = pending.shift()!, started = performance.now(), settled = await job.result
 		if ('error' in settled) throw settled.error
-		yield { parents: job.parents, result: settled.result, waitMs: performance.now() - started }
-		// The writer has consumed the previous buffer before another one is queued.
+		const waitMs = performance.now() - started
+		// Refill before the writer stages this result; keep CPU work overlapping SQLite.
 		fill()
+		yield { parents: job.parents, result: settled.result, waitMs }
 	}
 }

@@ -132,7 +132,7 @@ const check = async (db: sqlite3.Database) => {
 }
 try {
 	let reference: Row[] | undefined
-	for (const workers of [1, 2, 4]) {
+	for (const workers of [1, 2, 4, 8]) {
 		const db = await open(`workers-${workers}.db`)
 		try {
 			let profile: GenerationProfile | undefined
@@ -294,3 +294,49 @@ assert.equal(eta.overallEta(finishedWork), 'finishing')
 assert.match(formatGenerationProgress(finishedWork, 1000, 'finishing'), /99.99% complete/)
 assert.equal(eta.overallEta({ ...finishedWork, complete: true }), '0s')
 assert.match(formatGenerationProgress({ ...finishedWork, complete: true }, 1000, '0s'), /100.00% complete/)
+
+// Forecast against a known synthetic logarithmic slowdown, rather than its own formulas.
+const simulate = (costs: number[], limit = 4) => {
+	const model = new GenerationEstimator(5, 3, .2, limit)
+	let processed = 1000, now = 0
+	model.update({ depth: 4, processed, total: 10000, states: 100 }, now)
+	for (const cost of costs) {
+		processed += 100; now += cost * 100
+		model.update({ depth: 4, processed, total: 10000, states: 100 }, now)
+	}
+	const progress = { depth: 4, processed, total: 10000, states: 100, overallDone: processed, overallTotal: 10000 }
+	return { model, progress, remaining: 10000 - processed }
+}
+const steadyModel = simulate(Array(9).fill(10))
+assert.equal(steadyModel.model.remainingMs(steadyModel.progress), steadyModel.remaining * 10)
+const singleStall = simulate([...Array(8).fill(10), 100])
+assert.equal(singleStall.model.remainingMs(singleStall.progress), singleStall.remaining * 10, 'one slow interval cannot establish a sustained trend')
+const slowdown = simulate([10, 10, 10, 10, 15, 20, 25, 30, 35])
+assert.ok(slowdown.model.remainingMs(slowdown.progress)! >= slowdown.remaining * 30, 'recent slowdown must override a faster historical EMA')
+assert.ok(slowdown.model.remainingMs(slowdown.progress)! <= slowdown.remaining * 30 * 4, 'long extrapolations are bounded')
+const noTrend = simulate([10, 10, 10, 10, 15, 20, 25, 30, 35], 1)
+assert.equal(noTrend.model.remainingMs(noTrend.progress), noTrend.remaining * 30)
+const logCosts = Array.from({ length: 9 }, (_, i) => 10 + 2 * Math.log((1050 + i * 100) / 1000))
+const logarithmic = simulate(logCosts)
+// Independently integrate future work numerically, including costs beyond the observed samples.
+let actualRemaining = 0
+for (let x = logarithmic.progress.processed; x < 10000; x++) actualRemaining += 10 + 2 * Math.log((x + .5) / 1000)
+assert.ok(Math.abs(logarithmic.model.remainingMs(logarithmic.progress)! / actualRemaining - 1) < .1)
+assert.ok(logarithmic.model.remainingMs(logarithmic.progress)! > logarithmic.remaining * logCosts[logCosts.length - 1])
+assert.match(logarithmic.model.overallEta({ ...logarithmic.progress, overallEstimated: true }), /\(rough\)$/)
+logarithmic.model.update({ depth: 5, processed: 0, total: 500, states: 100 }, 100000)
+assert.match(logarithmic.model.overallEta({ ...logarithmic.progress, depth: 5 }), /learning/)
+assert.throws(() => parseConfig({ database: { etaMaximumSlowdown: .5 } }))
+assert.equal(parseConfig({ database: { etaMaximumSlowdown: 1.5 } }).database.etaMaximumSlowdown, 1.5)
+
+class CountingPool extends GenerationPool {
+	submitted = 0
+	override run(task: ExpansionTask) { this.submitted++; return Promise.resolve(kernel.expand(task)) }
+}
+const counting = new CountingPool(2, 2, gates)
+const stream = expandBatch(parents, gates.length, kernel, counting, { stageRows: gates.length, workers: 2, queueBatches: 2, minimumWork: 1 })
+try {
+	await stream.next()
+	assert.equal(counting.submitted, 5, 'the vacated queue slot is refilled before the writer consumes the yielded result')
+} finally { await stream.return(undefined); await counting.close() }
+console.log('Slowdown-aware ETA, bounded forecasts, outlier resistance and proactive expansion queue refill checks passed')
