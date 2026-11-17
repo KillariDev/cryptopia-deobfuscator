@@ -167,18 +167,24 @@ try {
 	// A staging write can fail while later CPU tasks are still queued/running.
 	db = await open('staging-error.db')
 	try {
-		const nativeRun = db.run.bind(db)
+		const nativePrepare = db.prepare.bind(db)
 		let failed = false
-		db.run = ((query: string, ...args: unknown[]) => {
-			const values = args[0] as unknown[]
-			if (!failed && query.startsWith('INSERT INTO BuildCandidates') && Array.isArray(values) && Buffer.isBuffer(values[3]) && values[3].length > 0) {
-				failed = true
-				const callback = args[args.length - 1] as Function
-				queueMicrotask(() => callback(new Error('staging write failed')))
-				return db
+		db.prepare = ((query: string, ...args: unknown[]) => {
+			const statement = (nativePrepare as Function)(query, ...args) as sqlite3.Statement
+			if (query.startsWith('INSERT INTO BuildCandidates')) {
+				const nativeRun = statement.run.bind(statement)
+				statement.run = ((...values: unknown[]) => {
+					const params = values[0] as unknown[]
+					if (!failed && Array.isArray(params) && Buffer.isBuffer(params[3]) && params[3].length > 0) {
+						failed = true
+						queueMicrotask(() => (values[values.length - 1] as Function)(new Error('staging write failed')))
+						return statement
+					}
+					return (nativeRun as Function)(...values)
+				}) as typeof statement.run
 			}
-			return (nativeRun as Function)(query, ...args)
-		}) as typeof db.run
+			return statement
+		}) as typeof db.prepare
 		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, stageRows: 1 }), /staging write failed/)
 		assert.equal((await rows(db)).length, 0)
 		assert.equal((await allSQL<{ processed: number }>(db, 'SELECT processed FROM BuildMeta'))[0].processed, 0)

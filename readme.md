@@ -187,7 +187,11 @@ existing gate payloads in JavaScript. Final cleanup removes them.
 
 Generation settings (the obsolete `insertBatchSize` and `keepGenerationState` settings have been removed):
 
-- `database.queryBatchSize`: SQL parameter budget (at most 900), independent of generation transaction size.
+- `database.queryBatchSize`: lookup SQL parameter budget (at most 900). Generation staging has its own budget.
+- `database.generationSqlParameters: 8192`: requested bind-variable budget for staging statements, capped at SQLite's compiled variable ceiling (portable 999 ceiling if compile diagnostics omit it). Five columns per candidate means at most 1,638 rows per statement at the default. This does not change lookup query limits or transaction/checkpoint size.
+- `database.generationPreparedInserts: true`: reuse prepared staging inserts across flushes, with serialized bindings on the generation connection. Set `false` for a diagnostic comparison using ordinary SQL calls.
+- `database.generationStatementCacheEntries: 8`: bound the LRU by statement row-count shape, including varying tail batches. Statements are finalized on success, pause and failure, before output cleanup/compaction.
+- `database.generationSortStaging: false`: optional stable sorting by packed key/mask within each staging buffer. Equal-key tie order remains intact. Sorting is off because it did not improve the larger benchmark fixture consistently.
 - `database.generationReadRows: 4096`: maximum frontier rows consumed per transaction. Larger values amortize commits but increase staging space and work repeated after interruption.
 - `database.generationCacheMegabytes: 256`: suggested page-cache budget for each of the main and temporary databases (up to approximately twice this value, plus other allocations). This is separate from mmap. SQLite treats it as a cache suggestion, not a hard process memory limit.
 - `database.generationTempStore: "file"`: allow candidate staging to spill to disk. `"memory"` is opt-in and can consume substantial additional RAM; the page-cache setting does not bound an in-memory temporary database.
@@ -243,6 +247,48 @@ worker-seconds are not job wall time. These measurements help identify whether
 CPU expansion or database work limits a build. Extra CPU workers cannot eliminate
 a database bottleneck, and the defaults are conservative rather than a promise
 of linear speedup. Full 4-wire/5-gate build throughput has not been benchmarked.
+
+### Staging benchmarks
+
+```sh
+npm run benchmark:staging
+npm run benchmark:staging -- --smoke
+```
+
+The staging-only fixture uses four-variable/five-gate candidates produced by the
+expansion kernel. `benchmark.stagingRows` defaults to 200,000; `benchmark.repeats`
+controls repetitions, and `stagingOutputName` selects the JSON report under the
+data directory. Seven variants compare ordinary portable inserts, prepared
+portable inserts, ordinary/prepared larger batches, sorted prepared larger
+batches, and unsorted/sorted prepared wider batches. The portable budget comes
+from `database.queryBatchSize`, the larger budget from `generationSqlParameters`,
+and the wider budget from `benchmark.stagingWideSqlParameters` (16,384 by default).
+All respect the compiled SQLite ceiling. Smoke mode uses 2,000 rows and one
+repetition. It is included in `npm test` without a timing threshold.
+
+Trials rotate/reverse variant order, use fresh temporary tables and verify an
+identical complete staged-row digest, including cost/tie winners. Sorting and
+initial statement preparation are timed; setup, fixture generation, commit,
+validation and statement finalization are excluded. Reports include settings,
+per-trial samples, effective parameter limits and prepared-statement/cache counts.
+The writer/SQL-helper fingerprint identifies the measured compiled implementation.
+These same-process, shared-host trials do not establish cold-disk or full 4/5
+production throughput. A new statement budget changes SQL call grouping only;
+existing checkpoints can resume without regeneration.
+
+`benchmarks/results/2026-11-17-staging.json` records 36 staging-only trials and
+12 complete table builds. On the 500,000-candidate fixture, median staging time
+changed from about 3.57s with ordinary 900-parameter inserts to 2.75s with prepared
+8,192-parameter inserts. Sorting and the wider 16,384 budget did not improve the
+larger fixture consistently, so defaults retain unsorted prepared 8,192 batches.
+The smaller fixture was noisier and did not show prepared inserts winning every
+comparison; these are descriptive measurements on a shared host.
+
+Complete 3/4 and 4/3 builds used one expansion worker and three fresh processes
+per variant. Median creation time changed from about 2.50s to 2.28s and 15.79s to
+13.67s respectively, with identical complete coverage/cost digests. These timings
+include automatic cleanup and compaction, but exclude post-build validation.
+The 4/3 build has 832,167 functions; full production 4/5 gains remain unmeasured.
 
 ### Deduplication query scaling
 

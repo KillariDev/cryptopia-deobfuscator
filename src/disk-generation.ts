@@ -1,9 +1,10 @@
+import { StagingWriter, StagingRow } from './generation-staging.js'
 import { frontierCandidatesSQL, countNewFinalFunctionsSQL } from './generation-dedup.js'
 import sqlite3 from 'sqlite3'
 import { Gate } from './types.js'
 import { circuitState, encodeGates } from './semantic.js'
 import { hashGates } from './utils.js'
-import { runSQL, allSQL, insertRows } from './sql.js'
+import { runSQL, allSQL } from './sql.js'
 import { overallGenerationWork, GenerationProfile, SemanticProgress } from './generation-progress.js'
 import { ExpansionKernel } from './generation-expansion.js'
 import { GenerationPool } from './generation-pool.js'
@@ -12,7 +13,7 @@ import { generationSignature, packState, unpackState, usedWires } from './genera
 
 type Meta = { signature: string, depth: number, processed: number, total: number, functions: number }
 type Entry = { id: number, state: Buffer, mask: number, reads: number, gates: Buffer }
-export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
+export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
 
 const better = 'excluded.gateCount<InputOutputReplacers.gateCount OR (excluded.gateCount=InputOutputReplacers.gateCount AND (excluded.wireCount<InputOutputReplacers.wireCount OR (excluded.wireCount=InputOutputReplacers.wireCount AND excluded.readCount<InputOutputReplacers.readCount)))'
 // Rank exactly as isReplacementSimpler: gate count, distinct used wires, reads.
@@ -69,6 +70,8 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	}
 	const encoded = catalog.map(gate => encodeGates([gate])), kernel = new ExpansionKernel(wires, catalog), pool = new GenerationPool(workers, wires, catalog)
 	const layers = await allSQL<{ depth: number, total: number, processed: number }>(db, 'SELECT * FROM BuildLayers ORDER BY depth')
+	const staging = await StagingWriter.create(db, { parameterLimit: options.parameterLimit, cacheEntries: options.statementCacheEntries ?? 8, prepared: options.preparedInserts ?? true, sort: options.sortStaging ?? false })
+	let failed = false
 	let startDepth = meta.depth, startProcessed = meta.processed
 	const report = () => {
 		profile.elapsedMs = performance.now() - started; profile.workersUsed = pool.workerCount
@@ -99,14 +102,14 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 			await run('BEGIN IMMEDIATE')
 			try {
 				// Merge the input layer in bulk using the same exact cost ordering.
-				await phase('staging', () => insertRows(db, 'INSERT INTO BuildCandidates VALUES ', batch.map(entry => [entry.state, entry.mask, entry.reads, entry.gates, usedWires(entry.mask)]), '', options.parameterLimit))
+				await phase('staging', () => staging.write(batch.map<StagingRow>(entry => [entry.state, entry.mask, entry.reads, entry.gates, usedWires(entry.mask)])))
 				await phase('writing lookup', () => run(merge, [meta!.depth]))
 				await phase('staging', () => run('DELETE FROM BuildCandidates'))
 				const parents = batch.map(entry => ({ ...entry, state: unpackState(entry.state, wires) }))
-				let candidates: unknown[][] = []
+				let candidates: StagingRow[] = []
 				const flush = async () => {
 					if (!candidates.length) return
-					await phase('staging', () => insertRows(db, 'INSERT INTO BuildCandidates VALUES ', candidates, ' ON CONFLICT(state,mask) DO UPDATE SET reads=excluded.reads,gates=excluded.gates WHERE excluded.reads<BuildCandidates.reads', options.parameterLimit))
+					await phase('staging', () => staging.write(candidates))
 					candidates = []
 				}
 				const expanding = () => { profile.phase = 'expanding'; profile.phaseStarted = performance.now(); options.onProfile?.({ ...profile }) }
@@ -152,8 +155,10 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 		if (!options.keepState) { await run('DROP TABLE BuildFrontier'); await run('DROP TABLE BuildSeen') }
 		profile.phase = 'complete'; report()
 		return true
-	} finally {
-		await pool.close(); profile.elapsedMs = performance.now() - started; profile.workersUsed = pool.workerCount
+	} catch (error) { failed = true; throw error } finally {
+		const cleanup = await Promise.allSettled([staging.close(), pool.close()])
+		if (!failed) for (const result of cleanup) if (result.status === 'rejected') throw result.reason
+		profile.elapsedMs = performance.now() - started; profile.workersUsed = pool.workerCount
 		options.onProfile?.({ ...profile })
 	}
 }

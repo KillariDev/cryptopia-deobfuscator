@@ -13,7 +13,8 @@
 		"benchmark": "npx tsc && node dist/benchmark.js",
 		"optimize-prof": "npx tsc && node dist/launch.js --profile",
 		"benchmark:generation": "npx tsc && node dist/generation-benchmark.js",
-		"benchmark:dedup": "npx tsc && node dist/dedup-benchmark.js"
+		"benchmark:dedup": "npx tsc && node dist/dedup-benchmark.js",
+		"benchmark:staging": "npx tsc && node dist/staging-benchmark.js"
 	},
 	"keywords": [],
 	"author": "",
