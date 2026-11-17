@@ -10,7 +10,9 @@ const smoke = process.argv.includes('--smoke')
 const args = process.argv.slice(2).filter(arg => arg !== '--smoke')
 if (args.length && (args.length !== 2 || args[0] !== '--reference')) throw new Error('Usage: npm run benchmark:generation -- [--smoke] [--reference /path/to/compiled/reference/repository]')
 const currentRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const currentVariants: { name: string, root: string, append?: boolean, prefetch?: boolean, diagnostics?: boolean, compact?: boolean, writers?: number, batchRows?: number, parameters?: number }[] = config.benchmark.generationWriterComparison
+const currentVariants: { name: string, root: string, append?: boolean, prefetch?: boolean, diagnostics?: boolean, compact?: boolean, writers?: number, batchRows?: number, parameters?: number, countFinal?: boolean }[] = config.benchmark.generationFinalComparison
+	? [{ name: 'count-candidates', root: currentRoot, countFinal: false }, { name: 'count-inserts', root: currentRoot, countFinal: true }]
+	: config.benchmark.generationWriterComparison
 	? [
 		{ name: 'baseline', root: currentRoot, compact: false, writers: 1, batchRows: 3000, parameters: 8192 },
 		{ name: 'compact', root: currentRoot, compact: true, writers: 1, batchRows: 3000, parameters: 8192 },
@@ -32,7 +34,7 @@ mkdirSync(dirname(output), { recursive: true })
 const revision = (root: string) => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { try { return readFileSync(join(root, '.generation-reference-revision'), 'utf8').trim() } catch { return null } } }
 const runtimeFingerprint = (root: string) => {
 	const hash = createHash('sha256')
-	for (const file of ['generation-utilization', 'generation-shards', 'generation-diagnostics', 'generation-prefetch', 'sql-observer', 'generation-merge', 'generation-staging', 'generation-dedup', 'generation-finalize', 'disk-generation', 'generation-expansion', 'generation-storage', 'generation-pipeline', 'generation-pool', 'generation-progress', 'rainbowtable', 'semantic', 'sql', 'config']) {
+	for (const file of ['generation-final-lookup', 'generation-operations', 'generation-utilization', 'generation-shards', 'generation-diagnostics', 'generation-prefetch', 'sql-observer', 'generation-merge', 'generation-staging', 'generation-dedup', 'generation-finalize', 'disk-generation', 'generation-expansion', 'generation-storage', 'generation-pipeline', 'generation-pool', 'generation-progress', 'rainbowtable', 'semantic', 'sql', 'config']) {
 		try { hash.update(file); hash.update(readFileSync(join(root, 'dist', `${file}.js`))) } catch { hash.update('absent') }
 	}
 	return hash.digest('hex')
@@ -44,8 +46,9 @@ try {
 		for (const variant of repeat % 2 ? [...variants].reverse() : variants) {
 			const directory = mkdtempSync(join(temporary, 'trial-')), report = join(directory, 'result.json')
 			let settingsSource = variant.name === 'reference' ? join(variant.root, 'solver.config.json') : configPath
-			if (variant.append !== undefined || variant.prefetch !== undefined || variant.diagnostics !== undefined || variant.compact !== undefined) {
+			if (variant.append !== undefined || variant.prefetch !== undefined || variant.diagnostics !== undefined || variant.compact !== undefined || variant.countFinal !== undefined) {
 				const settings = structuredClone(config)
+				if (variant.countFinal !== undefined) settings.database.generationCountFinalInserts = variant.countFinal
 				if (variant.compact !== undefined) {
 					settings.database.generationCompactBindings = variant.compact
 					settings.database.generationStagingWriters = variant.writers!

@@ -901,3 +901,5 @@ await import('./generation-prefetch-test.js')
 await import('./generation-shards-test.js')
 
 await import('./generation-interval-test.js')
+
+await import('./generation-final-lookup-test.js')

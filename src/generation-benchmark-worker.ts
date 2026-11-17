@@ -32,7 +32,8 @@ const storageBytes = (root: string): number => {
 const sample = () => { peakBytes = Math.max(peakBytes, storageBytes(directory)) }
 const timer = setInterval(sample, 25), cpuStarted = process.cpuUsage(), started = performance.now()
 try {
-	const db = await createRainbowTable(wires, gates), generationMs = performance.now() - started, cpu = process.cpuUsage(cpuStarted)
+	let operations: unknown, profile: unknown
+	const db = await createRainbowTable(wires, gates, (value: unknown, activity: { operations?: unknown } | undefined) => { profile = value; operations = activity?.operations }), generationMs = performance.now() - started, cpu = process.cpuUsage(cpuStarted)
 	sample()
 	let rows = 0
 	const hash = createHash('sha256')
@@ -46,5 +47,5 @@ try {
 		} catch (error) { reject(error) }
 	}, (error: Error | null) => error ? reject(error) : resolve()))
 	await closeRainbowTable(db); sample()
-	writeFileSync(output, JSON.stringify({ wires, gates, workers, generationMs, cpuMs: (cpu.user + cpu.system) / 1000, rows, semanticCostDigest: hash.digest('hex'), peakDatabaseBytes: peakBytes, storageMeasurement: '25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks', finalFileBytes: fileSize(path), peakRssBytes: process.resourceUsage().maxRSS * 1024, settings, validation: 'all-replacements-exhaustive' }))
+	writeFileSync(output, JSON.stringify({ wires, gates, workers, generationMs, operations, profile, cpuMs: (cpu.user + cpu.system) / 1000, rows, semanticCostDigest: hash.digest('hex'), peakDatabaseBytes: peakBytes, storageMeasurement: '25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks', finalFileBytes: fileSize(path), peakRssBytes: process.resourceUsage().maxRSS * 1024, settings, validation: 'all-replacements-exhaustive' }))
 } finally { clearInterval(timer) }
