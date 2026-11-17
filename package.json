@@ -11,7 +11,8 @@
 		"benchmark:ablate": "npx tsc && node dist/benchmark.js --ablate",
 		"benchmark:cases": "npx tsc && node dist/benchmark-cases.js",
 		"benchmark": "npx tsc && node dist/benchmark.js",
-		"optimize-prof": "npx tsc && node dist/launch.js --profile"
+		"optimize-prof": "npx tsc && node dist/launch.js --profile",
+		"benchmark:generation": "npx tsc && node dist/generation-benchmark.js"
 	},
 	"keywords": [],
 	"author": "",

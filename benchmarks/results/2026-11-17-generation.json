@@ -1,0 +1,659 @@
+{
+  "date": "2026-11-17",
+  "referenceRevision": "e0eb2fb7189f2ef0492ca36a2d0d6e81e1276088",
+  "currentBaseRevision": "e0eb2fb7189f2ef0492ca36a2d0d6e81e1276088",
+  "currentWorkingTreeDirty": true,
+  "measuredRuntimeSha256": {
+    "reference": "a085566093a8a8afd738a45ccf1de3d7dec05e74044919f2db8539fb90f49ae5",
+    "current": "8e6d92a0d4bb17493ebe789ebde1365eb74c0c82c928df2956e5563cea085cbd"
+  },
+  "notes": [
+    "Fresh temporary databases and processes; three repetitions per group; alternating variant order.",
+    "Small portfolio and mid-size builds only; production 4-variable/5-gate build not measured.",
+    "Wall time measures table creation including worker startup and build cleanup, before validation and connection close.",
+    "Every stored replacement is exhaustively validated. Digests match coverage and replacement costs, not equally cheap sequence identity.",
+    "Peak database bytes are sampled database plus WAL/rollback-journal bytes; temporary staging and shared-memory files are excluded. Final file sizes are not vacuumed.",
+    "Peak RSS includes post-generation validation; host was shared, so timings are descriptive.",
+    "Production defaults and the baseline each use their own generation tuning; this is a combined change comparison, not individual feature ablations."
+  ],
+  "studies": [
+    {
+      "name": "small",
+      "trials": 36,
+      "databaseSettings": {
+        "reference": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "insertBatchSize": 1000000,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "keepGenerationState": false,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 1,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000
+        },
+        "current": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "insertBatchSize": 1000000,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "keepGenerationState": false,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 1,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full"
+        }
+      },
+      "groups": [
+        {
+          "wires": 3,
+          "gates": 3,
+          "workers": 1,
+          "variants": {
+            "reference": {
+              "samplesMs": [
+                689.6289429999999,
+                616.594721,
+                612.3400369999999
+              ],
+              "medianMs": 616.594721,
+              "rows": 12120,
+              "semanticCostDigest": "7d24773469aed0814c47ae58c3af5ca4f86654a82266a63a94784762745dcf74",
+              "finalFileBytes": [
+                1032192,
+                1032192,
+                1032192
+              ],
+              "peakDatabaseBytes": [
+                1274864,
+                1324088,
+                1270736
+              ]
+            },
+            "current": {
+              "samplesMs": [
+                305.06877,
+                299.877758,
+                311.223055
+              ],
+              "medianMs": 305.06877,
+              "rows": 12120,
+              "semanticCostDigest": "7d24773469aed0814c47ae58c3af5ca4f86654a82266a63a94784762745dcf74",
+              "finalFileBytes": [
+                430080,
+                430080,
+                430080
+              ],
+              "peakDatabaseBytes": [
+                679760,
+                679760,
+                679760
+              ]
+            }
+          },
+          "medianSpeedup": 2.021166312762857
+        },
+        {
+          "wires": 3,
+          "gates": 3,
+          "workers": 2,
+          "variants": {
+            "reference": {
+              "samplesMs": [
+                618.542203,
+                617.059841,
+                584.497437
+              ],
+              "medianMs": 617.059841,
+              "rows": 12120,
+              "semanticCostDigest": "7d24773469aed0814c47ae58c3af5ca4f86654a82266a63a94784762745dcf74",
+              "finalFileBytes": [
+                1032192,
+                1032192,
+                1032192
+              ],
+              "peakDatabaseBytes": [
+                1287152,
+                1324088,
+                1324088
+              ]
+            },
+            "current": {
+              "samplesMs": [
+                317.03391799999997,
+                301.578347,
+                290.124188
+              ],
+              "medianMs": 301.578347,
+              "rows": 12120,
+              "semanticCostDigest": "7d24773469aed0814c47ae58c3af5ca4f86654a82266a63a94784762745dcf74",
+              "finalFileBytes": [
+                430080,
+                430080,
+                430080
+              ],
+              "peakDatabaseBytes": [
+                679760,
+                679760,
+                679760
+              ]
+            }
+          },
+          "medianSpeedup": 2.046101277290972
+        },
+        {
+          "wires": 3,
+          "gates": 3,
+          "workers": 4,
+          "variants": {
+            "reference": {
+              "samplesMs": [
+                656.489509,
+                640.1445160000001,
+                621.990386
+              ],
+              "medianMs": 640.1445160000001,
+              "rows": 12120,
+              "semanticCostDigest": "7d24773469aed0814c47ae58c3af5ca4f86654a82266a63a94784762745dcf74",
+              "finalFileBytes": [
+                1032192,
+                1032192,
+                1032192
+              ],
+              "peakDatabaseBytes": [
+                1287152,
+                1324088,
+                1287152
+              ]
+            },
+            "current": {
+              "samplesMs": [
+                302.509508,
+                305.552905,
+                319.19626
+              ],
+              "medianMs": 305.552905,
+              "rows": 12120,
+              "semanticCostDigest": "7d24773469aed0814c47ae58c3af5ca4f86654a82266a63a94784762745dcf74",
+              "finalFileBytes": [
+                430080,
+                430080,
+                430080
+              ],
+              "peakDatabaseBytes": [
+                679760,
+                679760,
+                679760
+              ]
+            }
+          },
+          "medianSpeedup": 2.0950365894901246
+        },
+        {
+          "wires": 4,
+          "gates": 2,
+          "workers": 1,
+          "variants": {
+            "reference": {
+              "samplesMs": [
+                559.25557,
+                579.774238,
+                582.315444
+              ],
+              "medianMs": 579.774238,
+              "rows": 13435,
+              "semanticCostDigest": "27b06abdad17ed1948c318ef98521687bda8e227fa1a2b03fa2c36610a933c4f",
+              "finalFileBytes": [
+                1490944,
+                1490944,
+                1490944
+              ],
+              "peakDatabaseBytes": [
+                1688448,
+                1692552,
+                1688448
+              ]
+            },
+            "current": {
+              "samplesMs": [
+                250.810198,
+                253.857398,
+                247.36147799999998
+              ],
+              "medianMs": 250.810198,
+              "rows": 13435,
+              "semanticCostDigest": "27b06abdad17ed1948c318ef98521687bda8e227fa1a2b03fa2c36610a933c4f",
+              "finalFileBytes": [
+                434176,
+                434176,
+                434176
+              ],
+              "peakDatabaseBytes": [
+                589120,
+                589120,
+                589120
+              ]
+            }
+          },
+          "medianSpeedup": 2.3116055193258127
+        },
+        {
+          "wires": 4,
+          "gates": 2,
+          "workers": 2,
+          "variants": {
+            "reference": {
+              "samplesMs": [
+                567.351682,
+                592.202043,
+                571.564627
+              ],
+              "medianMs": 571.564627,
+              "rows": 13435,
+              "semanticCostDigest": "27b06abdad17ed1948c318ef98521687bda8e227fa1a2b03fa2c36610a933c4f",
+              "finalFileBytes": [
+                1490944,
+                1490944,
+                1490944
+              ],
+              "peakDatabaseBytes": [
+                1688448,
+                1688448,
+                1692552
+              ]
+            },
+            "current": {
+              "samplesMs": [
+                266.126751,
+                259.363253,
+                245.76657100000003
+              ],
+              "medianMs": 259.363253,
+              "rows": 13435,
+              "semanticCostDigest": "27b06abdad17ed1948c318ef98521687bda8e227fa1a2b03fa2c36610a933c4f",
+              "finalFileBytes": [
+                434176,
+                434176,
+                434176
+              ],
+              "peakDatabaseBytes": [
+                589120,
+                589120,
+                589120
+              ]
+            }
+          },
+          "medianSpeedup": 2.2037224641071265
+        },
+        {
+          "wires": 4,
+          "gates": 2,
+          "workers": 4,
+          "variants": {
+            "reference": {
+              "samplesMs": [
+                560.147027,
+                563.428358,
+                588.3728219999999
+              ],
+              "medianMs": 563.428358,
+              "rows": 13435,
+              "semanticCostDigest": "27b06abdad17ed1948c318ef98521687bda8e227fa1a2b03fa2c36610a933c4f",
+              "finalFileBytes": [
+                1490944,
+                1490944,
+                1490944
+              ],
+              "peakDatabaseBytes": [
+                1688448,
+                1688448,
+                1688448
+              ]
+            },
+            "current": {
+              "samplesMs": [
+                247.578049,
+                256.759001,
+                248.83535999999998
+              ],
+              "medianMs": 248.83535999999998,
+              "rows": 13435,
+              "semanticCostDigest": "27b06abdad17ed1948c318ef98521687bda8e227fa1a2b03fa2c36610a933c4f",
+              "finalFileBytes": [
+                434176,
+                434176,
+                434176
+              ],
+              "peakDatabaseBytes": [
+                589120,
+                589120,
+                589120
+              ]
+            }
+          },
+          "medianSpeedup": 2.2642616306621375
+        }
+      ]
+    },
+    {
+      "name": "larger",
+      "trials": 24,
+      "databaseSettings": {
+        "reference": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "insertBatchSize": 1000000,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "keepGenerationState": false,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 1,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000
+        },
+        "current": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "insertBatchSize": 1000000,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "keepGenerationState": false,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 1,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full"
+        }
+      },
+      "groups": [
+        {
+          "wires": 3,
+          "gates": 4,
+          "workers": 1,
+          "variants": {
+            "reference": {
+              "samplesMs": [
+                3293.863521,
+                3241.484573,
+                3486.1743539999998
+              ],
+              "medianMs": 3293.863521,
+              "rows": 38016,
+              "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+              "finalFileBytes": [
+                3026944,
+                3026944,
+                3026944
+              ],
+              "peakDatabaseBytes": [
+                3782640,
+                3782640,
+                3782640
+              ]
+            },
+            "current": {
+              "samplesMs": [
+                2333.96051,
+                2303.2912389999997,
+                2411.120614
+              ],
+              "medianMs": 2333.96051,
+              "rows": 38016,
+              "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+              "finalFileBytes": [
+                1671168,
+                1671168,
+                1671168
+              ],
+              "peakDatabaseBytes": [
+                3926320,
+                3926320,
+                3926320
+              ]
+            }
+          },
+          "medianSpeedup": 1.4112764577152166
+        },
+        {
+          "wires": 3,
+          "gates": 4,
+          "workers": 4,
+          "variants": {
+            "reference": {
+              "samplesMs": [
+                3150.648487,
+                3376.134981,
+                3470.247367
+              ],
+              "medianMs": 3376.134981,
+              "rows": 38016,
+              "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+              "finalFileBytes": [
+                3026944,
+                3026944,
+                3026944
+              ],
+              "peakDatabaseBytes": [
+                3700592,
+                3803192,
+                3782640
+              ]
+            },
+            "current": {
+              "samplesMs": [
+                2325.617786,
+                2520.73572,
+                2536.589113
+              ],
+              "medianMs": 2520.73572,
+              "rows": 38016,
+              "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+              "finalFileBytes": [
+                1671168,
+                1671168,
+                1671168
+              ],
+              "peakDatabaseBytes": [
+                3926320,
+                3926320,
+                3926320
+              ]
+            }
+          },
+          "medianSpeedup": 1.3393450785868184
+        },
+        {
+          "wires": 4,
+          "gates": 3,
+          "workers": 1,
+          "variants": {
+            "reference": {
+              "samplesMs": [
+                35420.828292,
+                35726.543633,
+                46836.172346
+              ],
+              "medianMs": 35726.543633,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "finalFileBytes": [
+                93442048,
+                93442048,
+                93442048
+              ],
+              "peakDatabaseBytes": [
+                99493920,
+                99493920,
+                99493920
+              ]
+            },
+            "current": {
+              "samplesMs": [
+                14654.063266,
+                14888.393471,
+                15806.137695
+              ],
+              "medianMs": 14888.393471,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "finalFileBytes": [
+                27025408,
+                27025408,
+                27025408
+              ],
+              "peakDatabaseBytes": [
+                41564920,
+                41564920,
+                41564920
+              ]
+            }
+          },
+          "medianSpeedup": 2.399623821239618
+        },
+        {
+          "wires": 4,
+          "gates": 3,
+          "workers": 4,
+          "variants": {
+            "reference": {
+              "samplesMs": [
+                38356.334374,
+                33064.632437,
+                33402.63932
+              ],
+              "medianMs": 33402.63932,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "finalFileBytes": [
+                93442048,
+                93442048,
+                93442048
+              ],
+              "peakDatabaseBytes": [
+                99493920,
+                99493920,
+                99493920
+              ]
+            },
+            "current": {
+              "samplesMs": [
+                16581.346622999998,
+                14961.546109,
+                14720.288403
+              ],
+              "medianMs": 14961.546109,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "finalFileBytes": [
+                27025408,
+                27025408,
+                27025408
+              ],
+              "peakDatabaseBytes": [
+                41564920,
+                41564920,
+                41564920
+              ]
+            }
+          },
+          "medianSpeedup": 2.232566011336683
+        }
+      ]
+    }
+  ]
+}

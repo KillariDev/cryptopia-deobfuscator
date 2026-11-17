@@ -38,6 +38,7 @@ const runTests = () => {
 runTests()
 // Exhaustive/reference regressions for the optimized hot paths.
 import assert from 'node:assert/strict'
+import { generationLookupSchema } from './generation-storage.js'
 const { calculateAllOutputsArray, evalCircuit, generateCombinations, getVars } = await import('./utils.js')
 const { createDependencyGraph } = await import('./lineswapper.js')
 const { shuffleRowsWithDependentGateSwap, optimize, createOptimizerCaches } = await import('./processing.js')
@@ -542,7 +543,6 @@ assert.throws(() => parseConfig({ synthesis: { maximumWires: 5 } }))
 
 const { generateOnDisk } = await import('./disk-generation.js')
 const { runSQL, allSQL } = await import('./sql.js')
-const { storeReplacers } = await import('./rainbowtable.js')
 const diskDirectory = await mkdtemp(join(tmpdir(), 'deobfuscator-frontier-'))
 const options = { readRows: 2, stageRows: 3, parameterLimit: 20, stateLimit: 0, keepState: false }
 const expectedEntries = new Map<string, Gate[]>()
@@ -553,7 +553,7 @@ for (const sequence of brute) {
 }
 const openBuild = async (filename: string) => {
 	const db = new sqlite3.Database(filename)
-	await runSQL(db, 'CREATE TABLE IF NOT EXISTS InputOutputReplacers (ioIdentifier BLOB PRIMARY KEY, replacerGates BLOB NOT NULL)')
+	await runSQL(db, generationLookupSchema)
 	return db
 }
 const closeBuild = closeRainbowTable
@@ -571,29 +571,26 @@ try {
 	const path = join(diskDirectory, 'resume.db')
 	let db = await openBuild(path)
 	let polls = 0
-	assert.equal(await generateOnDisk(db, 2, 3, catalog, options, entries => storeReplacers(db, entries, true), undefined, () => ++polls > 3), false)
+	assert.equal(await generateOnDisk(db, 2, 3, catalog, options, undefined, () => ++polls > 3), false)
 	const checkpoint = (await allSQL<{ depth: number, processed: number }>(db, 'SELECT depth,processed FROM BuildMeta'))[0]
 	assert.equal(checkpoint.depth, 1)
 	assert.ok(checkpoint.processed > 0)
 	await closeBuild(db)
 	db = await openBuild(path)
-	assert.equal(await generateOnDisk(db, 2, 3, catalog, options, entries => storeReplacers(db, entries, true)), true)
+	assert.equal(await generateOnDisk(db, 2, 3, catalog, options), true)
 	await checkBuild(db)
 	assert.equal((await allSQL(db, "SELECT name FROM sqlite_master WHERE name IN ('BuildSeen','BuildFrontier')")).length, 0)
 	await closeBuild(db)
 	const failure = await openBuild(join(diskDirectory, 'rollback.db'))
-	await assert.rejects(generateOnDisk(failure, 2, 3, catalog, options, async entries => {
-		await storeReplacers(failure, entries, true)
-		throw new Error('injected write failure')
-	}), /injected write failure/)
+	await assert.rejects(generateOnDisk(failure, 2, 3, catalog, { ...options, beforeCommit: async () => { throw new Error('injected write failure') } }), /injected write failure/)
 	assert.equal((await allSQL(failure, 'SELECT * FROM InputOutputReplacers')).length, 0)
 	assert.equal((await allSQL<{ processed: number }>(failure, 'SELECT processed FROM BuildMeta'))[0].processed, 0)
-	await generateOnDisk(failure, 2, 3, catalog, options, entries => storeReplacers(failure, entries, true))
+	await generateOnDisk(failure, 2, 3, catalog, options)
 	await checkBuild(failure)
 	await closeBuild(failure)
 	const limited = await openBuild(join(diskDirectory, 'limited.db'))
-	await assert.rejects(generateOnDisk(limited, 2, 3, catalog, { ...options, stateLimit: 1 }, entries => storeReplacers(limited, entries, true)), /state limit/)
-	await generateOnDisk(limited, 2, 3, catalog, options, entries => storeReplacers(limited, entries, true))
+	await assert.rejects(generateOnDisk(limited, 2, 3, catalog, { ...options, stateLimit: 1 }), /state limit/)
+	await generateOnDisk(limited, 2, 3, catalog, options)
 	await checkBuild(limited)
 	await closeBuild(limited)
 
@@ -618,7 +615,7 @@ assert.match(paused.update(layer(10), 300000), /waiting for progress/)
 const resumedETA = new GenerationEstimator(5, 3, .2)
 assert.match(resumedETA.update(layer(9000), 0), /learning/)
 assert.match(resumedETA.update(layer(9010), 60000), /learning/)
-assert.match(formatGenerationProgress(layer(5000), 1000, '~5m'), /50.00%.*layer ETA ~5m.*overall ETA unavailable/)
+assert.equal(formatGenerationProgress({ ...layer(5000), overallDone: 5000, overallTotal: 10000, overallEstimated: true }, 1000, '~5m'), 'Rainbow generation: ~50.00% complete | ETA ~5m')
 assert.throws(() => parseConfig({ database: { etaSmoothing: 2 } }))
 assert.throws(() => parseConfig({ database: { etaWarmupSamples: 10, etaWindowSamples: 5 } }))
 assert.throws(() => parseConfig({ database: { format: 'legacy' } }))
@@ -892,3 +889,4 @@ await import('./search-reuse-test.js')
 await import('./work-elimination-test.js')
 await import('./resource-search-test.js')
 await import('./benchmark-regression-test.js')
+await import('./generation-benchmark-test.js')

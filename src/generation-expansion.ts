@@ -1,5 +1,6 @@
 import { Gate } from './types.js'
 import { getVars } from './utils.js'
+import { packState } from './generation-storage.js'
 
 export type ExpansionParent = { state: Uint8Array, mask: number, reads: number }
 export type ExpansionTask = { parents: ArrayBuffer, gateStart: number, gateEnd: number }
@@ -40,8 +41,14 @@ export class ExpansionKernel {
 		const started = performance.now(), stride = this.stateBytes + 8
 		if (parents.byteLength % stride || !Number.isInteger(gateStart) || !Number.isInteger(gateEnd) || gateStart < 0 || gateEnd > this.gates.length || gateEnd < gateStart) throw new Error('Invalid expansion task')
 		const view = new DataView(parents)
-		const candidates = new Map<string, { state: Buffer, parent: number, gate: number, mask: number, reads: number }>()
-		const scratch = Buffer.allocUnsafe(this.stateBytes)
+		const maximum = parents.byteLength / stride * (gateEnd - gateStart)
+		if (!Number.isSafeInteger(maximum) || maximum > 0x1fffffff) throw new Error('Expansion task exceeds supported capacity')
+		let capacity = 1
+		while (capacity < maximum * 2) capacity *= 2
+		const slots = new Int32Array(capacity), outputStride = this.stateBytes + 16
+		const output = new ArrayBuffer(maximum * outputStride), bytes = new Uint8Array(output), result = new DataView(output)
+		const scratch = new Uint8Array(this.stateBytes)
+		let count = 0
 		let attempts = 0
 		for (let parent = 0; parent < parents.byteLength / stride; parent++) {
 			const offset = parent * stride, state = new Uint8Array(parents, offset, this.stateBytes)
@@ -51,32 +58,33 @@ export class ExpansionKernel {
 				const gate = this.gates[index], mask = parentMask | gate.mask, reads = parentReads + gate.reads
 				if (reads > 0xffffffff) throw new Error('Expansion read cost exceeds supported range')
 				for (let i = 0; i < state.length; i++) scratch[i] = gate.transitions[state[i]]
-				const key = `${scratch.toString('hex')}:${mask}`, prior = candidates.get(key)
-				if (!prior || reads < prior.reads) candidates.set(key, { state: Buffer.from(scratch), parent, gate: index, mask, reads })
+				let hash = 2166136261
+				for (const value of scratch) hash = Math.imul(hash ^ value, 16777619)
+				hash = Math.imul(hash ^ mask, 16777619)
+				let slot = hash & (capacity - 1), candidate = -1
+				while (slots[slot]) {
+					const index = slots[slot] - 1, offset = index * outputStride
+					let equal = result.getUint32(offset + this.stateBytes + 8, true) === mask
+					for (let i = 0; equal && i < scratch.length; i++) equal = bytes[offset + i] === scratch[i]
+					if (equal) { candidate = index; break }
+					slot = (slot + 1) & (capacity - 1)
+				}
+				if (candidate === -1) {
+					candidate = count++; slots[slot] = candidate + 1
+					bytes.set(scratch, candidate * outputStride)
+				} else if (reads >= result.getUint32(candidate * outputStride + this.stateBytes + 12, true)) continue
+				const position = candidate * outputStride + this.stateBytes
+				result.setUint32(position, parent, true)
+				result.setUint32(position + 4, index, true)
+				result.setUint32(position + 8, mask, true)
+				result.setUint32(position + 12, reads, true)
 			}
 		}
-		// Gate sequences stay in the writer. Only surviving parent/gate references cross threads.
-		const outputStride = this.stateBytes + 16, output = new ArrayBuffer(candidates.size * outputStride), result = new DataView(output)
-		let offset = 0
-		for (const candidate of candidates.values()) {
-			new Uint8Array(output, offset, this.stateBytes).set(candidate.state)
-			result.setUint32(offset + this.stateBytes, candidate.parent, true)
-			result.setUint32(offset + this.stateBytes + 4, candidate.gate, true)
-			result.setUint32(offset + this.stateBytes + 8, candidate.mask, true)
-			result.setUint32(offset + this.stateBytes + 12, candidate.reads, true)
-			offset += outputStride
-		}
-		return { candidates: output, count: candidates.size, attempts, expansionMs: performance.now() - started }
+		return { candidates: output.slice(0, count * outputStride), count, attempts, expansionMs: performance.now() - started }
 	}
 }
 
 /** Pack a truth-table state directly, without expanding it into boolean objects. */
 export function stateIdentifier(state: Uint8Array, wires: number) {
-	const packed = Buffer.alloc(Math.ceil(state.length * wires / 8))
-	for (let i = 0; i < state.length; i++) {
-		const bit = i * wires, shift = bit & 7
-		packed[bit >>> 3] |= state[i] << shift
-		if (shift + wires > 8) packed[(bit >>> 3) + 1] |= state[i] >>> (8 - shift)
-	}
-	return packed.toString('hex')
+	return packState(state, wires).toString('hex')
 }

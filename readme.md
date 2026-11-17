@@ -151,7 +151,12 @@ There is one table format and one generator. Tables are named
 `rainbow_<wires>_<gates>.db` under `files.databaseDirectory`. The solver initializes
 every configured table sequentially before starting optimization. Missing tables
 are generated; completed tables are used as-is.
-Interrupted builds resume automatically. There is no migration, rebuild command,
+Interrupted builds made by this generator resume automatically. The packed/direct
+format uses a new build signature and cost columns. Earlier completed tables and
+unfinished builds are rejected without migration: keep their files and finish
+them with their original version, or choose a fresh `files.databaseDirectory`.
+Installing this version cannot resume an earlier unpacked build.
+There is no migration, rebuild command,
 format selector, or compatibility mode for older hash tables.
 
 The table uses exact packed truth-table BLOB keys, binary gate payloads and
@@ -167,10 +172,27 @@ shorter continuations correctly. Frontiers, visited functions and committed
 progress live in SQLite. Each bounded batch writes its results and advances
 its frontier in the same transaction, so a failed/interrupted batch can be retried.
 Database inserts use multi-row statements, not a JavaScript await for every row.
+Build keys use the packed lookup representation (8 bytes for four wires, rather
+than 16 unpacked bytes). Expansion workers retain unpacked states for fast gate
+transitions, with exact open-addressed deduplication over typed buffers instead
+of allocating a hexadecimal string/object for each candidate. Hash matches are
+checked against all state bytes and the used-wire mask.
 
-Generation settings:
+The last expansion layer merges candidates directly into the lookup table;
+there is no final-depth visited/frontier write followed by a separate drain.
+A SQL merge ranks candidates by gate count, distinct used wires, then read count,
+matching the solver's replacement ordering. Those three integer cost columns
+remain in the output table so resumed generation can compare candidates without
+fetching and decoding existing gate payloads in JavaScript.
 
-- `database.queryBatchSize`: maximum frontier rows read per batch and the SQL parameter budget (at most 900).
+Generation settings (the obsolete `insertBatchSize` setting has been removed):
+
+- `database.queryBatchSize`: SQL parameter budget (at most 900), independent of generation transaction size.
+- `database.generationReadRows: 4096`: maximum frontier rows consumed per transaction. Larger values amortize commits but increase staging space and work repeated after interruption.
+- `database.generationCacheMegabytes: 256`: suggested page-cache budget for each of the main and temporary databases (up to approximately twice this value, plus other allocations). This is separate from mmap. SQLite treats it as a cache suggestion, not a hard process memory limit.
+- `database.generationTempStore: "file"`: allow candidate staging to spill to disk. `"memory"` is opt-in and can consume substantial additional RAM; the page-cache setting does not bound an in-memory temporary database.
+- `database.generationJournalMode: "wal"`: build journal mode; `"delete"` is also supported.
+- `database.generationSynchronous: "full"`: conservative commit durability. `"normal"` is configurable; in WAL mode it can lose recent committed transactions on power loss, while application interruption remains resumable. No unsafe `OFF` setting is provided.
 - `database.generationBatchRows`: maximum raw candidate expansions per CPU task and maximum rows staged in JavaScript before a bulk SQL write. The gate catalog is split too if it exceeds this limit.
 - `database.generationStates`: optional distinct-function limit; `0` means unlimited disk-backed generation. Hitting a limit rolls back the current batch; increase the limit or set it to `0`, then restart to resume.
 - `database.keepGenerationState`: retain working tables after completion for inspection. By default they are dropped; SQLite may retain freed pages in the database file.
@@ -197,23 +219,25 @@ batch before updating the global visited set and frontier, rather than updating
 both for each small staging flush. The result rows, frontier changes and resume
 position still commit in one transaction. Worker errors, write failures, and
 state-limit errors roll back the active batch; earlier commits remain resumable.
-No table-format change or regeneration is required for this optimization.
+The packed/direct build format requires fresh tables; existing files are never converted or deleted.
 
 Settings under `database`:
 
 - `generationWorkers: 4`: maximum CPU slots, capped at available CPUs minus one (minimum one). A value of `1` runs the same optimized expansion in the writer process without worker threads. Threads start lazily and persist for the table build.
-- `generationQueueBatches: 2`: maximum outstanding tasks per CPU slot, including running tasks and completed results awaiting consumption. Together with `generationBatchRows`, this bounds expansion buffering; the writer can additionally retain one staging buffer and the current `queryBatchSize` frontier rows.
+- `generationQueueBatches: 2`: maximum outstanding tasks per CPU slot, including running tasks and completed results awaiting consumption. Together with `generationBatchRows`, this bounds expansion buffering; the writer can additionally retain one staging buffer and the current `generationReadRows` frontier rows.
 - `generationMinimumWork: 100000`: batches below this many raw candidate expansions run inline. This avoids worker startup and message overhead for small tables and small layers. Lower it to exercise parallel expansion on smaller batches.
 
 A task contains at most `generationBatchRows` raw expansions. SQLite's temporary
-candidate table uses `temp_store=FILE` so staging can spill to disk (subject to
-the SQLite build). It can hold up to `queryBatchSize × gate catalog size` distinct
+candidate table defaults to `temp_store=FILE` so staging can spill to disk (subject
+to the SQLite build). It can hold up to `generationReadRows × gate catalog size` distinct
 candidates for a committed read batch; increasing frontier batch size can increase
 temporary database space and time between checkpoints. State-limit enforcement
 occurs after staging this batch, before commit. Different table files are not
 built concurrently.
 
-With verbose logging enabled, generation completion reports expanded/emitted
+With verbose logging enabled, periodic diagnostics separate staging, deduplication,
+lookup writing, reads and commit time, and name the active phase.
+Generation completion also reports expanded/emitted
 candidate counts, aggregate expansion worker-seconds, database work time, writer
 wait for expansion, thread count, and peak pending tasks. Timings can overlap;
 worker-seconds are not job wall time. These measurements help identify whether
@@ -266,18 +290,60 @@ Normal progress stays compact.
 
 ### Stable generation progress
 
-Updates follow `timing.databaseLogSeconds`. They show depth, the current layer's
-completion percentage, functions indexed on disk and elapsed time for this run.
-The layer ETA warms up for `database.etaWarmupSamples` reports, uses a rolling
-median over `database.etaWindowSamples` rates, then smooths that rate with
-`database.etaSmoothing` (lower values react more slowly). Layer changes reset the
-estimate. Work committed before a restart contributes to percentage completion
-but is not treated as work performed during the new timing sample.
+Updates follow `timing.databaseLogSeconds` and show just one overall percentage
+and one ETA, for example:
 
-An ETA is still approximate. Future layer sizes depend on deduplication, so an
-overall ETA is explicitly unavailable rather than extrapolated from unstable
-sequence-space coverage. Stalls are labeled as waiting for progress after the
-sampling window fills with zero rates. Completion is logged after final writes.
+```text
+Rainbow generation: ~7.27% complete | ETA ~19d 11h
+```
+
+The percentage measures committed input-row work across all expansion layers,
+rather than completion of the current layer. Before all layer sizes are known,
+future sizes are projected from the latest observed growth ratio (initially the
+gate catalog size); `~` marks that estimated denominator. Estimates can move
+backward when a larger frontier is discovered. At the final expansion layer,
+all input totals are known and the percentage uses those measured totals. With
+direct final-layer writing, there is no separate final frontier-draining phase.
+This is a work percentage, not an exact fraction of elapsed runtime.
+
+The single ETA multiplies estimated remaining input work by the current layer's
+observed processing time per row. It warms up for `database.etaWarmupSamples`
+reports, uses a rolling median over `database.etaWindowSamples`, then smooths the
+rate with `database.etaSmoothing`. Layer transitions reset speed learning because
+processing cost can change. Estimates remain approximate, especially early on.
+Per-layer totals and committed progress survive a restart; speed samples relearn
+without counting pre-restart work as new processing. Stalls are labeled as
+waiting for progress. `100.00%` is reported after build-table cleanup succeeds.
+Phase timings and other internal counters appear only with verbose logging.
+
+### Generation benchmarks
+
+```sh
+npm run benchmark:generation
+npm run benchmark:generation -- --smoke
+npm run benchmark:generation -- --reference /absolute/path/to/compiled/reference/repository
+```
+
+`benchmark.generationTables` defaults to 3-wire/3-gate and 4-wire/2-gate fixtures.
+`benchmark.repeats` and `benchmark.workerCounts` set the repeated build matrix;
+`benchmark.generationTimeoutSeconds` bounds each child process. Smoke mode uses
+2-wire/2-gate and 2-wire/3-gate tables, one repetition and 1/2 workers. Every trial
+uses a fresh temporary database and process; it never touches the production
+portfolio. The current variant honors the selected `OPTIMIZER_CONFIG`; an
+optional reference repository uses its own JSON settings and compiled `dist`.
+The reference is a benchmark-only comparison, not a production compatibility mode.
+
+The report under `files.dataDirectory` / `benchmark.generationOutputName` records
+settings, revisions, dirty-working-tree state, a compiled-generator fingerprint, build duration, row count, sampled peak database/journal
+bytes, final file bytes, and peak process RSS (including output validation).
+Temporary staging-file space is not included in the sampled database total.
+All output replacements are checked exhaustively against their keys. A digest
+compares complete coverage and replacement costs across variants, repetitions,
+and worker counts, allowing different equally cheap gate sequences. Validation
+runs after the measured generation interval. Alternating variant order reduces
+ordering bias; small fixtures do not establish production 4/5 throughput.
+`npm test` includes a fresh-process generation-benchmark smoke regression, with
+no machine-dependent speed threshold.
 
 ## Bounded local synthesis
 
@@ -589,3 +655,21 @@ absolute rates rather than interpreting one aggregate as a universal speedup.
 These runs mostly exercise initial jobs and do not establish the long-running
 benefit of persistent scheduler learning. The small deterministic cases prove
 function preservation and simple rewrite coverage, not production throughput.
+
+### Recorded generation comparison
+
+`benchmarks/results/2026-11-17-generation.json` records 60 fresh builds against
+main revision `e0eb2fb`: three repetitions with alternating reference/current
+order. Small fixtures (3/3 and 4/2) used 1/2/4 configured workers; larger fixtures
+(3/4 and 4/3) used 1/4. The 4/3 builds produced 832,167 verified functions, with
+median build times of approximately 35.7s → 14.9s at one worker and 33.4s → 15.0s
+at four. The 3/4 medians improved approximately 1.3–1.4×; smaller fixtures improved
+approximately 2.0–2.3×. Every coverage/cost digest matched across implementations
+and worker counts. File sizes were also smaller in these fixtures, before vacuum.
+
+These are combined changes on a shared host, not isolated-feature estimates or
+significance tests. They do not establish throughput or final size for the full
+4-variable/5-gate build. Per-trial samples and database controls are included in
+the summary. Measurements preceded removal of the unused `insertBatchSize` knob
+and minor validation/progress-only cleanup; measured compiled fingerprints are
+retained separately from the base git revision.

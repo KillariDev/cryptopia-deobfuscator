@@ -1,3 +1,4 @@
+import { generationLookupSchema, generationSignature } from './generation-storage.js'
 import { LookupStatements } from './lookup-statements.js'
 import { LookupBatcher } from './lookup-batcher.js'
 import { join } from 'path'
@@ -5,13 +6,13 @@ import { availableParallelism } from 'os'
 import { logVerbose } from './logging.js'
 import sqlite3 from 'sqlite3'
 import { config } from './config.js'
-import { Gate, InputOutputReplacer } from './types.js'
-import { encodeGates, decodeGates } from './semantic.js'
+import { Gate } from './types.js'
+import { decodeGates } from './semantic.js'
 import { LimitedMap } from './limitedMap.js'
-import { isReplacementSimpler, logTimed, hashGates } from './utils.js'
-import { runSQL, allSQL, insertRows } from './sql.js'
+import { logTimed, hashGates } from './utils.js'
+import { runSQL, allSQL } from './sql.js'
 import { generateOnDisk } from './disk-generation.js'
-import { GenerationEstimator, formatGenerationProgress, generationDuration, GenerationProfile, SemanticProgress } from './generation-progress.js'
+import { GenerationEstimator, formatGenerationProgress, generationDuration, GenerationProfile, SemanticProgress, formatGenerationProfile } from './generation-progress.js'
 
 export const databaseFilename = (wires: number, gates: number) => join(config.files.databaseDirectory, `rainbow_${wires}_${gates}.db`)
 const keyToSql = (key: string) => Buffer.from(key, 'hex')
@@ -27,34 +28,6 @@ export const getRainbowTable = (wires: number, gates: number) => {
 	return db
 }
 export const isEmpty = async (db: sqlite3.Database) => !(await allSQL(db, 'SELECT 1 FROM InputOutputReplacers LIMIT 1')).length
-
-export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string, InputOutputReplacer>, withinTransaction = false) => {
-	const best = new Map<string, Gate[]>()
-	for (const { ioIdentifier, replacerGates } of replacers.values()) {
-		const prior = best.get(ioIdentifier)
-		if (!prior || isReplacementSimpler(replacerGates, prior)) best.set(ioIdentifier, replacerGates)
-	}
-	const ids = [...best.keys()]
-	for (let offset = 0; offset < ids.length; offset += config.database.insertBatchSize) {
-		const transactionIds = ids.slice(offset, offset + config.database.insertBatchSize)
-		if (!withinTransaction) await runSQL(db, 'BEGIN IMMEDIATE')
-		try {
-			const existing = new Map<string, Gate[]>()
-			for (let i = 0; i < transactionIds.length; i += config.database.queryBatchSize) {
-				const chunk = transactionIds.slice(i, i + config.database.queryBatchSize)
-				const rows = await allSQL<{ ioIdentifier: Buffer, replacerGates: Buffer }>(db, 'SELECT ioIdentifier,replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + chunk.map(() => '?').join(',') + ')', chunk.map(keyToSql))
-				for (const row of rows) existing.set(rowKey(row.ioIdentifier), decodeGates(row.replacerGates))
-			}
-			const inserts: unknown[][] = []
-			for (const id of transactionIds) {
-				const gates = best.get(id)!
-				if (!existing.has(id) || isReplacementSimpler(gates, existing.get(id)!)) inserts.push([keyToSql(id), encodeGates(gates)])
-			}
-			await insertRows(db, 'INSERT OR REPLACE INTO InputOutputReplacers VALUES ', inserts, '', config.database.queryBatchSize)
-			if (!withinTransaction) await runSQL(db, 'COMMIT')
-		} catch (error) { if (!withinTransaction) await runSQL(db, 'ROLLBACK'); throw error }
-	}
-}
 
 
 const lookupBatchers = new WeakMap<sqlite3.Database, LookupBatcher>()
@@ -75,7 +48,7 @@ export async function hasCanonicalCoverage(db: sqlite3.Database, wires: number, 
 		if (names.length !== 2) return false
 		const status = await allSQL<{ complete: number }>(db, 'SELECT complete FROM GenerationStatus WHERE id=1')
 		const meta = await allSQL<{ signature: string, depth: number }>(db, 'SELECT signature,depth FROM BuildMeta WHERE id=1')
-		return status[0]?.complete === 1 && meta[0]?.depth > gates && meta[0]?.signature === `labeled-sorted-v1:${wires}:${gates}:${hashGates([...generateAllGates(wires)])}`
+		return status[0]?.complete === 1 && meta[0]?.depth > gates && meta[0]?.signature === generationSignature(wires, gates, hashGates([...generateAllGates(wires)]))
 	} catch { return false }
 }
 
@@ -164,12 +137,16 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 	const db = getRainbowTable(wires, gates)
 	await databaseReady(db)
 	try {
-		await runSQL(db, 'CREATE TABLE IF NOT EXISTS InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
+		const columns = await allSQL<{ name: string }>(db, 'PRAGMA table_info(InputOutputReplacers)')
+		if (columns.length && !['gateCount', 'wireCount', 'readCount'].every(name => columns.some(column => column.name === name))) throw new Error('Incompatible rainbow schema. Keep the database and finish it with its original version, or select a fresh database directory; tables are not migrated.')
+		await runSQL(db, generationLookupSchema)
 		await runSQL(db, 'CREATE TABLE IF NOT EXISTS GenerationStatus(id INTEGER PRIMARY KEY,complete INTEGER NOT NULL)')
 		if ((await allSQL<{ complete: number }>(db, 'SELECT complete FROM GenerationStatus WHERE id=1'))[0]?.complete === 1) {
+			if (!await hasCanonicalCoverage(db, wires, gates)) throw new Error('Incompatible completed rainbow table; use a fresh database directory')
 			logTimed(`Using rainbow table ${databaseFilename(wires, gates)}`)
 			return db
 		}
+		await configureGenerationDatabase(db)
 		await runSQL(db, 'INSERT OR REPLACE INTO GenerationStatus VALUES(1,0)')
 		const catalog = [...generateAllGates(wires)]
 		logTimed(`Generating rainbow table: ${wires} wires, up to ${gates} gates, ${catalog.length} gate choices`)
@@ -182,18 +159,20 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 			const now = performance.now()
 			if (!force && now - lastReport < config.timing.databaseLogSeconds * 1000) return
 			lastReport = now
-			logTimed(formatGenerationProgress(current, now - started, current ? estimator.update(current, now) : 'learning processing speed'))
+			if (current) estimator.update(current, now)
+			logTimed(formatGenerationProgress(current, now - started, current ? estimator.overallEta(current) : 'learning processing speed'))
+			if (profile) logVerbose(formatGenerationProfile(profile, now))
 		}
 		report(true)
 		const timer = setInterval(() => report(), config.timing.databaseLogSeconds * 1000)
 		try {
 			await generateOnDisk(db, wires, gates, catalog, {
-				readRows: config.database.queryBatchSize, stageRows: config.database.generationBatchRows,
+				readRows: config.database.generationReadRows, stageRows: config.database.generationBatchRows,
 				parameterLimit: config.database.queryBatchSize, stateLimit: config.database.generationStates,
 				keepState: config.database.keepGenerationState,
 				workers, queueBatches: config.database.generationQueueBatches, minimumWork: config.database.generationMinimumWork,
 				onProfile: value => { profile = value },
-			}, entries => storeReplacers(db, entries, true), progress => {
+			}, progress => {
 				const newLayer = current?.depth !== progress.depth
 				current = progress
 				report(newLayer)
@@ -204,4 +183,13 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 		} finally { clearInterval(timer) }
 		return db
 	} catch (error) { await new Promise<void>(resolve => db.close(() => resolve())); throw error }
+}
+
+/** Explicit, bounded build tuning; lookup connections keep their own settings. */
+export async function configureGenerationDatabase(db: sqlite3.Database) {
+	await runSQL(db, `PRAGMA journal_mode=${config.database.generationJournalMode === 'wal' ? 'WAL' : 'DELETE'}`)
+	await runSQL(db, `PRAGMA synchronous=${config.database.generationSynchronous === 'full' ? 'FULL' : 'NORMAL'}`)
+	await runSQL(db, `PRAGMA cache_size=-${config.database.generationCacheMegabytes * 1024}`)
+	await runSQL(db, `PRAGMA temp.cache_size=-${config.database.generationCacheMegabytes * 1024}`)
+	await runSQL(db, `PRAGMA temp_store=${config.database.generationTempStore === 'file' ? 'FILE' : 'MEMORY'}`)
 }
