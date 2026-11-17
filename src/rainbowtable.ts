@@ -146,7 +146,7 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 			catch (error) { logVerbose(`Generation diagnostics unavailable: ${String(error)}`) }
 		}
 		const reportDiagnostics = (profile?: GenerationProfile, activity?: GenerationActivity, phase?: string) => {
-			try { const sample = diagnostics?.sample(profile, phase); if (sample) for (const line of formatDiagnosticSample(sample, activity)) logVerbose(line) }
+			try { const sample = diagnostics?.sample(profile, phase, activity); if (sample) for (const line of formatDiagnosticSample(sample, activity)) logVerbose(line) }
 			catch (error) { diagnostics?.close(); diagnostics = undefined; logVerbose(`Generation diagnostics disabled: ${String(error)}`) }
 		}
 		const columns = await allSQL<{ name: string }>(db, 'PRAGMA table_info(InputOutputReplacers)')
@@ -175,7 +175,7 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 		await configureGenerationDatabase(db)
 		await runSQL(db, 'INSERT OR REPLACE INTO GenerationStatus VALUES(1,0)')
 		logTimed(`Generating rainbow table: ${wires} wires, up to ${gates} gates, ${catalog.length} gate choices`)
-		const started = performance.now(), estimator = new GenerationEstimator(config.database.etaWindowSamples, config.database.etaWarmupSamples, config.database.etaSmoothing, config.database.etaMaximumSlowdown)
+		const started = performance.now(), estimator = new GenerationEstimator(config.database.etaWindowSamples, config.database.etaWarmupSamples, config.database.etaSmoothing, config.database.etaMaximumSlowdown, { windowSamples: config.database.etaTrendWindowSamples, minimumSamples: config.database.etaTrendMinimumSamples, minimumWorkGrowth: config.database.etaTrendMinimumWorkGrowth })
 		let lastReport = started, current: SemanticProgress | undefined
 		let profile: GenerationProfile | undefined
 		let activity: (() => GenerationActivity) | undefined
@@ -206,7 +206,8 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 				current = { ...progress, complete: false }
 				report(newLayer)
 			})
-			await finalizeGeneration(db, phase => { if (profile) profile = { ...profile, phase, phaseStarted: performance.now() } })
+			await finalizeGeneration(db, phase => { if (profile) profile = { ...profile, phase, phaseActive: true, phaseStarted: performance.now() } })
+			if (profile) profile = { ...profile, phase: 'complete', phaseActive: false }
 			if (current) current.complete = true
 			report(true)
 			logTimed(`Rainbow generation complete in ${generationDuration(performance.now() - started)}.`)

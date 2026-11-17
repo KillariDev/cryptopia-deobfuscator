@@ -155,10 +155,15 @@ try {
 	].entries()) {
 		const db = await open(`merge-controls-${index}.db`)
 		try {
+			let lastProfile: GenerationProfile | undefined
 			let activity: (() => import('./generation-prefetch.js').GenerationActivity) | undefined, overlapped = false
-			await generateOnDisk(db, 2, 3, gates, { ...options, ...controls, prefetch: true, prefetchMegabytes: 1 / 1048576, onActivity: read => { activity = read }, beforeCommit: async () => { const status = activity?.(); if (status?.lookaheadBatches && status.bufferedBytes > 0) overlapped = true } })
+			await generateOnDisk(db, 2, 3, gates, { ...options, ...controls, prefetch: true, prefetchMegabytes: 1 / 1048576, onActivity: read => { activity = read }, onProfile: value => { lastProfile = value }, beforeCommit: async () => { const status = activity?.(); if (status?.lookaheadBatches && status.bufferedBytes > 0) overlapped = true } })
 			assert.ok(overlapped, 'next-batch expansion results are ready while the current transaction is still active')
 			assert.deepEqual(await check(db), reference, 'staging/merge controls preserve exact representatives')
+			const committed = (await allSQL<{ count: number }>(db, 'SELECT SUM(processed) AS count FROM BuildLayers'))[0].count
+			assert.equal(lastProfile!.committedParents, committed)
+			assert.equal(lastProfile!.phaseActive, false)
+			if ('stagingWriters' in controls) assert.ok(lastProfile!.importMs > 0)
 		}
 		finally { await close(db) }
 	}
@@ -177,7 +182,9 @@ try {
 	// A writer error after parallel expansion leaves no half-committed frontier/results.
 	db = await open('rollback.db')
 	try {
-		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, beforeCommit: async () => { throw new Error('writer failed') } }), /writer failed/)
+		let rollbackProfile: GenerationProfile | undefined
+		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, onProfile: value => { rollbackProfile = value }, beforeCommit: async () => { throw new Error('writer failed') } }), /writer failed/)
+		assert.equal(rollbackProfile!.committedParents, 0, 'uncommitted parents never count as throughput')
 		assert.equal((await rows(db)).length, 0)
 		assert.equal((await allSQL<{ processed: number }>(db, 'SELECT processed FROM BuildMeta'))[0].processed, 0)
 		await generateOnDisk(db, 2, 3, gates, options)
@@ -210,6 +217,20 @@ try {
 		await generateOnDisk(db, 2, 3, gates, options)
 		await check(db)
 	} finally { await close(db) }
+	// Scratch import is timed independently, but is still part of the atomic main batch.
+	db = await open('import-error.db')
+	try {
+		await runSQL(db, 'CREATE TEMP TABLE BuildCandidates(state BLOB NOT NULL,mask INTEGER NOT NULL,reads INTEGER NOT NULL,gates BLOB NOT NULL,wires INTEGER NOT NULL,PRIMARY KEY(state,mask)) WITHOUT ROWID')
+		await runSQL(db, "CREATE TEMP TRIGGER rejectImport BEFORE INSERT ON BuildCandidates BEGIN SELECT RAISE(ABORT,'scratch import failed'); END")
+		let profile: GenerationProfile | undefined
+		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, stagingWriters: 2, onProfile: value => { profile = value } }), /scratch import failed/)
+		assert.equal(profile!.committedParents, 0); assert.ok(profile!.importMs > 0); assert.equal(profile!.phaseActive, false)
+		assert.equal((await rows(db)).length, 0)
+		assert.equal((await allSQL<{ processed: number }>(db, 'SELECT processed FROM BuildMeta'))[0].processed, 0)
+		await runSQL(db, 'DROP TRIGGER rejectImport')
+		await generateOnDisk(db, 2, 3, gates, options); await check(db)
+	} finally { await close(db) }
+
 	// State-limit rollback after expansion permits a clean retry.
 	db = await open('limit.db')
 	try {
@@ -322,7 +343,7 @@ assert.match(formatGenerationProgress({ ...finishedWork, complete: true }, 1000,
 
 // Forecast against a known synthetic logarithmic slowdown, rather than its own formulas.
 const simulate = (costs: number[], limit = 4) => {
-	const model = new GenerationEstimator(5, 3, .2, limit)
+	const model = new GenerationEstimator(5, 3, .2, limit, { windowSamples: 5, minimumSamples: 5, minimumWorkGrowth: .05 })
 	let processed = 1000, now = 0
 	model.update({ depth: 4, processed, total: 10000, states: 100 }, now)
 	for (const cost of costs) {

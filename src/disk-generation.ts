@@ -1,3 +1,4 @@
+import { WriterUtilization } from './generation-utilization.js'
 import { GenerationPrefetch, GenerationActivity } from './generation-prefetch.js'
 import { ShardedStagingWriter } from './generation-shards.js'
 import { logVerbose } from './logging.js'
@@ -37,9 +38,9 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	const columns = await allSQL<{ name: string }>(db, 'PRAGMA table_info(InputOutputReplacers)')
 	if (!['gateCount', 'wireCount', 'readCount'].every(name => columns.some(column => column.name === name))) throw new Error('Incompatible rainbow schema; use a fresh database directory. Existing tables are not migrated.')
 	const started = performance.now()
-	const profile: GenerationProfile = { elapsedMs: 0, expansionMs: 0, writeMs: 0, readMs: 0, waitMs: 0, stagingMs: 0, dedupMs: 0, outputMs: 0, commitMs: 0, phase: 'reading', phaseStarted: started, candidates: 0, emitted: 0, batches: 0, workersUsed: 0, peakPending: 0 }
+	const profile: GenerationProfile = { elapsedMs: 0, expansionMs: 0, writeMs: 0, readMs: 0, waitMs: 0, stagingMs: 0, dedupMs: 0, outputMs: 0, commitMs: 0, importMs: 0, committedParents: 0, phaseActive: false, phase: 'reading', phaseStarted: started, candidates: 0, emitted: 0, batches: 0, workersUsed: 0, peakPending: 0 }
 	const phase = async <T>(name: GenerationProfile['phase'], operation: () => Promise<T>): Promise<T> => {
-		profile.phase = name; profile.phaseStarted = performance.now(); options.onProfile?.({ ...profile })
+		profile.phase = name; profile.phaseActive = true; profile.phaseStarted = performance.now(); options.onProfile?.({ ...profile })
 		try { return await operation() } finally {
 			const elapsed = performance.now() - profile.phaseStarted
 			if (name === 'reading') profile.readMs += elapsed
@@ -47,7 +48,9 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 			else if (name === 'deduplicating') profile.dedupMs += elapsed
 			else if (name === 'writing lookup') profile.outputMs += elapsed
 			else if (name === 'committing') profile.commitMs += elapsed
-			profile.writeMs = profile.stagingMs + profile.dedupMs + profile.outputMs + profile.commitMs
+			else if (name === 'importing scratch') profile.importMs += elapsed
+			profile.writeMs = profile.stagingMs + profile.dedupMs + profile.outputMs + profile.commitMs + profile.importMs
+			profile.phaseActive = false; options.onProfile?.({ ...profile })
 		}
 	}
 	const run = (sql: string, params: unknown[] = []) => runSQL(db, sql, params)
@@ -74,13 +77,14 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	const stagingOptions = { parameterLimit: options.parameterLimit, cacheEntries: options.statementCacheEntries ?? 8, prepared: options.preparedInserts ?? true, sort: options.sortStaging ?? false, append: options.appendStaging ?? false, compactBindings: options.compactBindings ?? false }
 	const staging = await StagingWriter.create(db, stagingOptions)
 	let shards: ShardedStagingWriter | undefined
+	const singleWriter = new WriterUtilization(1)
 	const budget = (options.prefetchMegabytes ?? 16) * 1048576
 	if (!Number.isSafeInteger(budget) || budget < 1) throw new Error('Invalid generation lookahead budget')
 	const prefetchEnabled = (options.prefetch ?? false) && workers > 1
 	let queued: PreparedBatch | undefined, consuming: PreparedBatch | undefined
 	const parentsOf = (batch: Entry[]): Parent[] => batch.map(entry => ({ ...entry, state: unpackState(entry.state, wires) }))
 	const expand = (parents: Parent[]) => expandBatch(parents, catalog.length, kernel, pool, { stageRows: options.stageRows, workers, queueBatches, minimumWork }, pending => { profile.peakPending = Math.max(profile.peakPending, pending) })
-	options.onActivity?.(() => ({ ...pool.activity, lookaheadBatches: queued ? 1 : 0, bufferedBytes: (queued?.expansion?.bufferedBytes ?? 0) + (consuming?.expansion?.bufferedBytes ?? 0), bufferLimitBytes: prefetchEnabled ? budget * 2 : 0, ...(shards?.activity ?? { stagingWriters: 1, activeStagingWriters: profile.phase === 'staging' ? 1 : 0 }) }))
+	options.onActivity?.(() => ({ ...pool.activity, lookaheadBatches: queued ? 1 : 0, bufferedBytes: (queued?.expansion?.bufferedBytes ?? 0) + (consuming?.expansion?.bufferedBytes ?? 0), bufferLimitBytes: prefetchEnabled ? budget * 2 : 0, ...(shards?.activity ?? { ...singleWriter.snapshot(), stagingWriters: 1, activeStagingWriters: singleWriter.activeCount }) }))
 	let failed = false
 	let startDepth = meta.depth, startProcessed = meta.processed
 	const report = () => {
@@ -113,7 +117,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				continue
 			}
 			const priorFunctions = meta.functions
-			await shards?.beginBatch()
+			if (shards) await phase('staging', () => shards!.beginBatch())
 			// IMMEDIATE would reserve write locks on attached scratch databases,
 			// blocking their independent connections. Only main is authoritative.
 			await run(shards ? 'BEGIN' : 'BEGIN IMMEDIATE')
@@ -131,8 +135,8 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 					// The read batch is the remaining depth prefix through its last id.
 					await phase('writing lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true, true), [meta!.depth, meta!.depth, batch[batch.length - 1].id]))
 				} else {
-					await phase('staging', () => staging.write(batch.map<StagingRow>(entry => [entry.state, entry.mask, entry.reads, entry.gates, usedWires(entry.mask)])))
-					await phase('deduplicating', () => staging.materialize())
+					await phase('staging', () => singleWriter.measure(() => staging.write(batch.map<StagingRow>(entry => [entry.state, entry.mask, entry.reads, entry.gates, usedWires(entry.mask)]))))
+					await phase('deduplicating', () => singleWriter.measure(() => staging.materialize()))
 					await phase('writing lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true), [meta!.depth]))
 					await phase('staging', () => run('DELETE FROM BuildCandidates'))
 				}
@@ -140,16 +144,16 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				let candidates: StagingRow[] = []
 				const flush = async () => {
 					if (!candidates.length) return
-					await phase('staging', () => (shards ?? staging).write(candidates))
+					await phase('staging', () => shards ? shards.write(candidates) : singleWriter.measure(() => staging.write(candidates)))
 					candidates = []
 				}
-				const expanding = () => { profile.phase = 'expanding'; profile.phaseStarted = performance.now(); options.onProfile?.({ ...profile }) }
+				const expanding = () => { profile.phase = 'expanding'; profile.phaseActive = true; profile.phaseStarted = performance.now(); options.onProfile?.({ ...profile }) }
 				expanding()
 				for await (const expanded of (consuming?.expansion?.values() ?? expand(parents!))) {
 					const { result, parents: chunk, waitMs } = expanded
 					profile.expansionMs += result.expansionMs; profile.waitMs += waitMs
 					profile.candidates += result.attempts; profile.emitted += result.count
-					profile.phase = 'expanding'; profile.phaseStarted = performance.now(); options.onProfile?.({ ...profile })
+					profile.phase = 'expanding'; profile.phaseActive = true; profile.phaseStarted = performance.now(); options.onProfile?.({ ...profile })
 					const view = new DataView(result.candidates), stride = kernel.stateBytes + 16
 					for (let i = 0; i < result.count; i++) {
 						const offset = i * stride, parent = chunk[view.getUint32(offset + kernel.stateBytes, true)], gate = view.getUint32(offset + kernel.stateBytes + 4, true)
@@ -160,7 +164,10 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 					expanding()
 				}
 				await flush()
-				await phase('deduplicating', () => (shards ?? staging).materialize())
+				if (shards) {
+					await phase('staging', () => shards!.materialize())
+					await phase('importing scratch', () => shards!.importBatch())
+				} else await phase('deduplicating', () => singleWriter.measure(() => staging.materialize()))
 				const final = meta.depth + 1 === maximumDepth
 				await phase('deduplicating', async () => {
 					if (final) {
@@ -181,11 +188,12 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				})
 				await options.beforeCommit?.()
 				await phase('committing', () => run('COMMIT'))
+				profile.committedParents += batch.length;
 				meta.processed += batch.length; layers.find(layer => layer.depth === meta!.depth)!.processed += batch.length; profile.batches++
 			} catch (error) { meta.functions = priorFunctions; await run('ROLLBACK'); throw error }
 		}
 		if (!options.keepState) { await run('DROP TABLE BuildFrontier'); await run('DROP TABLE BuildSeen') }
-		profile.phase = 'complete'; report()
+		profile.phase = 'complete'; profile.phaseActive = false; report()
 		return true
 	} catch (error) { failed = true; throw error } finally {
 		queued?.expansion?.cancel(); consuming?.expansion?.cancel()

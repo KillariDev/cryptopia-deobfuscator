@@ -455,20 +455,26 @@ This is a work percentage, not an exact fraction of elapsed runtime.
 The single ETA uses a conservative recent rate: the slower of a smoothed median
 and the recent lower throughput quartile. This reacts to sustained slowdowns
 without allowing one isolated slow interval to dominate once four samples exist.
-After five samples, a robust pairwise fit estimates increasing per-row cost
-against logarithmic processed work and integrates that trend over remaining work.
-`database.etaMaximumSlowdown: 4` bounds the forecast average cost relative to the
-current conservative cost; set it to `1` to disable trend extrapolation. This cap
-limits unstable early extrapolation, not the actual slowdown a build can suffer.
+`database.etaMaximumSlowdown: 1` now disables speculative slowdown extrapolation
+by default. The ETA follows measured throughput rather than amplifying short
+fluctuations into a projected multi-day slowdown.
+
+To opt into trend extrapolation, set `etaMaximumSlowdown` above `1`. A robust
+pairwise logarithmic fit then requires at least `etaTrendMinimumSamples: 10`
+finite observations and `etaTrendMinimumWorkGrowth: 0.25` (25% growth in processed
+work between the first and last observation). It retains up to
+`etaTrendWindowSamples: 60` observations, separately from the recent-rate window.
+The multiplier still bounds forecast average cost relative to current cost;
+it is not a bound on actual future slowdown. Small work spans after a restart
+cannot establish a trend, even with many noisy reports.
 
 Speed estimates warm up for `database.etaWarmupSamples` reports, retain
 `database.etaWindowSamples` samples and smooth the median using
-`database.etaSmoothing`. A sample window below five disables the trend fit.
-Layer transitions reset speed learning because processing cost can change.
+`database.etaSmoothing`. Layer transitions reset speed learning because processing cost can change.
 Future layer sizes are still projected, so their ETA carries `(rough)`; it is not
 a calibrated confidence bound. This model cannot foresee cache exhaustion, a
 change in disk contention, different costs in unseen layers, or final compaction
-time. It reduces constant-speed optimism rather than guaranteeing a deadline.
+time. With extrapolation disabled, future cost increases can make the ETA optimistic; enabling a supported trend still does not guarantee a deadline.
 Per-layer work survives restart, while speed/trend samples relearn without
 counting pre-restart work as new processing. Stalls are labeled as waiting for
 progress. `100.00%` is reported after cleanup and compaction succeed. Normal
@@ -931,8 +937,8 @@ with native `INSERT ... SELECT`, without copying rows back through JavaScript.
 Only then does the existing main transaction update discovered states, lookup
 output, consumed frontier rows and checkpoint progress. Global seen-state checks,
 lookup writes, the import and final compaction remain serialized; this is parallel
-candidate staging, not a fully partitioned generation database. Merge time is
-included in the diagnostic dedup phase. The main connection uses a deferred
+candidate staging, not a fully partitioned generation database. Scratch import time is
+reported separately from candidate staging and discovered-state deduplication. The main connection uses a deferred
 transaction in this mode so it does not lock the scratch writers. Independent
 scratch connections are drained before failure cleanup or rollback completes.
 
@@ -949,7 +955,7 @@ behind; it is never reused and can be deleted once that process has exited.
 Parallel staging requires `generationAppendStaging: false`. Writer count and
 compact bindings can change when restarting an existing compatible checkpoint;
 no regeneration or migration is required. Verbose logs show the scratch path,
-active staging writers and buffered rows. SQL diagnostic totals cover all writer
+interval staging-writer utilization and overlap. SQL diagnostic totals cover all writer
 connections; concurrent API/native time can exceed wall-clock interval time.
 
 To compare complete builds set `benchmark.generationWriterComparison: true`,
@@ -989,3 +995,38 @@ Median prepared staging time at the 8,192-parameter limit was 925ms with five
 bindings and 727ms with compact bindings. These timings exclude transaction
 commit and setup, so the complete-build experiment above remains the basis for
 production defaults.
+
+
+## Reading interval generation reports
+
+Verbose work reports include staging-writer utilization over the entire reporting
+interval, rather than the number active at the instant a message is printed.
+Utilization is integrated active-writer operation time divided by wall time and
+configured writer slots. With multiple writers, `all busy` reports the fraction
+of the interval during which every writer had an outstanding operation. These
+measure operation occupancy, including preparation, binding, native SQL, queueing
+and waits; they are not CPU utilization or proof of disk saturation. Running
+operations contribute before they finish, and their history is retained after a
+batch commits. Thus a snapshot taken between batches still reports past overlap.
+Scratch transaction setup/clear, staging inserts and commits contribute; the main
+connection's imports and checkpoint commits are timed separately.
+
+`scratch import` measures the native imports from completed scratch files into
+the main candidate table. Scratch writers' final partial-buffer flushes and commits
+belong to staging. `dedup` now measures the main discovered-state checks and
+frontier updates, rather than hiding scratch import in the same number. For a
+single writer, append materialization remains in deduplication and contributes
+to that writer's occupancy. Single-writer occupancy excludes main transaction
+commits and candidate-table clearing.
+
+`committed parents/s` counts consumed frontier rows only after the main batch
+transaction commits. It excludes speculative expansion and failed/rolled-back
+batches; it starts at zero on resume instead of counting previous saved work.
+Compare intervals within the same table and depth, since work per parent can
+change across depths. It is a processing rate, not newly discovered functions.
+
+The current phase is explicitly a snapshot. Completed operations immediately
+publish their cumulative time and become inactive; time between operations is
+not charged to the last commit. In-flight phase time still contributes during
+long operations. Normal output retains one completion percentage and one ETA;
+these extra diagnostics require verbose logging.
