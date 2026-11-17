@@ -1,6 +1,7 @@
 import { ExpansionKernel, ExpansionParent, ExpansionResult, packParents } from './generation-expansion.js'
 import { GenerationPool } from './generation-pool.js'
 
+export type ExpansionChunk<T> = { parents: T[], result: ExpansionResult, waitMs: number }
 export type PipelineOptions = { stageRows: number, workers: number, queueBatches: number, minimumWork: number }
 type Chunk<T> = { parents: T[], gateStart: number, gateEnd: number }
 function* chunks<T>(entries: T[], gates: number, maximum: number): Generator<Chunk<T>> {
@@ -15,7 +16,7 @@ function* chunks<T>(entries: T[], gates: number, maximum: number): Generator<Chu
 
 /** Consume in submission order even when workers finish out of order. */
 export async function* expandBatch<T extends ExpansionParent>(entries: T[], gateCount: number, kernel: ExpansionKernel, pool: GenerationPool, options: PipelineOptions,
-	onPending?: (count: number) => void): AsyncGenerator<{ parents: T[], result: ExpansionResult, waitMs: number }> {
+	onPending?: (count: number) => void): AsyncGenerator<ExpansionChunk<T>> {
 	const iterator = chunks(entries, gateCount, options.stageRows)
 	if (options.workers === 1 || entries.length * gateCount < options.minimumWork) {
 		for (const chunk of iterator) yield { parents: chunk.parents, result: kernel.expand({ ...chunk, parents: packParents(chunk.parents, kernel.stateBytes) }), waitMs: 0 }

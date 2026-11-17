@@ -1,10 +1,12 @@
+import { GenerationActivity } from './generation-prefetch.js'
+import { GenerationDiagnostics, formatDiagnosticSample } from './generation-diagnostics.js'
 import { finalizeGeneration } from './generation-finalize.js'
 import { generationLookupSchema, generationSignature } from './generation-storage.js'
 import { LookupStatements } from './lookup-statements.js'
 import { LookupBatcher } from './lookup-batcher.js'
 import { join } from 'path'
 import { availableParallelism } from 'os'
-import { logVerbose } from './logging.js'
+import { logVerbose, verboseLogging } from './logging.js'
 import sqlite3 from 'sqlite3'
 import { config } from './config.js'
 import { Gate } from './types.js'
@@ -137,7 +139,16 @@ export function* generateAllGates(wires: number): Generator<Gate, undefined, unk
 export const createRainbowTable = async (wires: number, gates: number) => {
 	const db = getRainbowTable(wires, gates)
 	await databaseReady(db)
+	let diagnostics: GenerationDiagnostics | undefined
 	try {
+		if (verboseLogging() && config.logging.generationDiagnostics) {
+			try { diagnostics = new GenerationDiagnostics(db, config.logging.eventLoopResolutionMilliseconds, config.logging.generationDiagnosticsMinimumSeconds) }
+			catch (error) { logVerbose(`Generation diagnostics unavailable: ${String(error)}`) }
+		}
+		const reportDiagnostics = (profile?: GenerationProfile, activity?: GenerationActivity, phase?: string) => {
+			try { const sample = diagnostics?.sample(profile, phase); if (sample) for (const line of formatDiagnosticSample(sample, activity)) logVerbose(line) }
+			catch (error) { diagnostics?.close(); diagnostics = undefined; logVerbose(`Generation diagnostics disabled: ${String(error)}`) }
+		}
 		const columns = await allSQL<{ name: string }>(db, 'PRAGMA table_info(InputOutputReplacers)')
 		const costColumns = ['gateCount', 'wireCount', 'readCount'].filter(name => columns.some(column => column.name === name))
 		const catalog = [...generateAllGates(wires)]
@@ -151,7 +162,7 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 		const status = (await allSQL<{ complete: number }>(db, 'SELECT complete FROM GenerationStatus WHERE id=1'))[0]?.complete
 		if (finished) {
 			if (status !== 1 || costColumns.length) {
-				const finishing = () => logTimed('Rainbow generation: 99.99% complete | ETA finishing')
+				const finishing = () => { logTimed('Rainbow generation: 99.99% complete | ETA finishing'); reportDiagnostics(undefined, undefined, 'finalizing') }
 				finishing()
 				const timer = setInterval(finishing, config.timing.databaseLogSeconds * 1000)
 				try { await finalizeGeneration(db) } finally { clearInterval(timer) }
@@ -167,6 +178,7 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 		const started = performance.now(), estimator = new GenerationEstimator(config.database.etaWindowSamples, config.database.etaWarmupSamples, config.database.etaSmoothing, config.database.etaMaximumSlowdown)
 		let lastReport = started, current: SemanticProgress | undefined
 		let profile: GenerationProfile | undefined
+		let activity: (() => GenerationActivity) | undefined
 		const workers = Math.min(config.database.generationWorkers, Math.max(1, availableParallelism() - 1))
 		logTimed(`Generation expansion: up to ${workers} CPU slots; batches below ${config.database.generationMinimumWork.toLocaleString('en-US')} candidates run inline; one database writer`)
 		const report = (force = false) => {
@@ -175,7 +187,8 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 			lastReport = now
 			if (current) estimator.update(current, now)
 			logTimed(formatGenerationProgress(current, now - started, current ? estimator.overallEta(current) : 'learning processing speed'))
-			if (profile) logVerbose(formatGenerationProfile(profile, now))
+			if (diagnostics) reportDiagnostics(profile, activity?.())
+			else if (profile) logVerbose(formatGenerationProfile(profile, now))
 		}
 		report(true)
 		const timer = setInterval(() => report(), config.timing.databaseLogSeconds * 1000)
@@ -184,6 +197,7 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 				readRows: config.database.generationReadRows, stageRows: config.database.generationBatchRows,
 				parameterLimit: config.database.generationSqlParameters, preparedInserts: config.database.generationPreparedInserts, appendStaging: config.database.generationAppendStaging, aggregateMerge: config.database.generationAggregateMerge, directInputMerge: config.database.generationDirectInputMerge, sortStaging: config.database.generationSortStaging, statementCacheEntries: config.database.generationStatementCacheEntries, stateLimit: config.database.generationStates,
 				keepState: true,
+				prefetch: config.database.generationPrefetch, prefetchMegabytes: config.database.generationPrefetchMegabytes, onActivity: read => { activity = read },
 				workers, queueBatches: config.database.generationQueueBatches, minimumWork: config.database.generationMinimumWork,
 				onProfile: value => { profile = value },
 			}, progress => {
@@ -198,7 +212,7 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 			if (profile) logVerbose(`Generation profile: ${profile.workersUsed} CPU threads started; ${profile.candidates} candidates expanded, ${profile.emitted} emitted after local deduplication; ${(profile.expansionMs / 1000).toFixed(2)} expansion worker-seconds; ${((profile.writeMs + profile.readMs) / 1000).toFixed(2)}s database work; ${(profile.waitMs / 1000).toFixed(2)}s waiting for expansion; peak ${profile.peakPending} pending tasks. Times can overlap.`)
 		} finally { clearInterval(timer) }
 		return db
-	} catch (error) { await new Promise<void>(resolve => db.close(() => resolve())); throw error }
+	} catch (error) { diagnostics?.close(); await new Promise<void>(resolve => db.close(() => resolve())); throw error } finally { diagnostics?.close() }
 }
 
 /** Explicit, bounded build tuning; lookup connections keep their own settings. */

@@ -151,7 +151,12 @@ try {
 		{ appendStaging: false, aggregateMerge: true, directInputMerge: false },
 	].entries()) {
 		const db = await open(`merge-controls-${index}.db`)
-		try { await generateOnDisk(db, 2, 3, gates, { ...options, ...controls }); assert.deepEqual(await check(db), reference, 'staging/merge controls preserve exact representatives') }
+		try {
+			let activity: (() => import('./generation-prefetch.js').GenerationActivity) | undefined, overlapped = false
+			await generateOnDisk(db, 2, 3, gates, { ...options, ...controls, prefetch: true, prefetchMegabytes: 1 / 1048576, onActivity: read => { activity = read }, beforeCommit: async () => { const status = activity?.(); if (status?.lookaheadBatches && status.bufferedBytes > 0) overlapped = true } })
+			assert.ok(overlapped, 'next-batch expansion results are ready while the current transaction is still active')
+			assert.deepEqual(await check(db), reference, 'staging/merge controls preserve exact representatives')
+		}
 		finally { await close(db) }
 	}
 
@@ -159,7 +164,7 @@ try {
 	let db = await open('resume.db')
 	try {
 		let polls = 0
-		assert.equal(await generateOnDisk(db, 2, 3, gates, options, undefined, () => ++polls > 3), false)
+		assert.equal(await generateOnDisk(db, 2, 3, gates, { ...options, prefetch: true }, undefined, () => ++polls > 3), false)
 	} finally { await close(db) }
 	db = await open('resume.db')
 	try {
@@ -196,7 +201,7 @@ try {
 			}
 			return statement
 		}) as typeof db.prepare
-		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, stageRows: 1, appendStaging: true }), /staging write failed/)
+		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, stageRows: 1, appendStaging: true, prefetch: true }), /staging write failed/)
 		assert.equal((await rows(db)).length, 0)
 		assert.equal((await allSQL<{ processed: number }>(db, 'SELECT processed FROM BuildMeta'))[0].processed, 0)
 		await generateOnDisk(db, 2, 3, gates, options)
@@ -213,7 +218,7 @@ try {
 	db = await open('final-resume.db')
 	try {
 		let failed = false, finalBatches = 0
-		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, keepState: true, appendStaging: true, beforeCommit: async () => {
+		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, keepState: true, appendStaging: true, prefetch: true, beforeCommit: async () => {
 			const depth = (await allSQL<{ depth: number }>(db, 'SELECT depth FROM BuildMeta'))[0].depth
 			assert.equal((await allSQL<{ count: number }>(db, 'SELECT count(*) AS count FROM BuildFrontier WHERE depth=3'))[0].count, 0, 'last-depth candidates never enter the frontier')
 			if (depth === 2 && ++finalBatches === 2) { failed = true; throw new Error('final-layer interruption') }

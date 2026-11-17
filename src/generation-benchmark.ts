@@ -10,7 +10,9 @@ const smoke = process.argv.includes('--smoke')
 const args = process.argv.slice(2).filter(arg => arg !== '--smoke')
 if (args.length && (args.length !== 2 || args[0] !== '--reference')) throw new Error('Usage: npm run benchmark:generation -- [--smoke] [--reference /path/to/compiled/reference/repository]')
 const currentRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const currentVariants: { name: string, root: string, append?: boolean }[] = config.benchmark.generationStagingComparison
+const currentVariants: { name: string, root: string, append?: boolean, prefetch?: boolean, diagnostics?: boolean }[] = config.benchmark.generationPrefetchComparison
+	? [{ name: 'serial', root: currentRoot, prefetch: false, diagnostics: false }, { name: 'prefetch', root: currentRoot, prefetch: true, diagnostics: false }, { name: 'prefetch-diagnostics', root: currentRoot, prefetch: true, diagnostics: true }]
+	: config.benchmark.generationStagingComparison
 	? [{ name: 'indexed', root: currentRoot, append: false }, { name: 'append', root: currentRoot, append: true }]
 	: [{ name: 'current', root: currentRoot }]
 const variants = args.length ? [{ name: 'reference', root: resolve(args[1]) }, ...currentVariants] : currentVariants
@@ -21,7 +23,7 @@ mkdirSync(dirname(output), { recursive: true })
 const revision = (root: string) => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { try { return readFileSync(join(root, '.generation-reference-revision'), 'utf8').trim() } catch { return null } } }
 const runtimeFingerprint = (root: string) => {
 	const hash = createHash('sha256')
-	for (const file of ['generation-merge', 'generation-staging', 'generation-dedup', 'generation-finalize', 'disk-generation', 'generation-expansion', 'generation-storage', 'generation-pipeline', 'generation-pool', 'generation-progress', 'rainbowtable', 'semantic', 'sql', 'config']) {
+	for (const file of ['generation-diagnostics', 'generation-prefetch', 'sql-observer', 'generation-merge', 'generation-staging', 'generation-dedup', 'generation-finalize', 'disk-generation', 'generation-expansion', 'generation-storage', 'generation-pipeline', 'generation-pool', 'generation-progress', 'rainbowtable', 'semantic', 'sql', 'config']) {
 		try { hash.update(file); hash.update(readFileSync(join(root, 'dist', `${file}.js`))) } catch { hash.update('absent') }
 	}
 	return hash.digest('hex')
@@ -33,14 +35,16 @@ try {
 		for (const variant of repeat % 2 ? [...variants].reverse() : variants) {
 			const directory = mkdtempSync(join(temporary, 'trial-')), report = join(directory, 'result.json')
 			let settingsSource = variant.name === 'reference' ? join(variant.root, 'solver.config.json') : configPath
-			if (variant.append !== undefined) {
+			if (variant.append !== undefined || variant.prefetch !== undefined || variant.diagnostics !== undefined) {
 				const settings = structuredClone(config)
-				settings.database.generationAppendStaging = variant.append
+				if (variant.append !== undefined) settings.database.generationAppendStaging = variant.append
+				if (variant.prefetch !== undefined) settings.database.generationPrefetch = variant.prefetch
+				if (variant.diagnostics !== undefined) { settings.logging.verbose = variant.diagnostics; settings.logging.generationDiagnostics = variant.diagnostics }
 				settingsSource = join(directory, 'variant-settings.json')
 				writeFileSync(settingsSource, JSON.stringify(settings))
 			}
 			await new Promise<void>((resolveTrial, reject) => {
-				const child = spawn(process.execPath, [fileURLToPath(new URL('./generation-benchmark-worker.js', import.meta.url)), variant.root, directory, String(table.wires), String(table.gates), String(workers), report, settingsSource], { stdio: ['ignore', 'ignore', 'inherit'] })
+				const child = spawn(process.execPath, [fileURLToPath(new URL('./generation-benchmark-worker.js', import.meta.url)), variant.root, directory, String(table.wires), String(table.gates), String(workers), report, settingsSource], { stdio: ['ignore', 'ignore', 'inherit'], env: { ...process.env, ...(variant.diagnostics === undefined ? {} : { OPTIMIZER_VERBOSE: variant.diagnostics ? '1' : '0' }) } })
 				let timedOut = false
 				const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, config.benchmark.generationTimeoutSeconds * 1000)
 				child.once('error', error => { clearTimeout(timer); reject(error) })

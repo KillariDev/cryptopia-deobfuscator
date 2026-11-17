@@ -13,6 +13,7 @@ export class GenerationPool {
 		if (!Number.isSafeInteger(size) || size < 1) throw new Error('Invalid generation worker count')
 	}
 	get workerCount() { return this.slots.length }
+	get activity() { return { running: this.slots.filter(slot => slot.job).length, queued: this.queue.length } }
 	run(task: ExpansionTask): Promise<ExpansionResult> {
 		if (this.failure || this.closing) return Promise.reject(this.failure ?? new Error('Generation pool closed'))
 		return new Promise((resolve, reject) => { this.queue.push({ task, resolve, reject }); this.dispatch() })
