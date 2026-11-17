@@ -1,0 +1,615 @@
+{
+  "schemaVersion": 1,
+  "smoke": false,
+  "revision": "d1260cb87013b9bd148145853bae26c8d2c2ddde",
+  "workingTreeDirty": true,
+  "node": "v24.22.3",
+  "platform": "linux",
+  "cpu": "AMD Ryzen 9 5900X 12-Core Processor",
+  "cacheMegabytes": 256,
+  "repeats": 3,
+  "queries": {
+    "frontier": {
+      "reference": "SELECT c.state,c.mask,c.reads,c.gates,? FROM BuildCandidates c JOIN BuildSeen s ON c.state=s.state WHERE s.depth=?",
+      "current": "SELECT c.state,c.mask,c.reads,c.gates,? FROM BuildCandidates c CROSS JOIN BuildSeen s ON c.state=s.state WHERE s.depth=?"
+    },
+    "finalCount": {
+      "reference": "SELECT count(*) AS count FROM (SELECT DISTINCT state FROM BuildCandidates c WHERE NOT EXISTS (SELECT 1 FROM BuildSeen s WHERE s.state=c.state) AND NOT EXISTS (SELECT 1 FROM InputOutputReplacers o WHERE o.ioIdentifier=c.state))",
+      "current": "SELECT count(*) AS count FROM (SELECT state FROM BuildCandidates GROUP BY state) c WHERE NOT EXISTS (SELECT 1 FROM BuildSeen s WHERE s.state=c.state) AND NOT EXISTS (SELECT 1 FROM InputOutputReplacers o WHERE o.ioIdentifier=c.state)"
+    }
+  },
+  "records": [
+    {
+      "phase": "frontier",
+      "seenRows": 10000,
+      "functions": 2000,
+      "masks": 4,
+      "candidateRows": 8000,
+      "resultRows": 4000,
+      "resultDigest": "cc2874f62e3cb896e7e33bd9ec34390fa054ec588690b651526e41b262ec8c11",
+      "samplesMs": {
+        "reference": [
+          15.274170999999996,
+          15.286653999999999,
+          11.738106000000016
+        ],
+        "current": [
+          15.769677000000001,
+          13.65913599999999,
+          12.861754000000019
+        ]
+      },
+      "medianMs": {
+        "reference": 15.274170999999996,
+        "current": 13.65913599999999
+      },
+      "speedup": 1.1182384449499594,
+      "plans": {
+        "reference": [
+          {
+            "id": 3,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN s"
+          },
+          {
+            "id": 7,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SEARCH c USING PRIMARY KEY (state=?)"
+          }
+        ],
+        "current": [
+          {
+            "id": 3,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN c"
+          },
+          {
+            "id": 5,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+          }
+        ]
+      }
+    },
+    {
+      "phase": "finalCount",
+      "seenRows": 10000,
+      "functions": 2000,
+      "masks": 4,
+      "candidateRows": 8000,
+      "resultRows": 1,
+      "resultDigest": "9d43c8d59583ee0c667b261bb2e82ca370807e5bfff74b9cba2a9068ab59989c",
+      "samplesMs": {
+        "reference": [
+          2.8302679999999896,
+          3.0391720000000078,
+          3.167006000000015
+        ],
+        "current": [
+          1.4714779999999905,
+          1.5513799999999947,
+          1.4828660000000013
+        ]
+      },
+      "medianMs": {
+        "reference": 3.0391720000000078,
+        "current": 1.4828660000000013
+      },
+      "speedup": 2.0495257157423565,
+      "plans": {
+        "reference": [
+          {
+            "id": 2,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CO-ROUTINE (subquery-3)"
+          },
+          {
+            "id": 5,
+            "parent": 2,
+            "notused": 0,
+            "detail": "SCAN c"
+          },
+          {
+            "id": 8,
+            "parent": 2,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 1"
+          },
+          {
+            "id": 12,
+            "parent": 8,
+            "notused": 0,
+            "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+          },
+          {
+            "id": 21,
+            "parent": 2,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 2"
+          },
+          {
+            "id": 25,
+            "parent": 21,
+            "notused": 0,
+            "detail": "SEARCH o USING PRIMARY KEY (ioIdentifier=?)"
+          },
+          {
+            "id": 40,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN (subquery-3)"
+          }
+        ],
+        "current": [
+          {
+            "id": 2,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CO-ROUTINE c"
+          },
+          {
+            "id": 8,
+            "parent": 2,
+            "notused": 0,
+            "detail": "SCAN BuildCandidates"
+          },
+          {
+            "id": 35,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN c"
+          },
+          {
+            "id": 39,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 2"
+          },
+          {
+            "id": 43,
+            "parent": 39,
+            "notused": 0,
+            "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+          },
+          {
+            "id": 53,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 3"
+          },
+          {
+            "id": 57,
+            "parent": 53,
+            "notused": 0,
+            "detail": "SEARCH o USING PRIMARY KEY (ioIdentifier=?)"
+          }
+        ]
+      }
+    },
+    {
+      "phase": "frontier",
+      "seenRows": 100000,
+      "functions": 2000,
+      "masks": 4,
+      "candidateRows": 8000,
+      "resultRows": 4000,
+      "resultDigest": "40d6a0ebf795cd401e3faefddabfa800e320385d7cb7e79a9458d50e31b51f9d",
+      "samplesMs": {
+        "reference": [
+          22.12408000000005,
+          20.14145599999995,
+          21.83401499999991
+        ],
+        "current": [
+          12.89872600000001,
+          14.280397999999991,
+          12.906705999999986
+        ]
+      },
+      "medianMs": {
+        "reference": 21.83401499999991,
+        "current": 12.906705999999986
+      },
+      "speedup": 1.691679891058178,
+      "plans": {
+        "reference": [
+          {
+            "id": 3,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN s"
+          },
+          {
+            "id": 7,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SEARCH c USING PRIMARY KEY (state=?)"
+          }
+        ],
+        "current": [
+          {
+            "id": 3,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN c"
+          },
+          {
+            "id": 5,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+          }
+        ]
+      }
+    },
+    {
+      "phase": "finalCount",
+      "seenRows": 100000,
+      "functions": 2000,
+      "masks": 4,
+      "candidateRows": 8000,
+      "resultRows": 1,
+      "resultDigest": "9d43c8d59583ee0c667b261bb2e82ca370807e5bfff74b9cba2a9068ab59989c",
+      "samplesMs": {
+        "reference": [
+          3.5734790000000203,
+          3.127813999999944,
+          3.327513999999951
+        ],
+        "current": [
+          2.1856950000000097,
+          1.6593259999999646,
+          1.5552119999999832
+        ]
+      },
+      "medianMs": {
+        "reference": 3.327513999999951,
+        "current": 1.6593259999999646
+      },
+      "speedup": 2.0053407226789806,
+      "plans": {
+        "reference": [
+          {
+            "id": 2,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CO-ROUTINE (subquery-3)"
+          },
+          {
+            "id": 5,
+            "parent": 2,
+            "notused": 0,
+            "detail": "SCAN c"
+          },
+          {
+            "id": 8,
+            "parent": 2,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 1"
+          },
+          {
+            "id": 12,
+            "parent": 8,
+            "notused": 0,
+            "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+          },
+          {
+            "id": 21,
+            "parent": 2,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 2"
+          },
+          {
+            "id": 25,
+            "parent": 21,
+            "notused": 0,
+            "detail": "SEARCH o USING PRIMARY KEY (ioIdentifier=?)"
+          },
+          {
+            "id": 40,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN (subquery-3)"
+          }
+        ],
+        "current": [
+          {
+            "id": 2,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CO-ROUTINE c"
+          },
+          {
+            "id": 8,
+            "parent": 2,
+            "notused": 0,
+            "detail": "SCAN BuildCandidates"
+          },
+          {
+            "id": 35,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN c"
+          },
+          {
+            "id": 39,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 2"
+          },
+          {
+            "id": 43,
+            "parent": 39,
+            "notused": 0,
+            "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+          },
+          {
+            "id": 53,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 3"
+          },
+          {
+            "id": 57,
+            "parent": 53,
+            "notused": 0,
+            "detail": "SEARCH o USING PRIMARY KEY (ioIdentifier=?)"
+          }
+        ]
+      }
+    },
+    {
+      "phase": "frontier",
+      "seenRows": 1000000,
+      "functions": 2000,
+      "masks": 4,
+      "candidateRows": 8000,
+      "resultRows": 4000,
+      "resultDigest": "68cab1b64b6e446fa5f5d318a68a862cd1092e212d189abfb3097c37d90362a8",
+      "samplesMs": {
+        "reference": [
+          109.4078300000001,
+          112.28683499999988,
+          107.6708749999998
+        ],
+        "current": [
+          14.983349999999973,
+          13.783300000000054,
+          13.819870999999694
+        ]
+      },
+      "medianMs": {
+        "reference": 109.4078300000001,
+        "current": 13.819870999999694
+      },
+      "speedup": 7.91670414289703,
+      "plans": {
+        "reference": [
+          {
+            "id": 3,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN s"
+          },
+          {
+            "id": 7,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SEARCH c USING PRIMARY KEY (state=?)"
+          }
+        ],
+        "current": [
+          {
+            "id": 3,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN c"
+          },
+          {
+            "id": 5,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+          }
+        ]
+      }
+    },
+    {
+      "phase": "finalCount",
+      "seenRows": 1000000,
+      "functions": 2000,
+      "masks": 4,
+      "candidateRows": 8000,
+      "resultRows": 1,
+      "resultDigest": "9d43c8d59583ee0c667b261bb2e82ca370807e5bfff74b9cba2a9068ab59989c",
+      "samplesMs": {
+        "reference": [
+          4.177229999999781,
+          3.8226509999999507,
+          4.5263669999999365
+        ],
+        "current": [
+          2.3116359999999077,
+          2.174678999999742,
+          2.9544880000003104
+        ]
+      },
+      "medianMs": {
+        "reference": 4.177229999999781,
+        "current": 2.3116359999999077
+      },
+      "speedup": 1.807044880768403,
+      "plans": {
+        "reference": [
+          {
+            "id": 2,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CO-ROUTINE (subquery-3)"
+          },
+          {
+            "id": 5,
+            "parent": 2,
+            "notused": 0,
+            "detail": "SCAN c"
+          },
+          {
+            "id": 8,
+            "parent": 2,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 1"
+          },
+          {
+            "id": 12,
+            "parent": 8,
+            "notused": 0,
+            "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+          },
+          {
+            "id": 21,
+            "parent": 2,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 2"
+          },
+          {
+            "id": 25,
+            "parent": 21,
+            "notused": 0,
+            "detail": "SEARCH o USING PRIMARY KEY (ioIdentifier=?)"
+          },
+          {
+            "id": 40,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN (subquery-3)"
+          }
+        ],
+        "current": [
+          {
+            "id": 2,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CO-ROUTINE c"
+          },
+          {
+            "id": 8,
+            "parent": 2,
+            "notused": 0,
+            "detail": "SCAN BuildCandidates"
+          },
+          {
+            "id": 35,
+            "parent": 0,
+            "notused": 0,
+            "detail": "SCAN c"
+          },
+          {
+            "id": 39,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 2"
+          },
+          {
+            "id": 43,
+            "parent": 39,
+            "notused": 0,
+            "detail": "SEARCH s USING PRIMARY KEY (state=?)"
+          },
+          {
+            "id": 53,
+            "parent": 0,
+            "notused": 0,
+            "detail": "CORRELATED SCALAR SUBQUERY 3"
+          },
+          {
+            "id": 57,
+            "parent": 53,
+            "notused": 0,
+            "detail": "SEARCH o USING PRIMARY KEY (ioIdentifier=?)"
+          }
+        ]
+      }
+    }
+  ],
+  "limitations": "Query-only fixtures on a shared host, not whole generation or production 4/5 throughput. Results include row materialization; validation and setup are excluded. Alternating order shares an SQLite page cache, not cold-disk trials.",
+  "date": "2026-11-17",
+  "endToEnd": {
+    "trials": 12,
+    "variants": [
+      {
+        "name": "reference",
+        "root": "/tmp/cryptopia-dedup-reference",
+        "revision": "d1260cb87013b9bd148145853bae26c8d2c2ddde",
+        "workingTreeDirty": null,
+        "runtimeSha256": "03873e7289bf45ea330e333a6df424ad3f890e5d8df0438c7b909419cb4bd62d"
+      },
+      {
+        "name": "current",
+        "root": "/workspace/cryptopia-deobfuscator",
+        "revision": "d1260cb87013b9bd148145853bae26c8d2c2ddde",
+        "workingTreeDirty": true,
+        "runtimeSha256": "decc01305d78f3eee98b436077b3fdf41a25237b238de598f2b4641681015c9c"
+      }
+    ],
+    "summaries": [
+      {
+        "wires": 3,
+        "gates": 4,
+        "variants": {
+          "reference": {
+            "generationMs": [
+              2335.003874,
+              2475.544277,
+              2434.5571
+            ],
+            "medianMs": 2434.5571,
+            "rows": 38016,
+            "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+          },
+          "current": {
+            "generationMs": [
+              2430.751748,
+              2410.3815689999997,
+              2416.878983
+            ],
+            "medianMs": 2416.878983,
+            "rows": 38016,
+            "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+          }
+        }
+      },
+      {
+        "wires": 4,
+        "gates": 3,
+        "variants": {
+          "reference": {
+            "generationMs": [
+              15655.557015,
+              14333.254228,
+              15207.696607
+            ],
+            "medianMs": 15207.696607,
+            "rows": 832167,
+            "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+          },
+          "current": {
+            "generationMs": [
+              16012.016591,
+              14917.025174999999,
+              14547.197714999998
+            ],
+            "medianMs": 14917.025174999999,
+            "rows": 832167,
+            "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+          }
+        }
+      }
+    ],
+    "limitations": "Three fresh builds per variant and table, one expansion worker, automatic compaction included. All coverage/cost digests match. Medium builds showed little overall change; this is a scale-specific query fix, not a demonstrated production 4/5 speedup."
+  }
+}

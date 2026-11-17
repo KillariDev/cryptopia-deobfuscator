@@ -15,7 +15,7 @@ export const defaults = {
 	search: { probabilistic: true, variableElimination: true, exactMaximumWires: 7, subsetMinimum: 2, subsetMaximum: 199, sliceMinimum: 2, sliceMaximum: 199, maximumInnerChunks: 5, minimumInnerChunkGates: 200, workerShufflePasses: 200, roundShufflePasses: 2000, adaptive: true, stableSearchArms: false, schedulerHistoryEntries: 128, independentComponents: false, schedulerDecay: 0.98, localSearch: true, localSearchSeeds: 32, localSearchRadius: 16, localSearchBroadEvery: 5, explorationEvery: 5, searchArms: 16, prioritizeChangedWires: true, incrementalEvaluation: true, incrementalDependencies: true, circuitChunkGates: 128, prefixCacheBytes: 8388608, prefixStride: 16, normalizedCacheEntries: 10000, balancedWorkers: true },
 	cache: { lookupPolicy: 'lru' as 'fifo' | 'lru', lookupEntries: 1000000, processedEntries: 1000000, shuffleEntries: 100000, subsetEntries: 100000, windowKeyBytes: 16777216 },
 	database: { tables: [{ wires: 3, gates: 6 }, { wires: 4, gates: 5 }, { wires: 5, gates: 2 }], queryBatchSize: 900, lookupBatchMilliseconds: 0, statementCacheEntries: 16, sharedTables: true, sharedTableBytes: 33554432, sharedTableMaximumRows: 100000, memoryMapBytes: 268435456, generationStates: 0, generationBatchRows: 3000, generationReadRows: 4096, generationCacheMegabytes: 256, generationTempStore: 'file' as 'file' | 'memory', generationJournalMode: 'wal' as 'wal' | 'delete', generationSynchronous: 'full' as 'full' | 'normal', generationWorkers: 8, generationQueueBatches: 2, generationMinimumWork: 100000, etaWindowSamples: 5, etaWarmupSamples: 3, etaSmoothing: 0.2, etaMaximumSlowdown: 4 },
-	benchmark: { generationTables: [{ wires: 3, gates: 3 }, { wires: 4, gates: 2 }], generationOutputName: 'generation-benchmark.json', generationTimeoutSeconds: 600, variants: [] as string[], decayFactor: 0.98, mode: 'comparison' as 'comparison' | 'ablation', caseManifest: 'benchmarks/cases.json', caseOutputDirectory: 'benchmark-cases', seconds: 10, repeats: 3, seed: 1729, workerCounts: [1, 2, 4], maximumChecks: 0, maximumOverrunSeconds: 30, outputName: 'benchmark.json' },
+	benchmark: { dedupSeenRows: [10000, 100000, 1000000], dedupCandidateFunctions: 2000, dedupMasksPerFunction: 4, dedupOutputName: 'dedup-benchmark.json', generationTables: [{ wires: 3, gates: 3 }, { wires: 4, gates: 2 }], generationOutputName: 'generation-benchmark.json', generationTimeoutSeconds: 600, variants: [] as string[], decayFactor: 0.98, mode: 'comparison' as 'comparison' | 'ablation', caseManifest: 'benchmarks/cases.json', caseOutputDirectory: 'benchmark-cases', seconds: 10, repeats: 3, seed: 1729, workerCounts: [1, 2, 4], maximumChecks: 0, maximumOverrunSeconds: 30, outputName: 'benchmark.json' },
 	synthesis: { templates: true, templateEntries: 10000, maximumWires: 3, maximumWindowGates: 8, maximumReplacementGates: 3, attemptEvery: 100, timeoutMs: 100, states: 2000, smt: false, meetInMiddle: false, equalitySaturation: false },
 }
 export type SolverConfig = typeof defaults
@@ -34,8 +34,8 @@ export function parseConfig(value: unknown): SolverConfig {
 				if (!Array.isArray(setting) || setting.some(name => typeof name !== 'string' || !allowed.includes(name)) || new Set(setting).size !== setting.length) throw new Error('Invalid benchmark variants')
 				target[key] = setting.slice(); continue
 			}
-			if (section === 'benchmark' && key === 'workerCounts') {
-				if (!Array.isArray(setting) || !setting.length || setting.some(n => !Number.isSafeInteger(n) || n < 1) || new Set(setting).size !== setting.length) throw new Error('benchmark.workerCounts needs distinct positive integers')
+			if (section === 'benchmark' && (key === 'workerCounts' || key === 'dedupSeenRows')) {
+				if (!Array.isArray(setting) || !setting.length || setting.some(n => !Number.isSafeInteger(n) || n < 1) || new Set(setting).size !== setting.length) throw new Error(`benchmark.${key} needs distinct positive integers`)
 				target[key] = setting.slice(); continue
 			}
 			if ((section === 'database' && key === 'tables') || (section === 'benchmark' && key === 'generationTables')) {
@@ -59,6 +59,7 @@ export function parseConfig(value: unknown): SolverConfig {
 	const { search, timing, database, validation, workers, files } = result
 	if (!['file', 'memory'].includes(database.generationTempStore) || !['wal', 'delete'].includes(database.generationJournalMode) || !['full', 'normal'].includes(database.generationSynchronous)) throw new Error('Invalid generation SQLite settings')
 	if (database.generationCacheMegabytes > 1048576) throw new Error('Generation cache budget exceeds supported limit')
+	if (result.benchmark.dedupMasksPerFunction > 256 || Math.ceil(result.benchmark.dedupCandidateFunctions / 2) > Math.min(...result.benchmark.dedupSeenRows)) throw new Error('Invalid dedup benchmark dimensions')
 	if (!['comparison', 'ablation'].includes(result.benchmark.mode)) throw new Error('Invalid benchmark mode')
 	if (!['fifo', 'lru'].includes(result.cache.lookupPolicy)) throw new Error('Invalid lookup cache policy')
 	if (workers.concurrencyDatabaseFraction > 1 || workers.concurrencyRateTolerance >= 1 || database.sharedTableBytes > 0x7fffffff) throw new Error('Invalid resource limits')
@@ -70,7 +71,7 @@ export function parseConfig(value: unknown): SolverConfig {
 	if (search.subsetMinimum < 2 || search.sliceMinimum < 2 || search.subsetMaximum < search.subsetMinimum || search.sliceMaximum < search.sliceMinimum) throw new Error('Invalid search size ranges')
 	if (search.exactMaximumWires > 16 || search.exactMaximumWires > validation.maximumWires || database.tables.some(table => table.wires > validation.maximumWires) || validation.maximumWires > 1024 || database.queryBatchSize > 900) throw new Error('Config exceeds supported wire or database batch limits')
 	if (timing.improvedRoundMinutes > timing.roundMinutes || workers.maximumChunkFraction > 1) throw new Error('Invalid round timing or chunk fraction')
-	for (const name of [files.latestName, files.workerDirectory, files.progressDirectory, result.benchmark.outputName, result.benchmark.caseOutputDirectory, result.benchmark.generationOutputName]) {
+	for (const name of [files.latestName, files.workerDirectory, files.progressDirectory, result.benchmark.outputName, result.benchmark.caseOutputDirectory, result.benchmark.generationOutputName, result.benchmark.dedupOutputName]) {
 		if (name === '.' || name === '..' || /[\\/]/.test(name)) throw new Error('Output names must be single file or directory names')
 	}
 	return result

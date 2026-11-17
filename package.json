@@ -12,7 +12,8 @@
 		"benchmark:cases": "npx tsc && node dist/benchmark-cases.js",
 		"benchmark": "npx tsc && node dist/benchmark.js",
 		"optimize-prof": "npx tsc && node dist/launch.js --profile",
-		"benchmark:generation": "npx tsc && node dist/generation-benchmark.js"
+		"benchmark:generation": "npx tsc && node dist/generation-benchmark.js",
+		"benchmark:dedup": "npx tsc && node dist/dedup-benchmark.js"
 	},
 	"keywords": [],
 	"author": "",
