@@ -531,11 +531,50 @@ assert.ok(middle && middle.length === 1)
 assert.equal(functionKey(middle!, 2), functionKey([not0], 2))
 assert.equal(meetInMiddle(unsafe, 2, catalog, 2, 100, 500), undefined)
 assert.equal(truthKey(generateCombinations(4).flat()).length, 8)
-const { synthesizeSMT } = await import('./smt.js')
-const smtResult = await synthesizeSMT([singleGate[0], singleGate[0], singleGate[0]], 2, 1, 5000)
-assert.ok(smtResult && smtResult.length <= 1)
-assert.equal(functionKey(smtResult!, 2), functionKey(singleGate, 2))
-console.log('Template, semantic generation, meet-in-the-middle, equality graph and SMT regressions passed')
+const { synthesizeNative } = await import('./semantic.js')
+const nativeResult = synthesizeNative([singleGate[0], singleGate[0], singleGate[0]], 2, 1, 2000, 5000)
+assert.ok(nativeResult && nativeResult.length === 1)
+assert.equal(functionKey(nativeResult!, 2), functionKey(singleGate, 2))
+const erased = synthesizeNative(unsafe, 2, 1, 2000, 5000)
+assert.ok(erased && erased.length === 1)
+assert.equal(functionKey(erased!, 2), functionKey(unsafe, 2))
+assert.deepEqual(synthesizeNative([not0, not0], 2, 1, 2000, 5000), [])
+assert.equal(synthesizeNative([not0, not1], 2, 1, 2000, 5000), undefined)
+assert.equal(synthesizeNative([not0, not1, not0], 2, 2, 0, 5000), undefined)
+assert.equal(synthesizeNative([not0, not1, not0], 2, 2, 2000, 0), undefined)
+assert.throws(() => synthesizeNative(unsafe, 5, 1, 2000, 5000))
+// Every two-wire single-gate transformation, including repeated controls and
+// non-bijective gates, must be recoverable from an equivalent padded circuit.
+const allSingle = new Map<string, Gate>()
+for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) for (let target = 0; target < 2; target++) for (let gate_i = 0; gate_i < 16; gate_i++) {
+	const gate = { a, b, target, gate_i }
+	allSingle.set(functionKey([gate], 2), gate)
+}
+for (const gate of allSingle.values()) {
+	const padded = [gate, not0, not0]
+	const result = synthesizeNative(padded, 2, 1, 2000, 5000)
+	assert.ok(result)
+	assert.equal(functionKey(result!, 2), functionKey(padded, 2))
+}
+const pair = [singleGate[0], not0]
+const pairResult = synthesizeNative([...pair, not1, not1], 2, 2, 2000, 5000)
+assert.ok(pairResult && pairResult.length === 2)
+assert.deepEqual(circuitState(pairResult!, 2), circuitState(pair, 2))
+const { resetStrategyStats, recordStrategy, strategySnapshot } = await import('./strategy-stats.js')
+const { formatStrategyActivity } = await import('./logging.js')
+resetStrategyStats()
+recordStrategy('native', { states: 2000 }, performance.now(), 4, 2, true)
+recordStrategy('native', { states: 2000 }, performance.now(), 4, 4, false)
+const activityStats = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const, strategies: strategySnapshot() }
+const summary = formatStrategyActivity([{ activity: activityStats, updatedAtMs: 0, done: true }, { activity: activityStats, updatedAtMs: 0, done: false }])
+assert.match(summary, /4 gates removed, 2\/4 improving attempts/)
+assert.match(summary, /"states":2000/)
+assert.match(formatStrategyActivity([]), /awaiting worker reports/)
+resetStrategyStats()
+assert.deepEqual(strategySnapshot(), [])
+assert.throws(() => parseConfig({ synthesis: { smt: true } }), /Unknown config setting/)
+assert.equal(parseConfig({ synthesis: { native: true } }).synthesis.native, true)
+console.log('Template, semantic generation, meet-in-the-middle, equality graph, native synthesis and strategy summary regressions passed')
 
 assert.equal(parseConfig({ database: { memoryMapBytes: 0 } }).database.memoryMapBytes, 0)
 assert.throws(() => parseConfig({ database: { format: 'unknown' } }))

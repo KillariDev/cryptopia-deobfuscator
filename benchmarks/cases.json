@@ -33,7 +33,7 @@
       ]
     },
     "synthesis": {
-      "smt": false,
+      "native": false,
       "meetInMiddle": false,
       "equalitySaturation": false
     }

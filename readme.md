@@ -536,16 +536,31 @@ no machine-dependent speed threshold.
 The `synthesis` section controls additional local optimizers:
 
 - `templates` enables target/control-safe structural identities and pair merging before lookup. Exact rewrites are learned as normalized templates only after exhaustive verification; `templateEntries` bounds the cache.
-- `smt` enables Z3 counterexample-guided synthesis. Candidate gate fields are symbolic; counterexamples refine them until local equivalence is proven. `timeoutMs` bounds search after WASM startup, and helper threads are cleaned up after every attempt.
+- `native` enables bounded forward semantic synthesis over all Boolean gates, including non-bijective gates and target/control overlap. It searches by increasing gate count, merges equivalent truth states, and prunes prefixes that merge inputs the target must distinguish. `states` bounds retained states; `timeoutMs` bounds the whole attempt. Accepted replacements are exhaustively verified.
 - `meetInMiddle` searches small bijective functions bidirectionally using self-inverse gates with targets separate from controls.
 - `equalitySaturation` explores bounded equivalent circuit sequences through commuting alternatives and templates, then selects the cheapest discovered circuit.
 
-SMT, meet-in-the-middle and equality saturation remain opt-in. Scope is limited
+Native synthesis, meet-in-the-middle and equality saturation remain opt-in. Scope is limited
 by `maximumWires`, `maximumWindowGates`, `maximumReplacementGates`, `attemptEvery`,
 `states` and `timeoutMs`. Optional synthesis runs after ordinary local search
 fails and is serialized per worker. Returned replacements are exhaustively
 checked. Timeouts are heuristic failed attempts, not proofs of impossibility.
 Global checkpoint verification remains probabilistic.
+
+The former `synthesis.smt` setting is replaced by `synthesis.native` (still false
+by default); update custom configuration files accordingly. The optimizer no
+longer requires Z3 or WASM. Native search is bounded and may find different
+replacements than SMT within the same time budget.
+
+Periodic and end-of-round summaries report strategy attempts, improving rewrites,
+gates removed, worker-seconds and the settings used. Results are grouped by
+strategy and settings across jobs in the current round, including completed jobs.
+Initial gate simplification, templates, variable elimination, rainbow lookup and each optional synthesis
+strategy are attributed separately. Variable elimination combines exact and
+probabilistic work and reports whether probabilistic search was enabled. Counts
+include improvements with no gate reduction; worker-seconds are summed execution
+time, not wall time. These are observed contributions in pipeline order, not
+independent ablation results. Shuffling is preparatory work and is not included in strategy totals.
 
 ## Search-loop overhead controls
 

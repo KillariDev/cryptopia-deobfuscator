@@ -1,0 +1,405 @@
+{
+  "settings": {
+    "maximumReplacementGates": 3,
+    "states": 2000,
+    "timeoutMs": 100
+  },
+  "results": [
+    {
+      "name": "cancel",
+      "wires": 2,
+      "inputGates": 2,
+      "native": {
+        "elapsedMs": 0.4345910000000117,
+        "replacementGates": 0
+      },
+      "z3": {
+        "elapsedMs": 390.321437,
+        "replacementGates": 0
+      },
+      "gates": [
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 15
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 15
+        }
+      ]
+    },
+    {
+      "name": "triple",
+      "wires": 2,
+      "inputGates": 3,
+      "native": {
+        "elapsedMs": 0.8187179999999898,
+        "replacementGates": 1
+      },
+      "z3": {
+        "elapsedMs": 358.986177,
+        "replacementGates": null
+      },
+      "gates": [
+        {
+          "a": 0,
+          "b": 0,
+          "target": 1,
+          "gate_i": 3
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 1,
+          "gate_i": 3
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 1,
+          "gate_i": 3
+        }
+      ]
+    },
+    {
+      "name": "non-bijective",
+      "wires": 2,
+      "inputGates": 2,
+      "native": {
+        "elapsedMs": 0.3277860000000601,
+        "replacementGates": 1
+      },
+      "z3": {
+        "elapsedMs": 340.7552850000001,
+        "replacementGates": null
+      },
+      "gates": [
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 3
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 3
+        }
+      ]
+    },
+    {
+      "name": "two-gate",
+      "wires": 2,
+      "inputGates": 4,
+      "native": {
+        "elapsedMs": 0.5793570000000727,
+        "replacementGates": 2
+      },
+      "z3": {
+        "elapsedMs": 326.810522,
+        "replacementGates": null
+      },
+      "gates": [
+        {
+          "a": 0,
+          "b": 0,
+          "target": 1,
+          "gate_i": 3
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 15
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 1,
+          "gate_i": 3
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 1,
+          "gate_i": 3
+        }
+      ]
+    },
+    {
+      "name": "obfuscated-window-175",
+      "wires": 3,
+      "inputGates": 3,
+      "gates": [
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 0
+        },
+        {
+          "a": 2,
+          "b": 0,
+          "target": 1,
+          "gate_i": 3
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 0
+        }
+      ],
+      "native": {
+        "elapsedMs": 2.932350000000014,
+        "replacementGates": 1
+      },
+      "z3": {
+        "elapsedMs": 373.150223,
+        "replacementGates": null
+      }
+    },
+    {
+      "name": "obfuscated-window-180",
+      "wires": 3,
+      "inputGates": 3,
+      "gates": [
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 15
+        },
+        {
+          "a": 0,
+          "b": 2,
+          "target": 1,
+          "gate_i": 10
+        },
+        {
+          "a": 1,
+          "b": 0,
+          "target": 2,
+          "gate_i": 12
+        }
+      ],
+      "native": {
+        "elapsedMs": 5.517685000000029,
+        "replacementGates": null
+      },
+      "z3": {
+        "elapsedMs": 337.21667500000007,
+        "replacementGates": null
+      }
+    },
+    {
+      "name": "obfuscated-window-181",
+      "wires": 2,
+      "inputGates": 3,
+      "gates": [
+        {
+          "a": 0,
+          "b": 1,
+          "target": 0,
+          "gate_i": 10
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 1,
+          "gate_i": 12
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 1,
+          "gate_i": 15
+        }
+      ],
+      "native": {
+        "elapsedMs": 0.48550299999999424,
+        "replacementGates": 2
+      },
+      "z3": {
+        "elapsedMs": 349.8986789999999,
+        "replacementGates": null
+      }
+    },
+    {
+      "name": "obfuscated-window-182",
+      "wires": 2,
+      "inputGates": 3,
+      "gates": [
+        {
+          "a": 1,
+          "b": 0,
+          "target": 0,
+          "gate_i": 12
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 15
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 0
+        }
+      ],
+      "native": {
+        "elapsedMs": 0.3873880000001009,
+        "replacementGates": 1
+      },
+      "z3": {
+        "elapsedMs": 324.6532829999999,
+        "replacementGates": null
+      }
+    },
+    {
+      "name": "obfuscated-window-183",
+      "wires": 2,
+      "inputGates": 3,
+      "gates": [
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 15
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 0
+        },
+        {
+          "a": 0,
+          "b": 1,
+          "target": 0,
+          "gate_i": 5
+        }
+      ],
+      "native": {
+        "elapsedMs": 0.6602920000000267,
+        "replacementGates": 1
+      },
+      "z3": {
+        "elapsedMs": 323.895757,
+        "replacementGates": null
+      }
+    },
+    {
+      "name": "obfuscated-window-192",
+      "wires": 3,
+      "inputGates": 3,
+      "gates": [
+        {
+          "a": 1,
+          "b": 0,
+          "target": 0,
+          "gate_i": 3
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 2,
+          "gate_i": 15
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 2,
+          "gate_i": 0
+        }
+      ],
+      "native": {
+        "elapsedMs": 0.6727219999997942,
+        "replacementGates": 2
+      },
+      "z3": {
+        "elapsedMs": 323.0610650000001,
+        "replacementGates": null
+      }
+    },
+    {
+      "name": "obfuscated-window-193",
+      "wires": 2,
+      "inputGates": 3,
+      "gates": [
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 15
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 0
+        },
+        {
+          "a": 0,
+          "b": 1,
+          "target": 0,
+          "gate_i": 10
+        }
+      ],
+      "native": {
+        "elapsedMs": 0.24914200000011988,
+        "replacementGates": 1
+      },
+      "z3": {
+        "elapsedMs": 326.61774799999966,
+        "replacementGates": null
+      }
+    },
+    {
+      "name": "obfuscated-window-194",
+      "wires": 3,
+      "inputGates": 3,
+      "gates": [
+        {
+          "a": 0,
+          "b": 0,
+          "target": 0,
+          "gate_i": 0
+        },
+        {
+          "a": 0,
+          "b": 1,
+          "target": 0,
+          "gate_i": 10
+        },
+        {
+          "a": 0,
+          "b": 0,
+          "target": 2,
+          "gate_i": 0
+        }
+      ],
+      "native": {
+        "elapsedMs": 0.7801880000001802,
+        "replacementGates": 1
+      },
+      "z3": {
+        "elapsedMs": 324.9782580000001,
+        "replacementGates": null
+      }
+    }
+  ],
+  "notes": [
+    "Single run, not a production throughput benchmark. Z3 timings include initialization; its search budget starts after initialization.",
+    "Real windows are the first eight distinct eligible contiguous three-gate windows from data/obfuscated.json, not necessarily failures of ordinary optimization.",
+    "Native search has an additional 2000-state cap. Null means no replacement within the budget, not impossibility.",
+    "The dependency was removed after this comparison; these are recorded migration measurements, not a maintained Z3 benchmark."
+  ]
+}

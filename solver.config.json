@@ -145,7 +145,7 @@
     "attemptEvery": 100,
     "timeoutMs": 100,
     "states": 2000,
-    "smt": false,
+    "native": false,
     "meetInMiddle": false,
     "equalitySaturation": false
   },
