@@ -182,7 +182,7 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 		try {
 			await generateOnDisk(db, wires, gates, catalog, {
 				readRows: config.database.generationReadRows, stageRows: config.database.generationBatchRows,
-				parameterLimit: config.database.generationSqlParameters, preparedInserts: config.database.generationPreparedInserts, sortStaging: config.database.generationSortStaging, statementCacheEntries: config.database.generationStatementCacheEntries, stateLimit: config.database.generationStates,
+				parameterLimit: config.database.generationSqlParameters, preparedInserts: config.database.generationPreparedInserts, appendStaging: config.database.generationAppendStaging, aggregateMerge: config.database.generationAggregateMerge, directInputMerge: config.database.generationDirectInputMerge, sortStaging: config.database.generationSortStaging, statementCacheEntries: config.database.generationStatementCacheEntries, stateLimit: config.database.generationStates,
 				keepState: true,
 				workers, queueBatches: config.database.generationQueueBatches, minimumWork: config.database.generationMinimumWork,
 				onProfile: value => { profile = value },

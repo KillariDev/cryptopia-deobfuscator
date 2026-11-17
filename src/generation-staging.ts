@@ -2,8 +2,9 @@ import sqlite3 from 'sqlite3'
 import { allSQL, runSQL } from './sql.js'
 
 export type StagingRow = [Buffer, number, number, Buffer, number]
-export type StagingOptions = { parameterLimit: number, cacheEntries: number, prepared: boolean, sort: boolean }
+export type StagingOptions = { parameterLimit: number, cacheEntries: number, prepared: boolean, sort: boolean, append?: boolean, appendGrouping?: boolean }
 const prefix = 'INSERT INTO BuildCandidates VALUES '
+const appendPrefix = 'INSERT INTO BuildCandidateRows(state,mask,reads,gates,wires) VALUES '
 const suffix = ' ON CONFLICT(state,mask) DO UPDATE SET reads=excluded.reads,gates=excluded.gates WHERE excluded.reads<BuildCandidates.reads'
 
 /** This connection does not lower SQLite's runtime limit; honor its compiled ceiling. */
@@ -25,6 +26,7 @@ export class StagingWriter {
 	private constructor(private db: sqlite3.Database, readonly parameterLimit: number, private options: StagingOptions) {}
 	static async create(db: sqlite3.Database, options: StagingOptions) {
 		if (!Number.isSafeInteger(options.cacheEntries) || options.cacheEntries < 1) throw new Error('Invalid staging statement cache size')
+		if (options.append) await runSQL(db, 'CREATE TEMP TABLE IF NOT EXISTS BuildCandidateRows(id INTEGER PRIMARY KEY,state BLOB NOT NULL,mask INTEGER NOT NULL,reads INTEGER NOT NULL,gates BLOB NOT NULL,wires INTEGER NOT NULL)')
 		return new StagingWriter(db, await stagingParameterLimit(db, options.parameterLimit), options)
 	}
 	private finalize(statement: sqlite3.Statement) { return new Promise<void>((resolve, reject) => statement.finalize(error => error ? reject(error) : resolve())) }
@@ -32,13 +34,14 @@ export class StagingWriter {
 		if (this.closing) return Promise.reject(new Error('Staging writer is closed'))
 		const task = this.tail.then(async () => {
 			if (this.options.sort) rows.sort((a, b) => Buffer.compare(a[0], b[0]) || a[1] - b[1])
+			const insertPrefix = this.options.append ? appendPrefix : prefix, insertSuffix = this.options.append ? '' : suffix
 			const size = Math.floor(this.parameterLimit / 5)
 			for (let offset = 0; offset < rows.length; offset += size) {
 				const count = Math.min(size, rows.length - offset)
 				let statement = this.statements.get(count)
 				const params = rows.slice(offset, offset + count).flat()
 				if (!this.options.prepared) {
-					await runSQL(this.db, prefix + Array(count).fill('(?,?,?,?,?)').join(',') + suffix, params)
+					await runSQL(this.db, insertPrefix + Array(count).fill('(?,?,?,?,?)').join(',') + insertSuffix, params)
 				} else {
 					if (statement) this.statements.delete(count)
 					else {
@@ -47,7 +50,7 @@ export class StagingWriter {
 							this.statements.delete(oldSize); await this.finalize(oldest)
 						}
 						statement = await new Promise<sqlite3.Statement>((resolve, reject) => {
-							const prepared = this.db.prepare(prefix + Array(count).fill('(?,?,?,?,?)').join(',') + suffix, error => error ? reject(error) : resolve(prepared))
+							const prepared = this.db.prepare(insertPrefix + Array(count).fill('(?,?,?,?,?)').join(',') + insertSuffix, error => error ? reject(error) : resolve(prepared))
 						})
 						this.stats.statementsPrepared++
 					}
@@ -67,6 +70,32 @@ export class StagingWriter {
 		this.tail = task.catch(() => {})
 		return task
 	}
+
+	/** Called once after a complete read batch, inside the caller's transaction. */
+	materialize(): Promise<void> {
+		if (this.closing) return Promise.reject(new Error('Staging writer is closed'))
+		if (!this.options.append) return this.tail.then(() => {})
+		const task = this.tail.then(async () => {
+			await runSQL(this.db, 'DELETE FROM BuildCandidates')
+			const maxId = (await allSQL<{ maximum: number }>(this.db, 'SELECT COALESCE(MAX(id),0) AS maximum FROM BuildCandidateRows'))[0].maximum
+			if ((this.options.appendGrouping ?? true) && maxId <= 0x7fffffff) {
+				// uint32 reads * (maxId+1) + id fits signed int64 for this bound.
+				// Unique ids make the minimum unique, preserving the first equal-cost row.
+				await runSQL(this.db, `INSERT INTO BuildCandidates SELECT state,mask,reads,gates,wires FROM (
+				 SELECT state,mask,reads,gates,wires,MIN(reads * CAST(? AS INTEGER) + id) AS quality FROM BuildCandidateRows GROUP BY state,mask
+				) WHERE quality IS NOT NULL`, [maxId + 1])
+			} else {
+				// Keep exact ordering even for batches whose row ids exceed the safe score bound.
+				await runSQL(this.db, `INSERT INTO BuildCandidates SELECT state,mask,reads,gates,wires FROM (
+				 SELECT state,mask,reads,gates,wires,ROW_NUMBER() OVER (PARTITION BY state,mask ORDER BY reads,id) AS preference FROM BuildCandidateRows
+				) WHERE preference=1`)
+			}
+			await runSQL(this.db, 'DELETE FROM BuildCandidateRows')
+		})
+		this.tail = task.catch(() => {})
+		return task
+	}
+
 	close() {
 		return this.closing ??= this.tail.then(async () => {
 			const results = await Promise.allSettled([...this.statements.values()].map(statement => this.finalize(statement)))

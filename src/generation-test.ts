@@ -144,6 +144,17 @@ try {
 			assert.equal(profile!.workersUsed, workers === 1 ? 0 : workers)
 		} finally { await close(db) }
 	}
+	for (const [index, controls] of [
+		{ appendStaging: true, aggregateMerge: true, directInputMerge: true },
+		{ appendStaging: true, aggregateMerge: false, directInputMerge: false },
+		{ appendStaging: false, aggregateMerge: false, directInputMerge: true },
+		{ appendStaging: false, aggregateMerge: true, directInputMerge: false },
+	].entries()) {
+		const db = await open(`merge-controls-${index}.db`)
+		try { await generateOnDisk(db, 2, 3, gates, { ...options, ...controls }); assert.deepEqual(await check(db), reference, 'staging/merge controls preserve exact representatives') }
+		finally { await close(db) }
+	}
+
 	// Stop and restart with a different worker count and task size.
 	let db = await open('resume.db')
 	try {
@@ -171,7 +182,7 @@ try {
 		let failed = false
 		db.prepare = ((query: string, ...args: unknown[]) => {
 			const statement = (nativePrepare as Function)(query, ...args) as sqlite3.Statement
-			if (query.startsWith('INSERT INTO BuildCandidates')) {
+			if ((query.startsWith('INSERT INTO BuildCandidates') || query.startsWith('INSERT INTO BuildCandidateRows'))) {
 				const nativeRun = statement.run.bind(statement)
 				statement.run = ((...values: unknown[]) => {
 					const params = values[0] as unknown[]
@@ -185,7 +196,7 @@ try {
 			}
 			return statement
 		}) as typeof db.prepare
-		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, stageRows: 1 }), /staging write failed/)
+		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, stageRows: 1, appendStaging: true }), /staging write failed/)
 		assert.equal((await rows(db)).length, 0)
 		assert.equal((await allSQL<{ processed: number }>(db, 'SELECT processed FROM BuildMeta'))[0].processed, 0)
 		await generateOnDisk(db, 2, 3, gates, options)
@@ -202,7 +213,7 @@ try {
 	db = await open('final-resume.db')
 	try {
 		let failed = false, finalBatches = 0
-		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, keepState: true, beforeCommit: async () => {
+		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, keepState: true, appendStaging: true, beforeCommit: async () => {
 			const depth = (await allSQL<{ depth: number }>(db, 'SELECT depth FROM BuildMeta'))[0].depth
 			assert.equal((await allSQL<{ count: number }>(db, 'SELECT count(*) AS count FROM BuildFrontier WHERE depth=3'))[0].count, 0, 'last-depth candidates never enter the frontier')
 			if (depth === 2 && ++finalBatches === 2) { failed = true; throw new Error('final-layer interruption') }

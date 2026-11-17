@@ -14,7 +14,8 @@
 		"optimize-prof": "npx tsc && node dist/launch.js --profile",
 		"benchmark:generation": "npx tsc && node dist/generation-benchmark.js",
 		"benchmark:dedup": "npx tsc && node dist/dedup-benchmark.js",
-		"benchmark:staging": "npx tsc && node dist/staging-benchmark.js"
+		"benchmark:staging": "npx tsc && node dist/staging-benchmark.js",
+		"benchmark:merge": "npx tsc && node dist/merge-benchmark.js"
 	},
 	"keywords": [],
 	"author": "",

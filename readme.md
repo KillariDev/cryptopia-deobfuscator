@@ -248,6 +248,20 @@ CPU expansion or database work limits a build. Extra CPU workers cannot eliminat
 a database bottleneck, and the defaults are conservative rather than a promise
 of linear speedup. Full 4-wire/5-gate build throughput has not been benchmarked.
 
+### Batch materialization and lookup merging
+
+- `database.generationAppendStaging: false` enables experimental append-only staging when set to `true`. Candidates first enter a temporary row-id table without a function-key index, then materialize once per complete read batch into exact `(state,mask)` winners. All masks are preserved; minimum reads and the first equal-cost payload win. The raw table is cleared transactionally and removed at completion. It adds temporary storage for raw rows and sorting; its total cost includes both appending and materialization.
+- `database.generationAggregateMerge: true` selects lookup winners with a streaming grouped minimum rather than a per-function window rank. The exact integer score orders used wires, uint32 reads and mask. The mask makes each minimum unique. This uses [SQLite's documented single-MIN row selection](https://sqlite.org/lang_select.html#bare_columns_in_an_aggregate_query); it does not approximate costs or discard mask alternatives needed for expansion. Set `false` for the window-query comparison.
+- `database.generationDirectInputMerge: true` merges each selected frontier prefix directly into output, without staging those inputs. A forced depth/id range index bounds this operation to the same rows returned by the read batch. Set `false` for the staged-input comparison.
+
+Append materialization also uses an exact grouped minimum when its row-id bound
+fits signed 64-bit scoring. Larger row IDs use explicit window ordering, retaining
+correct cost/tie selection without overflow. There is no persistent table-format
+change; changing any of these controls can resume an existing checkpoint.
+Normal logs remain one percentage/ETA. With append mode, materialization time is
+reported under deduplication, so assess staging plus deduplication rather than
+interpreting a drop in staging alone as a throughput gain.
+
 ### Staging benchmarks
 
 ```sh
@@ -258,19 +272,18 @@ npm run benchmark:staging -- --smoke
 The staging-only fixture uses four-variable/five-gate candidates produced by the
 expansion kernel. `benchmark.stagingRows` defaults to 200,000; `benchmark.repeats`
 controls repetitions, and `stagingOutputName` selects the JSON report under the
-data directory. Seven variants compare ordinary portable inserts, prepared
+data directory. Nine variants compare ordinary portable inserts, prepared
 portable inserts, ordinary/prepared larger batches, sorted prepared larger
-batches, and unsorted/sorted prepared wider batches. The portable budget comes
+batches, unsorted/sorted prepared wider batches, and append-only staging with grouped/window materialization. The portable budget comes
 from `database.queryBatchSize`, the larger budget from `generationSqlParameters`,
 and the wider budget from `benchmark.stagingWideSqlParameters` (16,384 by default).
 All respect the compiled SQLite ceiling. Smoke mode uses 2,000 rows and one
 repetition. It is included in `npm test` without a timing threshold.
 
 Trials rotate/reverse variant order, use fresh temporary tables and verify an
-identical complete staged-row digest, including cost/tie winners. Sorting and
-initial statement preparation are timed; setup, fixture generation, commit,
+identical complete staged-row digest, including cost/tie winners. Sorting, initial statement preparation and append materialization are timed; setup, fixture generation, commit,
 validation and statement finalization are excluded. Reports include settings,
-per-trial samples, effective parameter limits and prepared-statement/cache counts.
+per-trial samples, append/materialization splits, effective parameter limits and prepared-statement/cache counts.
 The writer/SQL-helper fingerprint identifies the measured compiled implementation.
 These same-process, shared-host trials do not establish cold-disk or full 4/5
 production throughput. A new statement budget changes SQL call grouping only;
@@ -289,6 +302,41 @@ per variant. Median creation time changed from about 2.50s to 2.28s and 15.79s t
 13.67s respectively, with identical complete coverage/cost digests. These timings
 include automatic cleanup and compaction, but exclude post-build validation.
 The 4/3 build has 832,167 functions; full production 4/5 gains remain unmeasured.
+
+### Lookup merge benchmarks
+
+```sh
+npm run benchmark:merge
+npm run benchmark:merge -- --smoke
+```
+
+This compares window and aggregate winner selection over the same staged fixture
+(`benchmark.stagingRows`), timing both new-output inserts and equal-cost hits.
+`benchmark.mergeOutputName` selects the report. Settings, query plans, per-trial
+samples and exact output/cost digests are saved; setup, commit and validation are
+outside statement timing. Shared-host/page-cache limitations apply. The smoke
+case is included in `npm test`.
+
+For complete builds, `benchmark.generationStagingComparison: true` expands the
+generation benchmark into indexed/append variants using the configured merge
+controls. An optional `--reference` repository adds its original generator as a
+third variant. Every trial uses a fresh database/process and verifies all output
+replacements and complete coverage/cost digests. The default remains `false` for
+the ordinary current/reference comparison.
+
+`benchmarks/results/2026-11-17-bulk-merges.json` records the selected controls and
+samples from 27 staging trials, six merge trials and 18 complete builds. On the
+500k-row staging fixture, grouped append materialization beat indexed staging
+(about 2.28s versus 3.20s median), but it lost that advantage in complete builds.
+The new aggregate merge reduced fixture insertion/hit medians from about
+251/285ms to 118/140ms with exact payload/cost matches.
+
+Complete 3/4 builds had medians of 2.18s for the reference, 1.99s for new merges
+with indexed staging, and 2.04s with append staging. For 4/3 they were
+14.24s, 13.48s and 14.02s respectively. Consequently indexed staging remains the
+default, with aggregate and direct-input merging enabled; append stays opt-in.
+All 38,016-function and 832,167-function coverage/cost digests matched. These are
+small/mid-size, shared-host measurements, not production 4/5 throughput estimates.
 
 ### Deduplication query scaling
 
