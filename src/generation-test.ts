@@ -127,7 +127,8 @@ const check = async (db: sqlite3.Database) => {
 		const variables = sequence.flatMap(getVars)
 		assert.deepEqual([row.gateCount, row.wireCount, row.readCount], [sequence.length, new Set(variables).size, variables.length])
 	}
-	assert.equal((await allSQL<{ functions: number }>(db, 'SELECT functions FROM BuildMeta'))[0].functions, actual.length)
+	const count = (await allSQL<{ functions: number }>(db, 'SELECT functions FROM BuildMeta'))[0].functions
+	assert.ok(count === -1 || count === actual.length, 'count is exact or explicitly untracked')
 	return actual
 }
 try {
@@ -163,13 +164,14 @@ try {
 		try {
 			let lastProfile: GenerationProfile | undefined
 			let activity: (() => import('./generation-prefetch.js').GenerationActivity) | undefined, overlapped = false
-			await generateOnDisk(db, 2, 3, gates, { ...options, ...controls, prefetch: true, prefetchMegabytes: 1 / 1048576, onActivity: read => { activity = read }, onProfile: value => { lastProfile = value }, beforeCommit: async () => { const status = activity?.(); if (status?.lookaheadBatches && status.bufferedBytes > 0) overlapped = true } })
+			await generateOnDisk(db, 2, 3, gates, { ...options, ...controls, stateLimit: controls.countFinalInserts ? 1000000 : 0, prefetch: true, prefetchMegabytes: 1 / 1048576, onActivity: read => { activity = read }, onProfile: value => { lastProfile = value }, beforeCommit: async () => { const status = activity?.(); if (status?.lookaheadBatches && status.bufferedBytes > 0) overlapped = true } })
 			assert.ok(overlapped, 'next-batch expansion results are ready while the current transaction is still active')
 			assert.deepEqual(await check(db), reference, 'staging/merge controls preserve exact representatives')
 			const committed = (await allSQL<{ count: number }>(db, 'SELECT SUM(processed) AS count FROM BuildLayers'))[0].count
 			assert.equal(lastProfile!.committedParents, committed)
 			assert.equal(lastProfile!.phaseActive, false)
 			if ('stagingWriters' in controls) assert.ok(lastProfile!.importMs > 0)
+			if (!controls.countFinalInserts) assert.ok(!activity!().operations!.some(row => row.name === 'final membership/count' || row.name === 'arm final counter'), 'unlimited jobs execute neither counting strategy')
 			if ('candidateCacheMegabytes' in controls) assert.ok(activity!().candidateCacheSkipped! > 0, 'cache removes real redundant SQL candidates')
 		}
 		finally { await close(db) }
@@ -262,8 +264,28 @@ try {
 		assert.equal(keySize, 1, 'two-wire generation keys are packed')
 	} finally { await close(db) }
 	db = await open('final-resume.db')
-	try { await generateOnDisk(db, 2, 3, gates, options); await check(db) }
+	try {
+		const before = (await allSQL<{ processed: number, functions: number }>(db, 'SELECT processed,functions FROM BuildMeta'))[0]
+		assert.equal(before.functions, -1, 'unlimited final batches persist an explicit unknown count')
+		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, stateLimit: 1 }), /state limit/)
+		assert.equal((await allSQL<{ processed: number }>(db, 'SELECT processed FROM BuildMeta'))[0].processed, before.processed)
+		await generateOnDisk(db, 2, 3, gates, { ...options, stateLimit: 1000000, stagingWriters: 2, countFinalInserts: true })
+		await check(db)
+		assert.equal((await allSQL<{ functions: number }>(db, 'SELECT functions FROM BuildMeta'))[0].functions, best.size)
+	}
 	finally { await close(db) }
+
+	// A final-only build must never copy scratch candidates into main temp storage.
+	db = await open('direct-shard.db')
+	try {
+		await runSQL(db, 'CREATE TEMP TABLE BuildCandidates(state BLOB NOT NULL,mask INTEGER NOT NULL,reads INTEGER NOT NULL,gates BLOB NOT NULL,wires INTEGER NOT NULL,PRIMARY KEY(state,mask)) WITHOUT ROWID')
+		await runSQL(db, "CREATE TEMP TRIGGER rejectCopy BEFORE INSERT ON BuildCandidates BEGIN SELECT RAISE(ABORT,'unnecessary scratch copy'); END")
+		await generateOnDisk(db, 2, 1, gates, { ...options, stagingWriters: 2, stateLimit: 1000000 })
+		const result = await rows(db)
+		assert.ok(result.length > 1)
+		assert.equal((await allSQL<{ functions: number }>(db, 'SELECT functions FROM BuildMeta'))[0].functions, result.length)
+		for (const row of result) assert.equal(stateIdentifier(circuitState(decodeGates(row.replacerGates), 2), 2), row.ioIdentifier.toString('hex'))
+	} finally { await close(db) }
 
 	// Four-variable packed keys and non-bijective controls agree with brute force.
 	const mixed: Gate[] = [

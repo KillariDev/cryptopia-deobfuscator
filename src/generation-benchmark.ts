@@ -51,7 +51,11 @@ try {
 			if (variant.append !== undefined || variant.prefetch !== undefined || variant.diagnostics !== undefined || variant.compact !== undefined || variant.countFinal !== undefined || variant.stream !== undefined) {
 				const settings = structuredClone(config)
 				if (variant.stream !== undefined) { settings.database.generationStreamStaging = variant.stream; settings.database.generationCandidateCacheMegabytes = variant.candidateCache! }
-				if (variant.countFinal !== undefined) settings.database.generationCountFinalInserts = variant.countFinal
+				if (variant.countFinal !== undefined) {
+					settings.database.generationCountFinalInserts = variant.countFinal
+					// Compare counting strategies with counting actually required.
+					settings.database.generationStates = Number.MAX_SAFE_INTEGER
+				}
 				if (variant.compact !== undefined) {
 					settings.database.generationCompactBindings = variant.compact
 					settings.database.generationStagingWriters = variant.writers!

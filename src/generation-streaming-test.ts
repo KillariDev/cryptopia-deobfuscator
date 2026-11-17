@@ -36,6 +36,19 @@ assert.equal(cache.accept(Buffer.from([1,2]), 2, 9), true, 'depth changes discar
 assert.throws(() => cache.accept(Buffer.from([1,2]), 256, 1), /Invalid/)
 assert.throws(() => cache.accept(Buffer.from([1,2]), 1, -1), /Invalid/)
 
+// Final-layer masks need no future continuation. Strictly better wire/read
+// costs dominate other masks; equal-cost different masks retain SQL tie choices.
+const finalCache = new GenerationCandidateCache(1, 64)
+finalCache.beginDepth(2, true)
+assert.equal(finalCache.accept(Buffer.from([7]), 3, 9), true)
+assert.equal(finalCache.accept(Buffer.from([7]), 5, 10), false)
+assert.equal(finalCache.accept(Buffer.from([7]), 1, 20), true)
+assert.equal(finalCache.accept(Buffer.from([7]), 3, 1), false)
+assert.equal(finalCache.accept(Buffer.from([7]), 2, 20), true)
+finalCache.beginDepth(2, false)
+assert.equal(finalCache.accept(Buffer.from([7]), 3, 1), true)
+assert.equal(finalCache.accept(Buffer.from([7]), 1, 20), true)
+
 const row = (id: number): StagingRow[] => [[Buffer.from([id]), 1, id, Buffer.from([id]), 1]]
 let release!: () => void
 const order: number[] = []

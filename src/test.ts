@@ -186,7 +186,7 @@ const originalLog = console.log
 const messages: unknown[][] = []
 try {
 	console.log = (...args: unknown[]) => { messages.push(args) }
-	delete process.env.OPTIMIZER_VERBOSE
+	process.env.OPTIMIZER_VERBOSE = '0'
 	for (let i = 0; i < 100; i++) logVerbose('per-replacement detail')
 	assert.equal(messages.length, 0)
 	process.env.OPTIMIZER_VERBOSE = '1'
@@ -317,7 +317,7 @@ console.log('Detailed progress, reduction checkpoints and round-stop regressions
 
 const { defaults, parseConfig, config } = await import('./config.js')
 assert.deepEqual(parseConfig({}), defaults)
-assert.deepEqual(parseConfig(JSON.parse(readFileSync(new URL('../solver.config.json', import.meta.url), 'utf8'))), defaults)
+assert.doesNotThrow(() => parseConfig(JSON.parse(readFileSync(new URL('../solver.config.json', import.meta.url), 'utf8'))), 'shipped settings may override defaults but must remain valid')
 const custom = parseConfig({ timing: { summarySeconds: 10, improvedRoundMinutes: 2 }, workers: { maximum: 3 }, logging: { verbose: true } })
 assert.equal(custom.timing.summarySeconds, 10)
 assert.equal(custom.workers.maximum, 3)

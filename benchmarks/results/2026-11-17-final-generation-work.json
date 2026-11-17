@@ -1,0 +1,3483 @@
+{
+  "schemaVersion": 1,
+  "smoke": false,
+  "node": "v24.22.3",
+  "platform": "linux",
+  "variants": [
+    {
+      "name": "reference",
+      "root": "/tmp/cryptopia-final-baseline-xw9e8bl6",
+      "revision": null,
+      "workingTreeDirty": null,
+      "runtimeSha256": "7fdcb50c5bcf67688934aadeff3721341ae922dc43f6962d9e77772423d34324"
+    },
+    {
+      "name": "current",
+      "root": "/workspace/cryptopia-deobfuscator",
+      "revision": "b4137923feff6a675317f742e10583b9b03e3543",
+      "workingTreeDirty": true,
+      "runtimeSha256": "564ae863f9c782141c1bb296e62ce235f4406ed8f5744e3c17b74799a80e5511"
+    }
+  ],
+  "results": [
+    {
+      "variant": "reference",
+      "repeat": 0,
+      "wires": 3,
+      "gates": 4,
+      "workers": 2,
+      "generationMs": 1360.670064,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 27.34151700000001,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 8.077562999999998,
+          "calls": 3
+        },
+        {
+          "name": "update frontier",
+          "ms": 14.749600999999927,
+          "calls": 3
+        },
+        {
+          "name": "consume frontier",
+          "ms": 8.186704000000134,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.437374000000034,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.471911999999918,
+          "calls": 6
+        },
+        {
+          "name": "final membership/count",
+          "ms": 30.589531000000193,
+          "calls": 3
+        },
+        {
+          "name": "final lookup",
+          "ms": 41.87551100000019,
+          "calls": 3
+        }
+      ],
+      "profile": {
+        "elapsedMs": 1150.486585,
+        "expansionMs": 173.8521820000003,
+        "writeMs": 341.65955200000013,
+        "readMs": 48.67003299999976,
+        "waitMs": 122.50605600000017,
+        "stagingMs": 111.15402199999971,
+        "dedupMs": 64.99774600000052,
+        "outputMs": 69.4104659999997,
+        "commitMs": 71.37898200000001,
+        "importMs": 24.718336000000193,
+        "committedParents": 12132,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 1312.800059,
+        "candidates": 691524,
+        "emitted": 328425,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 328425,
+        "skipped": 259658,
+        "cacheBytes": 18874368,
+        "peakBatches": 2
+      },
+      "cpuMs": 1722.911,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+      "peakDatabaseBytes": 5680880,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 786432,
+      "peakRssBytes": 286318592,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-b5nst9",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-b5nst9"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    },
+    {
+      "variant": "current",
+      "repeat": 0,
+      "wires": 3,
+      "gates": 4,
+      "workers": 2,
+      "generationMs": 1216.968308,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 24.544085000000052,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 6.356494999999995,
+          "calls": 3
+        },
+        {
+          "name": "update frontier",
+          "ms": 14.225672000000031,
+          "calls": 3
+        },
+        {
+          "name": "consume frontier",
+          "ms": 7.677056000000164,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.7021360000000527,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.3770250000000033,
+          "calls": 6
+        },
+        {
+          "name": "final lookup",
+          "ms": 42.75779399999999,
+          "calls": 6
+        }
+      ],
+      "profile": {
+        "elapsedMs": 1010.646903,
+        "expansionMs": 143.2627960000001,
+        "writeMs": 257.07324999999923,
+        "readMs": 49.70990300000011,
+        "waitMs": 126.8236989999998,
+        "stagingMs": 96.58561099999997,
+        "dedupMs": 31.784765999999763,
+        "outputMs": 67.54130199999963,
+        "commitMs": 55.59087099999988,
+        "importMs": 5.570699999999988,
+        "committedParents": 12132,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 1147.257152,
+        "candidates": 691524,
+        "emitted": 328425,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 328425,
+        "skipped": 259955,
+        "cacheBytes": 18874368,
+        "peakBatches": 2
+      },
+      "cpuMs": 1678.322,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+      "peakDatabaseBytes": 5664400,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 786432,
+      "peakRssBytes": 309284864,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-13kCYg",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-13kCYg"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    },
+    {
+      "variant": "current",
+      "repeat": 1,
+      "wires": 3,
+      "gates": 4,
+      "workers": 2,
+      "generationMs": 1224.610668,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 23.24462299999999,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 7.331633999999951,
+          "calls": 3
+        },
+        {
+          "name": "update frontier",
+          "ms": 13.697564000000114,
+          "calls": 3
+        },
+        {
+          "name": "consume frontier",
+          "ms": 7.628341999999975,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.6290469999999573,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.5426219999999375,
+          "calls": 6
+        },
+        {
+          "name": "final lookup",
+          "ms": 39.85420199999976,
+          "calls": 6
+        }
+      ],
+      "profile": {
+        "elapsedMs": 1016.2021649999999,
+        "expansionMs": 116.19834200000071,
+        "writeMs": 288.1741310000001,
+        "readMs": 72.69049699999982,
+        "waitMs": 95.27940700000045,
+        "stagingMs": 88.11692099999993,
+        "dedupMs": 32.1524730000001,
+        "outputMs": 63.31806400000005,
+        "commitMs": 97.24550699999992,
+        "importMs": 7.341166000000101,
+        "committedParents": 12132,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 1154.705727,
+        "candidates": 691524,
+        "emitted": 328425,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 328425,
+        "skipped": 259955,
+        "cacheBytes": 18874368,
+        "peakBatches": 2
+      },
+      "cpuMs": 1556.838,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+      "peakDatabaseBytes": 6769816,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 786432,
+      "peakRssBytes": 309428224,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-QtuuSi",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-QtuuSi"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    },
+    {
+      "variant": "reference",
+      "repeat": 1,
+      "wires": 3,
+      "gates": 4,
+      "workers": 2,
+      "generationMs": 1243.017396,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 28.752569999999906,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 7.061361999999917,
+          "calls": 3
+        },
+        {
+          "name": "update frontier",
+          "ms": 10.917789999999911,
+          "calls": 3
+        },
+        {
+          "name": "consume frontier",
+          "ms": 10.216890000000092,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.60087099999987,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.5094760000000633,
+          "calls": 6
+        },
+        {
+          "name": "final membership/count",
+          "ms": 29.55769100000009,
+          "calls": 3
+        },
+        {
+          "name": "final lookup",
+          "ms": 43.231085000000235,
+          "calls": 3
+        }
+      ],
+      "profile": {
+        "elapsedMs": 1045.779525,
+        "expansionMs": 123.73592500000001,
+        "writeMs": 329.8140750000005,
+        "readMs": 51.85185699999997,
+        "waitMs": 92.46187599999791,
+        "stagingMs": 100.33789300000015,
+        "dedupMs": 61.194954000000166,
+        "outputMs": 72.21247699999998,
+        "commitMs": 64.44692400000008,
+        "importMs": 31.62182700000011,
+        "committedParents": 12132,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 1175.342928,
+        "candidates": 691524,
+        "emitted": 328425,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 328425,
+        "skipped": 259658,
+        "cacheBytes": 18874368,
+        "peakBatches": 2
+      },
+      "cpuMs": 1539.451,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+      "peakDatabaseBytes": 6790368,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 786432,
+      "peakRssBytes": 313724928,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-6lwdgA",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-6lwdgA"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    },
+    {
+      "variant": "reference",
+      "repeat": 2,
+      "wires": 3,
+      "gates": 4,
+      "workers": 2,
+      "generationMs": 1542.799294,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 35.35241000000002,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 8.165983000000097,
+          "calls": 3
+        },
+        {
+          "name": "update frontier",
+          "ms": 12.793530999999973,
+          "calls": 3
+        },
+        {
+          "name": "consume frontier",
+          "ms": 9.312271000000123,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.746464999999887,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.4182670000000712,
+          "calls": 6
+        },
+        {
+          "name": "final membership/count",
+          "ms": 34.284770999999864,
+          "calls": 3
+        },
+        {
+          "name": "final lookup",
+          "ms": 44.225734999999986,
+          "calls": 3
+        }
+      ],
+      "profile": {
+        "elapsedMs": 1330.330054,
+        "expansionMs": 180.3751029999999,
+        "writeMs": 342.6024139999998,
+        "readMs": 67.34465000000017,
+        "waitMs": 212.5631129999996,
+        "stagingMs": 104.43621499999983,
+        "dedupMs": 68.49195300000025,
+        "outputMs": 79.86471699999981,
+        "commitMs": 63.39509099999998,
+        "importMs": 26.414437999999905,
+        "committedParents": 12132,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 1459.318108,
+        "candidates": 691524,
+        "emitted": 328425,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 328425,
+        "skipped": 259658,
+        "cacheBytes": 18874368,
+        "peakBatches": 2
+      },
+      "cpuMs": 2130.672,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+      "peakDatabaseBytes": 6790368,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 786432,
+      "peakRssBytes": 298110976,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-GQ8acT",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-GQ8acT"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    },
+    {
+      "variant": "current",
+      "repeat": 2,
+      "wires": 3,
+      "gates": 4,
+      "workers": 2,
+      "generationMs": 1462.3637330000001,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 23.473337000000015,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 8.101652000000115,
+          "calls": 3
+        },
+        {
+          "name": "update frontier",
+          "ms": 11.676046999999926,
+          "calls": 3
+        },
+        {
+          "name": "consume frontier",
+          "ms": 7.673764000000062,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.4689419999998563,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.5608020000001375,
+          "calls": 6
+        },
+        {
+          "name": "final lookup",
+          "ms": 41.547319000000016,
+          "calls": 6
+        }
+      ],
+      "profile": {
+        "elapsedMs": 1135.238598,
+        "expansionMs": 144.29675600000053,
+        "writeMs": 347.2619940000004,
+        "readMs": 55.39836700000029,
+        "waitMs": 109.52688900000066,
+        "stagingMs": 133.65272400000026,
+        "dedupMs": 30.787623999999994,
+        "outputMs": 65.22334600000016,
+        "commitMs": 111.01838499999997,
+        "importMs": 6.579915000000028,
+        "committedParents": 12132,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 1386.10307,
+        "candidates": 691524,
+        "emitted": 328425,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 328425,
+        "skipped": 259955,
+        "cacheBytes": 18874368,
+        "peakBatches": 2
+      },
+      "cpuMs": 1760.924,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+      "peakDatabaseBytes": 6769816,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 786432,
+      "peakRssBytes": 344113152,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-eIVQTD",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-eIVQTD"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    },
+    {
+      "variant": "reference",
+      "repeat": 0,
+      "wires": 4,
+      "gates": 3,
+      "workers": 2,
+      "generationMs": 10660.318312,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 56.92704200000057,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 6.076531999999986,
+          "calls": 2
+        },
+        {
+          "name": "update frontier",
+          "ms": 19.01239099999998,
+          "calls": 2
+        },
+        {
+          "name": "consume frontier",
+          "ms": 8.153710000000274,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.5349980000006553,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.577667000000929,
+          "calls": 6
+        },
+        {
+          "name": "final membership/count",
+          "ms": 717.3754799999979,
+          "calls": 4
+        },
+        {
+          "name": "final lookup",
+          "ms": 960.5083460000005,
+          "calls": 4
+        }
+      ],
+      "profile": {
+        "elapsedMs": 9948.272787,
+        "expansionMs": 999.4123159999878,
+        "writeMs": 5174.7325229999815,
+        "readMs": 120.76575200000022,
+        "waitMs": 980.1331370000167,
+        "stagingMs": 1691.046850999978,
+        "dedupMs": 754.0868299999988,
+        "outputMs": 1017.6604900000027,
+        "commitMs": 996.6835130000002,
+        "importMs": 715.2548390000018,
+        "committedParents": 13435,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 10075.408202,
+        "candidates": 2310820,
+        "emitted": 1750865,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 1750865,
+        "skipped": 809311,
+        "cacheBytes": 29360128,
+        "peakBatches": 2
+      },
+      "cpuMs": 12762.861,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+      "peakDatabaseBytes": 70751880,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 19238912,
+      "peakRssBytes": 1255989248,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-04Jy9f",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-04Jy9f"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    },
+    {
+      "variant": "current",
+      "repeat": 0,
+      "wires": 4,
+      "gates": 3,
+      "workers": 2,
+      "generationMs": 7440.592638,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 38.29332399999947,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 5.8085590000000025,
+          "calls": 2
+        },
+        {
+          "name": "update frontier",
+          "ms": 11.766167999999993,
+          "calls": 2
+        },
+        {
+          "name": "consume frontier",
+          "ms": 8.098678000001087,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.514370000000838,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.3878070000006346,
+          "calls": 6
+        },
+        {
+          "name": "final lookup",
+          "ms": 964.3978359999978,
+          "calls": 8
+        }
+      ],
+      "profile": {
+        "elapsedMs": 6617.49659,
+        "expansionMs": 475.3741960000043,
+        "writeMs": 2553.5441990000018,
+        "readMs": 48.28538099999969,
+        "waitMs": 557.5183409999985,
+        "stagingMs": 1112.5349670000012,
+        "dedupMs": 28.8723269999997,
+        "outputMs": 1002.9336130000006,
+        "commitMs": 403.0642480000002,
+        "importMs": 6.139044000000013,
+        "committedParents": 13435,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 6751.952763,
+        "candidates": 2310820,
+        "emitted": 1750865,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 1750865,
+        "skipped": 813300,
+        "cacheBytes": 29360128,
+        "peakBatches": 2
+      },
+      "cpuMs": 9719.336,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+      "peakDatabaseBytes": 70817416,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 19238912,
+      "peakRssBytes": 1301884928,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-mjA13A",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-mjA13A"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    },
+    {
+      "variant": "current",
+      "repeat": 1,
+      "wires": 4,
+      "gates": 3,
+      "workers": 2,
+      "generationMs": 6583.777644,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 40.03890400000034,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 5.654414999999972,
+          "calls": 2
+        },
+        {
+          "name": "update frontier",
+          "ms": 10.705073999999968,
+          "calls": 2
+        },
+        {
+          "name": "consume frontier",
+          "ms": 8.512119999999868,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.436455999998941,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.2211099999997828,
+          "calls": 6
+        },
+        {
+          "name": "final lookup",
+          "ms": 920.1854339999986,
+          "calls": 8
+        }
+      ],
+      "profile": {
+        "elapsedMs": 5944.557737,
+        "expansionMs": 385.8982730000002,
+        "writeMs": 2313.4689120000025,
+        "readMs": 55.12668600000046,
+        "waitMs": 532.9141220000034,
+        "stagingMs": 1013.8528310000015,
+        "dedupMs": 27.80002199999916,
+        "outputMs": 960.4313390000011,
+        "commitMs": 305.5136990000007,
+        "importMs": 5.871020999999985,
+        "committedParents": 13435,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 6071.430296,
+        "candidates": 2310820,
+        "emitted": 1750865,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 1750865,
+        "skipped": 813300,
+        "cacheBytes": 29360128,
+        "peakBatches": 2
+      },
+      "cpuMs": 9184.767,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+      "peakDatabaseBytes": 70817416,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 19238912,
+      "peakRssBytes": 1273991168,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-DveOen",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-DveOen"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    },
+    {
+      "variant": "reference",
+      "repeat": 1,
+      "wires": 4,
+      "gates": 3,
+      "workers": 2,
+      "generationMs": 6941.4245439999995,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 33.63553200000007,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 5.838314000000025,
+          "calls": 2
+        },
+        {
+          "name": "update frontier",
+          "ms": 10.689565999999957,
+          "calls": 2
+        },
+        {
+          "name": "consume frontier",
+          "ms": 7.712545999999463,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.4225559999998154,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.4184470000014926,
+          "calls": 6
+        },
+        {
+          "name": "final membership/count",
+          "ms": 608.1156949999995,
+          "calls": 4
+        },
+        {
+          "name": "final lookup",
+          "ms": 683.868848000001,
+          "calls": 4
+        }
+      ],
+      "profile": {
+        "elapsedMs": 6119.438271,
+        "expansionMs": 409.2110479999953,
+        "writeMs": 2812.777245999994,
+        "readMs": 48.805998000000784,
+        "waitMs": 504.2777230000052,
+        "stagingMs": 834.6724809999932,
+        "dedupMs": 635.5062369999998,
+        "outputMs": 717.7080320000007,
+        "commitMs": 281.82279300000056,
+        "importMs": 343.0677029999997,
+        "committedParents": 13435,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 6269.135798,
+        "candidates": 2310820,
+        "emitted": 1750865,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 1750865,
+        "skipped": 809311,
+        "cacheBytes": 29360128,
+        "peakBatches": 2
+      },
+      "cpuMs": 9227.786,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+      "peakDatabaseBytes": 70751880,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 19238912,
+      "peakRssBytes": 1318821888,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-VE2q0h",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-VE2q0h"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    },
+    {
+      "variant": "reference",
+      "repeat": 2,
+      "wires": 4,
+      "gates": 3,
+      "workers": 2,
+      "generationMs": 6948.977884000001,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 32.51377600000018,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 5.612140000000011,
+          "calls": 2
+        },
+        {
+          "name": "update frontier",
+          "ms": 10.656413999999984,
+          "calls": 2
+        },
+        {
+          "name": "consume frontier",
+          "ms": 8.170000999999615,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.3898910000011142,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.2897040000000857,
+          "calls": 6
+        },
+        {
+          "name": "final membership/count",
+          "ms": 655.0232110000002,
+          "calls": 4
+        },
+        {
+          "name": "final lookup",
+          "ms": 689.6613930000003,
+          "calls": 4
+        }
+      ],
+      "profile": {
+        "elapsedMs": 6324.367731,
+        "expansionMs": 408.1794089999933,
+        "writeMs": 3106.670918999995,
+        "readMs": 49.92554700000116,
+        "waitMs": 424.07046500000115,
+        "stagingMs": 1032.4521499999978,
+        "dedupMs": 682.4512939999986,
+        "outputMs": 722.3950679999982,
+        "commitMs": 321.3629499999998,
+        "importMs": 348.0094570000004,
+        "committedParents": 13435,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 6451.687792,
+        "candidates": 2310820,
+        "emitted": 1750865,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 1750865,
+        "skipped": 809311,
+        "cacheBytes": 29360128,
+        "peakBatches": 2
+      },
+      "cpuMs": 8991.016,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+      "peakDatabaseBytes": 70751880,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 19238912,
+      "peakRssBytes": 1282297856,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-Jyi92s",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-Jyi92s"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    },
+    {
+      "variant": "current",
+      "repeat": 2,
+      "wires": 4,
+      "gates": 3,
+      "workers": 2,
+      "generationMs": 6682.511254,
+      "operations": [
+        {
+          "name": "input lookup",
+          "ms": 38.979396999999324,
+          "calls": 6
+        },
+        {
+          "name": "insert seen",
+          "ms": 5.547342000000015,
+          "calls": 2
+        },
+        {
+          "name": "update frontier",
+          "ms": 11.531441000000086,
+          "calls": 2
+        },
+        {
+          "name": "consume frontier",
+          "ms": 11.236850000000175,
+          "calls": 6
+        },
+        {
+          "name": "update checkpoint",
+          "ms": 1.730605000000537,
+          "calls": 6
+        },
+        {
+          "name": "update layer",
+          "ms": 1.3461470000009967,
+          "calls": 6
+        },
+        {
+          "name": "final lookup",
+          "ms": 917.726956999999,
+          "calls": 8
+        }
+      ],
+      "profile": {
+        "elapsedMs": 5932.919441,
+        "expansionMs": 401.66668400000225,
+        "writeMs": 2198.2072939999994,
+        "readMs": 51.84711000000027,
+        "waitMs": 616.3521339999951,
+        "stagingMs": 888.8550189999992,
+        "dedupMs": 31.691379000000325,
+        "outputMs": 956.9101880000009,
+        "commitMs": 313.9322139999992,
+        "importMs": 6.818493999999987,
+        "committedParents": 13435,
+        "phaseActive": false,
+        "phase": "complete",
+        "phaseStarted": 6071.570962,
+        "candidates": 2310820,
+        "emitted": 1750865,
+        "batches": 6,
+        "workersUsed": 2,
+        "peakPending": 4
+      },
+      "staging": {
+        "checked": 1750865,
+        "skipped": 813300,
+        "cacheBytes": 29360128,
+        "peakBatches": 2
+      },
+      "cpuMs": 9128.744,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+      "peakDatabaseBytes": 70817416,
+      "storageMeasurement": "25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks",
+      "finalFileBytes": 19238912,
+      "peakRssBytes": 1278537728,
+      "settings": {
+        "runtime": {
+          "heapMegabytes": 16384
+        },
+        "files": {
+          "dataDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-oKP1cY",
+          "latestName": "latest.json",
+          "workerDirectory": "worker",
+          "progressDirectory": "progress",
+          "databaseDirectory": "/tmp/rainbow-benchmark-02Xzrk/trial-oKP1cY"
+        },
+        "workers": {
+          "maximum": 24,
+          "minimumChunkGates": 100,
+          "maximumChunkFraction": 0.5,
+          "jobsPerWorker": 4,
+          "jobSeconds": 30,
+          "shareTemplates": true,
+          "sharedTemplateSeconds": 15,
+          "sharedTemplateEntries": 64,
+          "sharedTemplateBatch": 16,
+          "adaptiveConcurrency": true,
+          "initialConcurrency": 4,
+          "concurrencySampleRounds": 2,
+          "concurrencyDatabaseFraction": 0.6,
+          "concurrencyRateTolerance": 0.05,
+          "memoryBudgetMegabytes": 8192
+        },
+        "timing": {
+          "roundMinutes": 25,
+          "improvedRoundMinutes": 5,
+          "summarySeconds": 30,
+          "workerReportSeconds": 5,
+          "databaseLogSeconds": 60,
+          "standaloneSaveSeconds": 60
+        },
+        "logging": {
+          "verbose": false,
+          "generationDiagnostics": true,
+          "generationDiagnosticsMinimumSeconds": 5,
+          "eventLoopResolutionMilliseconds": 20
+        },
+        "validation": {
+          "checkpointInputs": 20,
+          "probabilisticInputs": 202,
+          "maximumWires": 64
+        },
+        "search": {
+          "probabilistic": true,
+          "variableElimination": true,
+          "exactMaximumWires": 7,
+          "subsetMinimum": 2,
+          "subsetMaximum": 199,
+          "sliceMinimum": 2,
+          "sliceMaximum": 199,
+          "maximumInnerChunks": 5,
+          "minimumInnerChunkGates": 200,
+          "workerShufflePasses": 200,
+          "roundShufflePasses": 2000,
+          "adaptive": true,
+          "explorationEvery": 5,
+          "searchArms": 16,
+          "prioritizeChangedWires": true,
+          "incrementalEvaluation": true,
+          "prefixCacheBytes": 8388608,
+          "prefixStride": 16,
+          "normalizedCacheEntries": 10000,
+          "balancedWorkers": true,
+          "incrementalDependencies": true,
+          "schedulerDecay": 0.98,
+          "localSearch": true,
+          "localSearchSeeds": 32,
+          "localSearchRadius": 16,
+          "localSearchBroadEvery": 5,
+          "circuitChunkGates": 128,
+          "stableSearchArms": false,
+          "schedulerHistoryEntries": 128,
+          "independentComponents": false
+        },
+        "cache": {
+          "lookupEntries": 1000000,
+          "processedEntries": 1000000,
+          "shuffleEntries": 100000,
+          "subsetEntries": 100000,
+          "windowKeyBytes": 16777216,
+          "lookupPolicy": "lru"
+        },
+        "database": {
+          "tables": [
+            {
+              "wires": 3,
+              "gates": 6
+            },
+            {
+              "wires": 4,
+              "gates": 5
+            },
+            {
+              "wires": 5,
+              "gates": 2
+            }
+          ],
+          "queryBatchSize": 900,
+          "memoryMapBytes": 268435456,
+          "generationStates": 0,
+          "generationBatchRows": 3000,
+          "etaWindowSamples": 5,
+          "etaWarmupSamples": 3,
+          "etaSmoothing": 0.2,
+          "lookupBatchMilliseconds": 0,
+          "generationWorkers": 2,
+          "generationQueueBatches": 2,
+          "generationMinimumWork": 100000,
+          "statementCacheEntries": 16,
+          "sharedTables": true,
+          "sharedTableBytes": 33554432,
+          "sharedTableMaximumRows": 100000,
+          "generationReadRows": 4096,
+          "generationCacheMegabytes": 256,
+          "generationTempStore": "file",
+          "generationJournalMode": "wal",
+          "generationSynchronous": "full",
+          "etaMaximumSlowdown": 1,
+          "generationSqlParameters": 8192,
+          "generationPreparedInserts": true,
+          "generationSortStaging": false,
+          "generationStatementCacheEntries": 8,
+          "generationAppendStaging": false,
+          "generationAggregateMerge": true,
+          "generationDirectInputMerge": true,
+          "generationPrefetch": true,
+          "generationPrefetchMegabytes": 16,
+          "generationCompactBindings": true,
+          "generationStagingWriters": 2,
+          "etaTrendWindowSamples": 60,
+          "etaTrendMinimumSamples": 10,
+          "etaTrendMinimumWorkGrowth": 0.25,
+          "generationCountFinalInserts": false,
+          "generationCandidateCacheMegabytes": 32,
+          "generationStreamStaging": true,
+          "generationStagingQueueBatches": 2
+        },
+        "synthesis": {
+          "templates": true,
+          "templateEntries": 10000,
+          "maximumWires": 3,
+          "maximumWindowGates": 8,
+          "maximumReplacementGates": 3,
+          "attemptEvery": 100,
+          "timeoutMs": 100,
+          "states": 2000,
+          "forwardSemanticSearch": true,
+          "smt": true,
+          "meetInMiddle": true,
+          "equalitySaturation": true
+        },
+        "benchmark": {
+          "seconds": 10,
+          "repeats": 3,
+          "seed": 1729,
+          "workerCounts": [
+            2
+          ],
+          "maximumChecks": 0,
+          "outputName": "benchmark.json",
+          "maximumOverrunSeconds": 30,
+          "mode": "comparison",
+          "caseManifest": "benchmarks/cases.json",
+          "caseOutputDirectory": "benchmark-cases",
+          "variants": [],
+          "decayFactor": 0.98,
+          "generationTables": [
+            {
+              "wires": 3,
+              "gates": 4
+            },
+            {
+              "wires": 4,
+              "gates": 3
+            }
+          ],
+          "generationOutputName": "final-generation-work.json",
+          "generationTimeoutSeconds": 600,
+          "dedupSeenRows": [
+            10000,
+            100000,
+            1000000
+          ],
+          "dedupCandidateFunctions": 2000,
+          "dedupMasksPerFunction": 4,
+          "dedupOutputName": "dedup-benchmark.json",
+          "stagingRows": 200000,
+          "stagingOutputName": "staging-benchmark.json",
+          "stagingWideSqlParameters": 16384,
+          "mergeOutputName": "merge-benchmark.json",
+          "generationStagingComparison": false,
+          "generationPrefetchComparison": false,
+          "generationWriterComparison": false,
+          "generationFinalComparison": false,
+          "finalLookupOutputName": "final-lookup-benchmark.json",
+          "generationStreamingComparison": false
+        }
+      },
+      "validation": "all-replacements-exhaustive"
+    }
+  ],
+  "notes": [
+    "Paired complete builds against origin/main b413792 with identical JSON settings: two staging writers, two expansion workers, unlimited states, final insert counting disabled, 32 MiB candidate cache and bounded streaming enabled.",
+    "Three repeats per table/variant, alternating execution order. Shared-host small fixtures; includes setup and final compaction, excludes exhaustive output validation. Not a production 4-wire/5-gate disk benchmark.",
+    "All builds have matching semantic/cost digests and exhaustive replacement verification. These timings measure the combined updates, not individual feature contributions."
+  ],
+  "summary": [
+    {
+      "wires": 3,
+      "gates": 4,
+      "medianMilliseconds": {
+        "reference": 1360.670064,
+        "current": 1224.610668
+      },
+      "pairedCurrentToReferenceRatios": [
+        0.8943889780469221,
+        0.9851918983119364,
+        0.9478638852682806
+      ]
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "medianMilliseconds": {
+        "reference": 6948.977884000001,
+        "current": 6682.511254
+      },
+      "pairedCurrentToReferenceRatios": [
+        0.6979709629893837,
+        0.9484764405731182,
+        0.9616538382409391
+      ]
+    }
+  ]
+}

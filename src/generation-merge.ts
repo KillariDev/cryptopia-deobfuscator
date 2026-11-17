@@ -14,6 +14,6 @@ export function candidateWinnersSQL(aggregate: boolean, source = candidateSource
 	// winner selection cannot be optimized away as an unused result expression.
 	return `SELECT state,gates,wires,reads FROM (SELECT state,gates,wires,reads,MIN(${candidateQualitySQL}) AS quality FROM (${source}) GROUP BY state) WHERE quality IS NOT NULL`
 }
-export function candidateMergeSQL(aggregate: boolean, input = false) {
-	return `INSERT INTO InputOutputReplacers(ioIdentifier,replacerGates,gateCount,wireCount,readCount) SELECT state,gates,?,wires,reads FROM (${candidateWinnersSQL(aggregate, input ? inputSource : candidateSource)}) WHERE 1 ON CONFLICT(ioIdentifier) DO UPDATE SET replacerGates=excluded.replacerGates,gateCount=excluded.gateCount,wireCount=excluded.wireCount,readCount=excluded.readCount WHERE ${better}`
+export function candidateMergeSQL(aggregate: boolean, input = false, source = candidateSource) {
+	return `INSERT INTO InputOutputReplacers(ioIdentifier,replacerGates,gateCount,wireCount,readCount) SELECT state,gates,?,wires,reads FROM (${candidateWinnersSQL(aggregate, input ? inputSource : source)}) WHERE 1 ON CONFLICT(ioIdentifier) DO UPDATE SET replacerGates=excluded.replacerGates,gateCount=excluded.gateCount,wireCount=excluded.wireCount,readCount=excluded.readCount WHERE ${better}`
 }
