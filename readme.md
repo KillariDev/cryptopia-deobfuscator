@@ -81,9 +81,10 @@ The solver combines several approaches:
   expose simplifications that were not adjacent before.
 - **Adaptive local search:** prioritize recently changed regions and methods
   that have found useful reductions, while continuing to explore other regions.
-- **Optional bounded synthesis:** try SMT synthesis, meet-in-the-middle search,
-  or equality saturation on small regions when ordinary search stalls. These
-  methods are disabled by default and have configurable limits.
+- **Bounded synthesis:** select randomly among enabled forward semantic search,
+  Z3/SMT synthesis, meet-in-the-middle search and equality saturation on small
+  regions. These methods are enabled by default, with limits on circuit size,
+  search effort and time; each can be disabled in `synthesis`.
 
 Replacements are ordered by gate count, then used-wire count and read cost.
 Multiple workers search circuit chunks, retaining caches between jobs. The
@@ -111,7 +112,7 @@ fail at startup. Job-specific circuit filenames stay on the command line.
 | `search` | Search methods, region sizes, caching and adaptive scheduling |
 | `cache` | Per-worker cache limits |
 | `database` | Lookup-table portfolio, database access and generation settings |
-| `synthesis` | Optional local synthesis methods and their limits |
+| `synthesis` | Local synthesis strategies, attempt frequency and search limits |
 | `benchmark` | Reproducible performance comparisons |
 
 Useful settings to start with:

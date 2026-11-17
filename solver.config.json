@@ -146,9 +146,10 @@
     "attemptEvery": 100,
     "timeoutMs": 100,
     "states": 2000,
-    "smt": false,
-    "meetInMiddle": false,
-    "equalitySaturation": false
+    "forwardSemanticSearch": true,
+    "smt": true,
+    "meetInMiddle": true,
+    "equalitySaturation": true
   },
   "benchmark": {
     "seconds": 10,
