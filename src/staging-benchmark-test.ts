@@ -18,7 +18,7 @@ try {
 		child.once('exit', code => code === 0 ? resolve() : reject(new Error(`Staging benchmark smoke failed (${code})`)))
 	})
 	const report = JSON.parse(readFileSync(join(directory, 'staging-benchmark-smoke.json'), 'utf8'))
-	assert.equal(report.results.length, 9)
+	assert.equal(report.results.length, 11)
 	assert.equal(new Set(report.results.map((row: { resultDigest: string }) => row.resultDigest)).size, 1)
 	const prepared = report.results.find((row: { variant: string }) => row.variant === 'prepared-large')
 	assert.ok(prepared.parameters >= 5 && prepared.parameters <= 1000, 'selected settings reach the benchmark writer')
@@ -28,4 +28,4 @@ try {
 	assert.equal(merges.results.length, 2)
 	assert.equal(new Set(merges.results.map((row: { digest: string }) => row.digest)).size, 1)
 } finally { rmSync(directory, { recursive: true, force: true }) }
-console.log('Nine-variant staging benchmark smoke and report equivalence checks passed')
+console.log('Eleven-variant staging benchmark smoke and report equivalence checks passed')

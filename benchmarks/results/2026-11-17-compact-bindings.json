@@ -1,0 +1,590 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-17",
+  "type": "staging-only",
+  "trials": 33,
+  "node": "v24.22.3",
+  "platform": "linux",
+  "cpu": "AMD Ryzen 9 5900X 12-Core Processor",
+  "revision": "1768f6bdb419461be560a50c33c0278da37f0999",
+  "workingTreeDirty": true,
+  "writerRuntimeSha256": "dffb04fb93338ab575f8dfae782813d27a4edb0113eabc2557ea487e06fa4d01",
+  "fixtureRows": 200000,
+  "batchRows": 3000,
+  "parameters": 8192,
+  "wideParameters": 16384,
+  "seed": 1729,
+  "limitations": "Staging-only realistic four-variable/five-gate candidates, same process/shared host, fresh temporary tables. Setup, fixture generation, commit, validation and statement finalization excluded. Sorting, initial statement preparation and append materialization included. Not full production throughput or cold-disk trials.",
+  "groups": [
+    {
+      "variant": "reference",
+      "samples": [
+        {
+          "repeat": 0,
+          "variant": "reference",
+          "parameters": 900,
+          "stagingMs": 1261.444428,
+          "insertMs": 1261.4416580000002,
+          "materializeMs": 0.0027699999998276326,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": null
+        },
+        {
+          "repeat": 1,
+          "variant": "reference",
+          "parameters": 900,
+          "stagingMs": 1132.5034979999982,
+          "insertMs": 1132.5011279999999,
+          "materializeMs": 0.002369999998336425,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": null
+        },
+        {
+          "repeat": 2,
+          "variant": "reference",
+          "parameters": 900,
+          "stagingMs": 1146.0623070000001,
+          "insertMs": 1146.0588769999958,
+          "materializeMs": 0.003430000004300382,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": null
+        }
+      ],
+      "medianStagingMs": 1146.0623070000001
+    },
+    {
+      "variant": "prepared-small",
+      "samples": [
+        {
+          "repeat": 0,
+          "variant": "prepared-small",
+          "parameters": 900,
+          "stagingMs": 1225.5256099999997,
+          "insertMs": 1225.3757219999998,
+          "materializeMs": 0.14988799999991897,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 1134,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 1,
+          "variant": "prepared-small",
+          "parameters": 900,
+          "stagingMs": 986.957015,
+          "insertMs": 986.9486440000001,
+          "materializeMs": 0.008370999999897322,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 1134,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 2,
+          "variant": "prepared-small",
+          "parameters": 900,
+          "stagingMs": 1159.876980000001,
+          "insertMs": 1159.8665600000022,
+          "materializeMs": 0.010419999998703133,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 1134,
+            "peakCached": 3
+          }
+        }
+      ],
+      "medianStagingMs": 1159.876980000001
+    },
+    {
+      "variant": "unprepared-large",
+      "samples": [
+        {
+          "repeat": 0,
+          "variant": "unprepared-large",
+          "parameters": 8192,
+          "stagingMs": 987.7860559999999,
+          "insertMs": 987.7825549999998,
+          "materializeMs": 0.003501000000142085,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": null
+        },
+        {
+          "repeat": 1,
+          "variant": "unprepared-large",
+          "parameters": 8192,
+          "stagingMs": 922.4781809999986,
+          "insertMs": 922.475180999998,
+          "materializeMs": 0.0030000000006111804,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": null
+        },
+        {
+          "repeat": 2,
+          "variant": "unprepared-large",
+          "parameters": 8192,
+          "stagingMs": 1037.2886590000053,
+          "insertMs": 1037.2863290000023,
+          "materializeMs": 0.002330000002984889,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": null
+        }
+      ],
+      "medianStagingMs": 987.7860559999999
+    },
+    {
+      "variant": "prepared-large",
+      "samples": [
+        {
+          "repeat": 0,
+          "variant": "prepared-large",
+          "parameters": 8192,
+          "stagingMs": 925.0868809999993,
+          "insertMs": 925.0779309999998,
+          "materializeMs": 0.008949999999458669,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 1,
+          "variant": "prepared-large",
+          "parameters": 8192,
+          "stagingMs": 929.8917819999988,
+          "insertMs": 929.8842519999998,
+          "materializeMs": 0.007529999998951098,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 2,
+          "variant": "prepared-large",
+          "parameters": 8192,
+          "stagingMs": 880.3629169999986,
+          "insertMs": 880.3527770000001,
+          "materializeMs": 0.01013999999850057,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        }
+      ],
+      "medianStagingMs": 925.0868809999993
+    },
+    {
+      "variant": "prepared-large-sorted",
+      "samples": [
+        {
+          "repeat": 0,
+          "variant": "prepared-large-sorted",
+          "parameters": 8192,
+          "stagingMs": 1028.3936320000003,
+          "insertMs": 1028.3864619999995,
+          "materializeMs": 0.007170000000769505,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 1,
+          "variant": "prepared-large-sorted",
+          "parameters": 8192,
+          "stagingMs": 974.4175890000006,
+          "insertMs": 974.4083879999998,
+          "materializeMs": 0.009201000000757631,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 2,
+          "variant": "prepared-large-sorted",
+          "parameters": 8192,
+          "stagingMs": 973.0528399999966,
+          "insertMs": 973.0430199999973,
+          "materializeMs": 0.009819999999308493,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        }
+      ],
+      "medianStagingMs": 974.4175890000006
+    },
+    {
+      "variant": "prepared-wide",
+      "samples": [
+        {
+          "repeat": 0,
+          "variant": "prepared-wide",
+          "parameters": 16384,
+          "stagingMs": 959.8605370000005,
+          "insertMs": 959.8513070000008,
+          "materializeMs": 0.009229999999661231,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 2,
+            "executions": 67,
+            "peakCached": 2
+          }
+        },
+        {
+          "repeat": 1,
+          "variant": "prepared-wide",
+          "parameters": 16384,
+          "stagingMs": 950.1350570000031,
+          "insertMs": 950.1253460000007,
+          "materializeMs": 0.009711000002425862,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 2,
+            "executions": 67,
+            "peakCached": 2
+          }
+        },
+        {
+          "repeat": 2,
+          "variant": "prepared-wide",
+          "parameters": 16384,
+          "stagingMs": 903.5789139999979,
+          "insertMs": 903.5681390000027,
+          "materializeMs": 0.010774999995192047,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 2,
+            "executions": 67,
+            "peakCached": 2
+          }
+        }
+      ],
+      "medianStagingMs": 950.1350570000031
+    },
+    {
+      "variant": "prepared-wide-sorted",
+      "samples": [
+        {
+          "repeat": 0,
+          "variant": "prepared-wide-sorted",
+          "parameters": 16384,
+          "stagingMs": 942.8625830000001,
+          "insertMs": 942.8539730000011,
+          "materializeMs": 0.008609999998952844,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 2,
+            "executions": 67,
+            "peakCached": 2
+          }
+        },
+        {
+          "repeat": 1,
+          "variant": "prepared-wide-sorted",
+          "parameters": 16384,
+          "stagingMs": 1015.6342949999998,
+          "insertMs": 1015.6226549999992,
+          "materializeMs": 0.01164000000062515,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 2,
+            "executions": 67,
+            "peakCached": 2
+          }
+        },
+        {
+          "repeat": 2,
+          "variant": "prepared-wide-sorted",
+          "parameters": 16384,
+          "stagingMs": 914.4337200000009,
+          "insertMs": 914.421245000005,
+          "materializeMs": 0.01247499999590218,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 2,
+            "executions": 67,
+            "peakCached": 2
+          }
+        }
+      ],
+      "medianStagingMs": 942.8625830000001
+    },
+    {
+      "variant": "compact-large",
+      "samples": [
+        {
+          "repeat": 0,
+          "variant": "compact-large",
+          "parameters": 8192,
+          "stagingMs": 700.9901229999996,
+          "insertMs": 700.9798420000006,
+          "materializeMs": 0.010280999998940388,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 133,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 1,
+          "variant": "compact-large",
+          "parameters": 8192,
+          "stagingMs": 726.6285419999986,
+          "insertMs": 726.6026710000006,
+          "materializeMs": 0.025870999998005573,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 133,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 2,
+          "variant": "compact-large",
+          "parameters": 8192,
+          "stagingMs": 768.4907789999997,
+          "insertMs": 768.481498000001,
+          "materializeMs": 0.009280999998736661,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 133,
+            "peakCached": 3
+          }
+        }
+      ],
+      "medianStagingMs": 726.6285419999986
+    },
+    {
+      "variant": "compact-wide",
+      "samples": [
+        {
+          "repeat": 0,
+          "variant": "compact-wide",
+          "parameters": 16384,
+          "stagingMs": 700.3330310000001,
+          "insertMs": 700.3241909999997,
+          "materializeMs": 0.008840000000418513,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 2,
+            "executions": 67,
+            "peakCached": 2
+          }
+        },
+        {
+          "repeat": 1,
+          "variant": "compact-wide",
+          "parameters": 16384,
+          "stagingMs": 701.104668,
+          "insertMs": 701.090747000002,
+          "materializeMs": 0.013920999997935724,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 2,
+            "executions": 67,
+            "peakCached": 2
+          }
+        },
+        {
+          "repeat": 2,
+          "variant": "compact-wide",
+          "parameters": 16384,
+          "stagingMs": 691.9029779999983,
+          "insertMs": 691.8920870000002,
+          "materializeMs": 0.010890999998082407,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 2,
+            "executions": 67,
+            "peakCached": 2
+          }
+        }
+      ],
+      "medianStagingMs": 700.3330310000001
+    },
+    {
+      "variant": "append-large",
+      "samples": [
+        {
+          "repeat": 0,
+          "variant": "append-large",
+          "parameters": 8192,
+          "stagingMs": 776.2329099999988,
+          "insertMs": 539.8908569999985,
+          "materializeMs": 236.3420530000003,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 1,
+          "variant": "append-large",
+          "parameters": 8192,
+          "stagingMs": 781.6439769999997,
+          "insertMs": 550.2606799999994,
+          "materializeMs": 231.3832970000003,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 2,
+          "variant": "append-large",
+          "parameters": 8192,
+          "stagingMs": 755.2300660000037,
+          "insertMs": 516.0540630000032,
+          "materializeMs": 239.1760030000005,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        }
+      ],
+      "medianStagingMs": 776.2329099999988
+    },
+    {
+      "variant": "append-window",
+      "samples": [
+        {
+          "repeat": 0,
+          "variant": "append-window",
+          "parameters": 8192,
+          "stagingMs": 1006.8824349999995,
+          "insertMs": 653.6491449999994,
+          "materializeMs": 353.2332900000001,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 1,
+          "variant": "append-window",
+          "parameters": 8192,
+          "stagingMs": 874.6633559999973,
+          "insertMs": 527.5965450000003,
+          "materializeMs": 347.06681099999696,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        },
+        {
+          "repeat": 2,
+          "variant": "append-window",
+          "parameters": 8192,
+          "stagingMs": 833.359338000002,
+          "insertMs": 493.0881270000027,
+          "materializeMs": 340.2712109999993,
+          "candidateRows": 200000,
+          "distinctStateMasks": 192432,
+          "resultDigest": "8c7e5290c7532570e92386f2dd7eb6830aafb08ab4b5f3fee7c2aaf60ef858e4",
+          "statementStats": {
+            "statementsPrepared": 3,
+            "executions": 134,
+            "peakCached": 3
+          }
+        }
+      ],
+      "medianStagingMs": 874.6633559999973
+    }
+  ]
+}

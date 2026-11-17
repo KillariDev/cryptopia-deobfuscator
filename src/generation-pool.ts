@@ -3,7 +3,7 @@ import { Gate } from './types.js'
 import { ExpansionResult, ExpansionTask } from './generation-expansion.js'
 
 type Job = { task: ExpansionTask, resolve: (result: ExpansionResult) => void, reject: (error: Error) => void }
-/** The caller bounds queued jobs; only this CPU pool runs in parallel, never SQLite writes. */
+/** The caller bounds queued CPU jobs, independently of staging database connections. */
 export class GenerationPool {
 	private slots: { worker: Worker, job?: Job }[] = []
 	private queue: Job[] = []

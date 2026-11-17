@@ -3,7 +3,7 @@ import sqlite3 from 'sqlite3'
 import { allSQL, runSQL } from './sql.js'
 
 export type StagingRow = [Buffer, number, number, Buffer, number]
-export type StagingOptions = { parameterLimit: number, cacheEntries: number, prepared: boolean, sort: boolean, append?: boolean, appendGrouping?: boolean }
+export type StagingOptions = { parameterLimit: number, cacheEntries: number, prepared: boolean, sort: boolean, append?: boolean, appendGrouping?: boolean, compactBindings?: boolean }
 const prefix = 'INSERT INTO BuildCandidates VALUES '
 const appendPrefix = 'INSERT INTO BuildCandidateRows(state,mask,reads,gates,wires) VALUES '
 const suffix = ' ON CONFLICT(state,mask) DO UPDATE SET reads=excluded.reads,gates=excluded.gates WHERE excluded.reads<BuildCandidates.reads'
@@ -36,13 +36,26 @@ export class StagingWriter {
 		const task = this.tail.then(async () => {
 			if (this.options.sort) rows.sort((a, b) => Buffer.compare(a[0], b[0]) || a[1] - b[1])
 			const insertPrefix = this.options.append ? appendPrefix : prefix, insertSuffix = this.options.append ? '' : suffix
-			const size = Math.floor(this.parameterLimit / 5)
+			const compact = this.options.compactBindings ?? false, columns = compact ? 3 : 5
+			const size = Math.floor(this.parameterLimit / columns)
 			for (let offset = 0; offset < rows.length; offset += size) {
 				const count = Math.min(size, rows.length - offset)
 				let statement = this.statements.get(count)
-				const params = rows.slice(offset, offset + count).flat()
+				const params: unknown[] = new Array(count * columns)
+				for (let i = 0; i < count; i++) {
+					const row = rows[offset + i], at = i * columns
+					if (compact) {
+						const [, mask, reads, , wires] = row
+						if (!Number.isInteger(mask) || mask < 0 || mask > 255 || !Number.isInteger(reads) || reads < 0 || reads > 0xffffffff || !Number.isInteger(wires) || wires < 0 || wires > 8) throw new Error('Invalid compact staging cost')
+						// 44 bits: exact in both a JS number and a SQLite int64.
+						params[at] = row[0]; params[at + 1] = mask + reads * 256 + wires * 2 ** 40; params[at + 2] = row[3]
+					} else for (let column = 0; column < columns; column++) params[at + column] = row[column]
+				}
+				const sql = () => compact
+					? (this.options.append ? 'INSERT INTO BuildCandidateRows(state,mask,reads,gates,wires) ' : 'INSERT INTO BuildCandidates ') + 'SELECT column1,column2 & 255,(column2 >> 8) & 4294967295,column3,column2 >> 40 FROM (VALUES ' + Array(count).fill('(?,?,?)').join(',') + ') WHERE true' + insertSuffix
+					: insertPrefix + Array(count).fill('(?,?,?,?,?)').join(',') + insertSuffix
 				if (!this.options.prepared) {
-					await runSQL(this.db, insertPrefix + Array(count).fill('(?,?,?,?,?)').join(',') + insertSuffix, params)
+					await runSQL(this.db, sql(), params)
 				} else {
 					if (statement) this.statements.delete(count)
 					else {
@@ -51,7 +64,7 @@ export class StagingWriter {
 							this.statements.delete(oldSize); await this.finalize(oldest)
 						}
 						statement = await observeSQL(this.db, () => new Promise<sqlite3.Statement>((resolve, reject) => {
-							const prepared = this.db.prepare(insertPrefix + Array(count).fill('(?,?,?,?,?)').join(',') + insertSuffix, error => error ? reject(error) : resolve(prepared))
+							const prepared = this.db.prepare(sql(), error => error ? reject(error) : resolve(prepared))
 						}))
 						this.stats.statementsPrepared++
 					}

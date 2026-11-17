@@ -129,7 +129,9 @@
     "generationAggregateMerge": true,
     "generationDirectInputMerge": true,
     "generationPrefetch": true,
-    "generationPrefetchMegabytes": 16
+    "generationPrefetchMegabytes": 16,
+    "generationCompactBindings": true,
+    "generationStagingWriters": 1
   },
   "synthesis": {
     "templates": true,
@@ -186,6 +188,7 @@
     "stagingWideSqlParameters": 16384,
     "mergeOutputName": "merge-benchmark.json",
     "generationStagingComparison": false,
-    "generationPrefetchComparison": false
+    "generationPrefetchComparison": false,
+    "generationWriterComparison": false
   }
 }

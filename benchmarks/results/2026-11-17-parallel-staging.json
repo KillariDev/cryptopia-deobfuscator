@@ -1,0 +1,737 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-17",
+  "node": "v24.22.3",
+  "platform": "linux",
+  "variants": [
+    {
+      "name": "reference",
+      "root": "/tmp/cryptopia-staging-reference-9hn2IM",
+      "revision": "1768f6bdb419461be560a50c33c0278da37f0999",
+      "workingTreeDirty": null,
+      "runtimeSha256": "0776471c5022a2823daf142ac9a7ec9af4d115d750234b2624a1da6650ca8bfa"
+    },
+    {
+      "name": "baseline",
+      "root": "/workspace/cryptopia-deobfuscator",
+      "compact": false,
+      "writers": 1,
+      "batchRows": 3000,
+      "parameters": 8192,
+      "revision": "1768f6bdb419461be560a50c33c0278da37f0999",
+      "workingTreeDirty": true,
+      "runtimeSha256": "5eb87e5da1057ae9ea5fc39b83c64d26bbd0e8f84fcf1cf75bbe21a08537779e"
+    },
+    {
+      "name": "compact",
+      "root": "/workspace/cryptopia-deobfuscator",
+      "compact": true,
+      "writers": 1,
+      "batchRows": 3000,
+      "parameters": 8192,
+      "revision": "1768f6bdb419461be560a50c33c0278da37f0999",
+      "workingTreeDirty": true,
+      "runtimeSha256": "5eb87e5da1057ae9ea5fc39b83c64d26bbd0e8f84fcf1cf75bbe21a08537779e"
+    },
+    {
+      "name": "compact-wide",
+      "root": "/workspace/cryptopia-deobfuscator",
+      "compact": true,
+      "writers": 1,
+      "batchRows": 3000,
+      "parameters": 16384,
+      "revision": "1768f6bdb419461be560a50c33c0278da37f0999",
+      "workingTreeDirty": true,
+      "runtimeSha256": "5eb87e5da1057ae9ea5fc39b83c64d26bbd0e8f84fcf1cf75bbe21a08537779e"
+    },
+    {
+      "name": "compact-batched",
+      "root": "/workspace/cryptopia-deobfuscator",
+      "compact": true,
+      "writers": 1,
+      "batchRows": 12000,
+      "parameters": 32766,
+      "revision": "1768f6bdb419461be560a50c33c0278da37f0999",
+      "workingTreeDirty": true,
+      "runtimeSha256": "5eb87e5da1057ae9ea5fc39b83c64d26bbd0e8f84fcf1cf75bbe21a08537779e"
+    },
+    {
+      "name": "writers-2",
+      "root": "/workspace/cryptopia-deobfuscator",
+      "compact": true,
+      "writers": 2,
+      "batchRows": 12000,
+      "parameters": 32766,
+      "revision": "1768f6bdb419461be560a50c33c0278da37f0999",
+      "workingTreeDirty": true,
+      "runtimeSha256": "5eb87e5da1057ae9ea5fc39b83c64d26bbd0e8f84fcf1cf75bbe21a08537779e"
+    },
+    {
+      "name": "writers-4",
+      "root": "/workspace/cryptopia-deobfuscator",
+      "compact": true,
+      "writers": 4,
+      "batchRows": 12000,
+      "parameters": 32766,
+      "revision": "1768f6bdb419461be560a50c33c0278da37f0999",
+      "workingTreeDirty": true,
+      "runtimeSha256": "5eb87e5da1057ae9ea5fc39b83c64d26bbd0e8f84fcf1cf75bbe21a08537779e"
+    }
+  ],
+  "completeBuildTrials": 42,
+  "validation": "All coverage/cost digests matched across variants; every generated replacement exhaustively validated.",
+  "timing": "Includes scratch setup, insert/import/disposal and final cleanup/VACUUM; excludes fixture validation and main connection close.",
+  "storage": "25ms sampled main and scratch database/WAL/journal/SHM bytes; excludes anonymous SQLite temp files and may miss short-lived peaks.",
+  "limitations": [
+    "Three repeats on a shared host, alternating order; not significance tests or cold-disk measurements",
+    "Production 4-wire/5-gate table not built",
+    "Main discovered-state checks and lookup writes remain serialized; parallelism is local candidate staging only",
+    "Measurements preceded changing the production compact-binding default to true and a CPU-pool comment; experimental arms explicitly control compact bindings, writer count and batch/parameter limits"
+  ],
+  "groups": [
+    {
+      "wires": 3,
+      "gates": 4,
+      "variant": "reference",
+      "settings": {
+        "generationCompactBindings": null,
+        "generationStagingWriters": null,
+        "generationBatchRows": 3000,
+        "generationSqlParameters": 8192,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 1779.599628,
+          "cpuMs": 2091.727,
+          "peakDatabaseBytes": 3922008,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 257880064
+        },
+        {
+          "repeat": 1,
+          "generationMs": 2121.595336,
+          "cpuMs": 2430.275,
+          "peakDatabaseBytes": 6790368,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 242991104
+        },
+        {
+          "repeat": 2,
+          "generationMs": 2029.32216,
+          "cpuMs": 2356.411,
+          "peakDatabaseBytes": 4737768,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 245174272
+        }
+      ],
+      "medianSeconds": 2.02932216,
+      "medianCpuSeconds": 2.356411,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+    },
+    {
+      "wires": 3,
+      "gates": 4,
+      "variant": "baseline",
+      "settings": {
+        "generationCompactBindings": false,
+        "generationStagingWriters": 1,
+        "generationBatchRows": 3000,
+        "generationSqlParameters": 8192,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 1805.1235760000002,
+          "cpuMs": 2101.02,
+          "peakDatabaseBytes": 6790368,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 245768192
+        },
+        {
+          "repeat": 1,
+          "generationMs": 1788.05974,
+          "cpuMs": 2095.114,
+          "peakDatabaseBytes": 3922008,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 243429376
+        },
+        {
+          "repeat": 2,
+          "generationMs": 2053.832719,
+          "cpuMs": 2303.134,
+          "peakDatabaseBytes": 4824288,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 247304192
+        }
+      ],
+      "medianSeconds": 1.8051235760000002,
+      "medianCpuSeconds": 2.10102,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+    },
+    {
+      "wires": 3,
+      "gates": 4,
+      "variant": "compact",
+      "settings": {
+        "generationCompactBindings": true,
+        "generationStagingWriters": 1,
+        "generationBatchRows": 3000,
+        "generationSqlParameters": 8192,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 1544.278147,
+          "cpuMs": 1849.439,
+          "peakDatabaseBytes": 4824288,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 245977088
+        },
+        {
+          "repeat": 1,
+          "generationMs": 1483.829824,
+          "cpuMs": 1788.829,
+          "peakDatabaseBytes": 6790368,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 243392512
+        },
+        {
+          "repeat": 2,
+          "generationMs": 1609.0774119999999,
+          "cpuMs": 1901.816,
+          "peakDatabaseBytes": 6790368,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 243675136
+        }
+      ],
+      "medianSeconds": 1.544278147,
+      "medianCpuSeconds": 1.849439,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+    },
+    {
+      "wires": 3,
+      "gates": 4,
+      "variant": "compact-wide",
+      "settings": {
+        "generationCompactBindings": true,
+        "generationStagingWriters": 1,
+        "generationBatchRows": 3000,
+        "generationSqlParameters": 16384,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 1520.275962,
+          "cpuMs": 1848.661,
+          "peakDatabaseBytes": 3922008,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 240726016
+        },
+        {
+          "repeat": 1,
+          "generationMs": 1519.591485,
+          "cpuMs": 1850.339,
+          "peakDatabaseBytes": 3922008,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 245628928
+        },
+        {
+          "repeat": 2,
+          "generationMs": 1646.832227,
+          "cpuMs": 1997.675,
+          "peakDatabaseBytes": 3922008,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 240922624
+        }
+      ],
+      "medianSeconds": 1.520275962,
+      "medianCpuSeconds": 1.850339,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+    },
+    {
+      "wires": 3,
+      "gates": 4,
+      "variant": "compact-batched",
+      "settings": {
+        "generationCompactBindings": true,
+        "generationStagingWriters": 1,
+        "generationBatchRows": 12000,
+        "generationSqlParameters": 32766,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 1638.621473,
+          "cpuMs": 2001.264,
+          "peakDatabaseBytes": 3922008,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 352403456
+        },
+        {
+          "repeat": 1,
+          "generationMs": 1606.279949,
+          "cpuMs": 1939.849,
+          "peakDatabaseBytes": 3922008,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 354922496
+        },
+        {
+          "repeat": 2,
+          "generationMs": 1766.052228,
+          "cpuMs": 2161.462,
+          "peakDatabaseBytes": 6790368,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 357044224
+        }
+      ],
+      "medianSeconds": 1.638621473,
+      "medianCpuSeconds": 2.001264,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+    },
+    {
+      "wires": 3,
+      "gates": 4,
+      "variant": "writers-2",
+      "settings": {
+        "generationCompactBindings": true,
+        "generationStagingWriters": 2,
+        "generationBatchRows": 12000,
+        "generationSqlParameters": 32766,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 2066.5031339999996,
+          "cpuMs": 2873.016,
+          "peakDatabaseBytes": 7122880,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 383590400
+        },
+        {
+          "repeat": 1,
+          "generationMs": 2001.6098780000002,
+          "cpuMs": 2812.857,
+          "peakDatabaseBytes": 7122880,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 380149760
+        },
+        {
+          "repeat": 2,
+          "generationMs": 2147.135128,
+          "cpuMs": 2984.039,
+          "peakDatabaseBytes": 6554320,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 380219392
+        }
+      ],
+      "medianSeconds": 2.0665031339999995,
+      "medianCpuSeconds": 2.8730160000000002,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+    },
+    {
+      "wires": 3,
+      "gates": 4,
+      "variant": "writers-4",
+      "settings": {
+        "generationCompactBindings": true,
+        "generationStagingWriters": 4,
+        "generationBatchRows": 12000,
+        "generationSqlParameters": 32766,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 1962.227213,
+          "cpuMs": 3412.132,
+          "peakDatabaseBytes": 7320272,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 449802240
+        },
+        {
+          "repeat": 1,
+          "generationMs": 1970.384261,
+          "cpuMs": 3423.13,
+          "peakDatabaseBytes": 6790368,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 447188992
+        },
+        {
+          "repeat": 2,
+          "generationMs": 2243.229645,
+          "cpuMs": 3763.318,
+          "peakDatabaseBytes": 7320272,
+          "finalFileBytes": 786432,
+          "peakRssBytes": 448819200
+        }
+      ],
+      "medianSeconds": 1.970384261,
+      "medianCpuSeconds": 3.42313,
+      "rows": 38016,
+      "semanticCostDigest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59"
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "variant": "reference",
+      "settings": {
+        "generationCompactBindings": null,
+        "generationStagingWriters": null,
+        "generationBatchRows": 3000,
+        "generationSqlParameters": 8192,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 11783.261784,
+          "cpuMs": 12843.055,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1268293632
+        },
+        {
+          "repeat": 1,
+          "generationMs": 10373.910786999999,
+          "cpuMs": 11378.063,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1252880384
+        },
+        {
+          "repeat": 2,
+          "generationMs": 10457.39463,
+          "cpuMs": 11439.698,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1260965888
+        }
+      ],
+      "medianSeconds": 10.457394630000001,
+      "medianCpuSeconds": 11.439698,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "variant": "baseline",
+      "settings": {
+        "generationCompactBindings": false,
+        "generationStagingWriters": 1,
+        "generationBatchRows": 3000,
+        "generationSqlParameters": 8192,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 10534.763395,
+          "cpuMs": 11524.946,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1266241536
+        },
+        {
+          "repeat": 1,
+          "generationMs": 10168.630898,
+          "cpuMs": 11137.916,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1250299904
+        },
+        {
+          "repeat": 2,
+          "generationMs": 10492.439778,
+          "cpuMs": 11507.805,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1271959552
+        }
+      ],
+      "medianSeconds": 10.492439778,
+      "medianCpuSeconds": 11.507805000000001,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "variant": "compact",
+      "settings": {
+        "generationCompactBindings": true,
+        "generationStagingWriters": 1,
+        "generationBatchRows": 3000,
+        "generationSqlParameters": 8192,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 9053.931558999999,
+          "cpuMs": 10075.603,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1265811456
+        },
+        {
+          "repeat": 1,
+          "generationMs": 8771.552679999999,
+          "cpuMs": 9804.115,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1290936320
+        },
+        {
+          "repeat": 2,
+          "generationMs": 8402.024594,
+          "cpuMs": 9315.28,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1287229440
+        }
+      ],
+      "medianSeconds": 8.77155268,
+      "medianCpuSeconds": 9.804115,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "variant": "compact-wide",
+      "settings": {
+        "generationCompactBindings": true,
+        "generationStagingWriters": 1,
+        "generationBatchRows": 3000,
+        "generationSqlParameters": 16384,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 8837.504698,
+          "cpuMs": 9899.034,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1278513152
+        },
+        {
+          "repeat": 1,
+          "generationMs": 8751.971733,
+          "cpuMs": 9766.086,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1269161984
+        },
+        {
+          "repeat": 2,
+          "generationMs": 8640.334883,
+          "cpuMs": 9691.68,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1273950208
+        }
+      ],
+      "medianSeconds": 8.751971733,
+      "medianCpuSeconds": 9.766086,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "variant": "compact-batched",
+      "settings": {
+        "generationCompactBindings": true,
+        "generationStagingWriters": 1,
+        "generationBatchRows": 12000,
+        "generationSqlParameters": 32766,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 9403.16183,
+          "cpuMs": 10742.557,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1274322944
+        },
+        {
+          "repeat": 1,
+          "generationMs": 9564.341242,
+          "cpuMs": 10915.196,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1254002688
+        },
+        {
+          "repeat": 2,
+          "generationMs": 9479.852432,
+          "cpuMs": 10802.903,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1276715008
+        }
+      ],
+      "medianSeconds": 9.479852432,
+      "medianCpuSeconds": 10.802903,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "variant": "writers-2",
+      "settings": {
+        "generationCompactBindings": true,
+        "generationStagingWriters": 2,
+        "generationBatchRows": 12000,
+        "generationSqlParameters": 32766,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 9418.758643,
+          "cpuMs": 11581.981,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1253048320
+        },
+        {
+          "repeat": 1,
+          "generationMs": 9581.815883,
+          "cpuMs": 11847.297,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1240092672
+        },
+        {
+          "repeat": 2,
+          "generationMs": 9218.012805,
+          "cpuMs": 11521.98,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1273716736
+        }
+      ],
+      "medianSeconds": 9.418758642999999,
+      "medianCpuSeconds": 11.581980999999999,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "variant": "writers-4",
+      "settings": {
+        "generationCompactBindings": true,
+        "generationStagingWriters": 4,
+        "generationBatchRows": 12000,
+        "generationSqlParameters": 32766,
+        "generationReadRows": 4096,
+        "generationWorkers": 2,
+        "generationPrefetch": true,
+        "generationCacheMegabytes": 256,
+        "generationSynchronous": "full"
+      },
+      "samples": [
+        {
+          "repeat": 0,
+          "generationMs": 9523.129179,
+          "cpuMs": 12357.498,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1300418560
+        },
+        {
+          "repeat": 1,
+          "generationMs": 9372.559384,
+          "cpuMs": 12257.598,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1253687296
+        },
+        {
+          "repeat": 2,
+          "generationMs": 9608.677007999999,
+          "cpuMs": 12630.816,
+          "peakDatabaseBytes": 70751880,
+          "finalFileBytes": 19238912,
+          "peakRssBytes": 1282744320
+        }
+      ],
+      "medianSeconds": 9.523129179,
+      "medianCpuSeconds": 12.357498,
+      "rows": 832167,
+      "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1"
+    }
+  ]
+}

@@ -10,9 +10,9 @@ try {
 	const suffix = ' ON CONFLICT(state,mask) DO UPDATE SET reads=excluded.reads,gates=excluded.gates WHERE excluded.reads<BuildCandidates.reads'
 	await insertRows(db, 'INSERT INTO BuildCandidates VALUES ', rows, suffix, 900)
 	const expected = await allSQL(db, 'SELECT * FROM BuildCandidates ORDER BY state,mask')
-	for (const prepared of [false, true]) for (const sort of [false, true]) for (const append of [false, true]) for (const limit of [10, 900, 8192]) {
+	for (const prepared of [false, true]) for (const sort of [false, true]) for (const append of [false, true]) for (const limit of [10, 900, 8192]) for (const compactBindings of [false, true]) {
 		await runSQL(db, 'DELETE FROM BuildCandidates')
-		const writer = await StagingWriter.create(db, { prepared, sort, append, parameterLimit: limit, cacheEntries: 2 })
+		const writer = await StagingWriter.create(db, { prepared, sort, append, compactBindings, parameterLimit: limit, cacheEntries: 2 })
 		try {
 			await runSQL(db, 'BEGIN')
 			// Concurrent calls must serialize bindings; sorting must preserve equal-key ties.
@@ -64,6 +64,17 @@ try {
 		await wide.write(many)
 		assert.equal((await allSQL<{ count: number }>(db, 'SELECT count(*) AS count FROM BuildCandidates'))[0].count, 2000)
 	} finally { await wide.close() }
+
+	// Compact arithmetic must preserve all uint32 costs, masks and wire counts.
+	await runSQL(db, 'DELETE FROM BuildCandidates')
+	const compact = await StagingWriter.create(db, { prepared: true, sort: false, compactBindings: true, parameterLimit: 10, cacheEntries: 2 })
+	try {
+		const boundary: StagingRow[] = [0, 1, 0x7fffffff, 0x80000000, 0xffffffff].flatMap((reads, i) => [0, 255].map(mask => [Buffer.from([i, mask]), mask, reads, Buffer.from([i]), 8] as StagingRow))
+		await compact.write(boundary)
+		const actual = await allSQL<{ mask: number, reads: number, wires: number }>(db, 'SELECT mask,reads,wires FROM BuildCandidates ORDER BY state,mask')
+		assert.deepEqual(actual.map(row => [row.mask, row.reads, row.wires]), boundary.map(row => [row[1], row[2], row[4]]))
+		await assert.rejects(compact.write([[Buffer.from([9]), 256, 1, Buffer.from([1]), 1]]), /Invalid compact/)
+	} finally { await compact.close() }
 
 	const compiled = await stagingParameterLimit(db, 32766)
 	assert.ok(compiled >= 5 && compiled <= 32766)

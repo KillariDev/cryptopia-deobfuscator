@@ -2,6 +2,13 @@ import sqlite3 from 'sqlite3'
 import { EventEmitter } from 'events'
 export type SQLSnapshot = { calls: number, awaitMs: number, nativeCalls: number, nativeMs: number, active: number, oldestMs: number, maxMs: number }
 const observers = new WeakMap<sqlite3.Database, SQLObserver>()
+/** Include disposable writer connections in the owner's diagnostic totals. */
+export function observeRelatedSQL(owner: sqlite3.Database, db: sqlite3.Database): () => void {
+	const parent = observers.get(owner)
+	if (!parent) return () => {}
+	const child = new SQLObserver(db); parent.related.push(child)
+	return () => child.close()
+}
 export function observeSQL<T>(db: sqlite3.Database, operation: () => Promise<T>): Promise<T> {
 	return observers.get(db)?.measure(operation) ?? operation()
 }
@@ -9,6 +16,7 @@ export function observeSQL<T>(db: sqlite3.Database, operation: () => Promise<T>)
  * binding, queuing, result conversion and callback scheduling. Never subtract
  * interval totals as an exact handoff measurement: completion events can lag. */
 export class SQLObserver {
+	readonly related: SQLObserver[] = []
 	private calls = 0; private awaitMs = 0; private nativeCalls = 0; private nativeMs = 0; private maxMs = 0
 	private active = new Map<number, number>(); private sequence = 0
 	private owned: boolean
@@ -31,11 +39,18 @@ export class SQLObserver {
 	}
 	snapshot(now = performance.now()): SQLSnapshot {
 		const pending = [...this.active.values()].map(at => Math.max(0, now - at))
-		return { calls: this.calls, awaitMs: this.awaitMs + pending.reduce((a, b) => a + b, 0), nativeCalls: this.nativeCalls, nativeMs: this.nativeMs, active: pending.length, oldestMs: Math.max(0, ...pending), maxMs: this.maxMs }
+		const own = { calls: this.calls, awaitMs: this.awaitMs + pending.reduce((a, b) => a + b, 0), nativeCalls: this.nativeCalls, nativeMs: this.nativeMs, active: pending.length, oldestMs: Math.max(0, ...pending), maxMs: this.maxMs }
+		for (const child of this.related) {
+			const next = child.snapshot(now)
+			for (const key of ['calls', 'awaitMs', 'nativeCalls', 'nativeMs', 'active'] as const) own[key] += next[key]
+			own.oldestMs = Math.max(own.oldestMs, next.oldestMs); own.maxMs = Math.max(own.maxMs, next.maxMs)
+		}
+		return own
 	}
 	close() {
 		if (observers.get(this.db) !== this) return
 		observers.delete(this.db)
+		for (const child of this.related) child.close()
 		if (this.db.listenerCount('profile') === 1) this.db.removeListener('profile', this.profile)
 		else EventEmitter.prototype.removeListener.call(this.db, 'profile', this.profile)
 	}

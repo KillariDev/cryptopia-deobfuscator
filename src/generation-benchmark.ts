@@ -10,7 +10,16 @@ const smoke = process.argv.includes('--smoke')
 const args = process.argv.slice(2).filter(arg => arg !== '--smoke')
 if (args.length && (args.length !== 2 || args[0] !== '--reference')) throw new Error('Usage: npm run benchmark:generation -- [--smoke] [--reference /path/to/compiled/reference/repository]')
 const currentRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const currentVariants: { name: string, root: string, append?: boolean, prefetch?: boolean, diagnostics?: boolean }[] = config.benchmark.generationPrefetchComparison
+const currentVariants: { name: string, root: string, append?: boolean, prefetch?: boolean, diagnostics?: boolean, compact?: boolean, writers?: number, batchRows?: number, parameters?: number }[] = config.benchmark.generationWriterComparison
+	? [
+		{ name: 'baseline', root: currentRoot, compact: false, writers: 1, batchRows: 3000, parameters: 8192 },
+		{ name: 'compact', root: currentRoot, compact: true, writers: 1, batchRows: 3000, parameters: 8192 },
+		{ name: 'compact-wide', root: currentRoot, compact: true, writers: 1, batchRows: 3000, parameters: 16384 },
+		{ name: 'compact-batched', root: currentRoot, compact: true, writers: 1, batchRows: 12000, parameters: 32766 },
+		{ name: 'writers-2', root: currentRoot, compact: true, writers: 2, batchRows: 12000, parameters: 32766 },
+		{ name: 'writers-4', root: currentRoot, compact: true, writers: 4, batchRows: 12000, parameters: 32766 },
+	]
+	: config.benchmark.generationPrefetchComparison
 	? [{ name: 'serial', root: currentRoot, prefetch: false, diagnostics: false }, { name: 'prefetch', root: currentRoot, prefetch: true, diagnostics: false }, { name: 'prefetch-diagnostics', root: currentRoot, prefetch: true, diagnostics: true }]
 	: config.benchmark.generationStagingComparison
 	? [{ name: 'indexed', root: currentRoot, append: false }, { name: 'append', root: currentRoot, append: true }]
@@ -23,7 +32,7 @@ mkdirSync(dirname(output), { recursive: true })
 const revision = (root: string) => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { try { return readFileSync(join(root, '.generation-reference-revision'), 'utf8').trim() } catch { return null } } }
 const runtimeFingerprint = (root: string) => {
 	const hash = createHash('sha256')
-	for (const file of ['generation-diagnostics', 'generation-prefetch', 'sql-observer', 'generation-merge', 'generation-staging', 'generation-dedup', 'generation-finalize', 'disk-generation', 'generation-expansion', 'generation-storage', 'generation-pipeline', 'generation-pool', 'generation-progress', 'rainbowtable', 'semantic', 'sql', 'config']) {
+	for (const file of ['generation-shards', 'generation-diagnostics', 'generation-prefetch', 'sql-observer', 'generation-merge', 'generation-staging', 'generation-dedup', 'generation-finalize', 'disk-generation', 'generation-expansion', 'generation-storage', 'generation-pipeline', 'generation-pool', 'generation-progress', 'rainbowtable', 'semantic', 'sql', 'config']) {
 		try { hash.update(file); hash.update(readFileSync(join(root, 'dist', `${file}.js`))) } catch { hash.update('absent') }
 	}
 	return hash.digest('hex')
@@ -35,8 +44,15 @@ try {
 		for (const variant of repeat % 2 ? [...variants].reverse() : variants) {
 			const directory = mkdtempSync(join(temporary, 'trial-')), report = join(directory, 'result.json')
 			let settingsSource = variant.name === 'reference' ? join(variant.root, 'solver.config.json') : configPath
-			if (variant.append !== undefined || variant.prefetch !== undefined || variant.diagnostics !== undefined) {
+			if (variant.append !== undefined || variant.prefetch !== undefined || variant.diagnostics !== undefined || variant.compact !== undefined) {
 				const settings = structuredClone(config)
+				if (variant.compact !== undefined) {
+					settings.database.generationCompactBindings = variant.compact
+					settings.database.generationStagingWriters = variant.writers!
+					settings.database.generationBatchRows = variant.batchRows!
+					settings.database.generationSqlParameters = variant.parameters!
+					settings.database.generationAppendStaging = false
+				}
 				if (variant.append !== undefined) settings.database.generationAppendStaging = variant.append
 				if (variant.prefetch !== undefined) settings.database.generationPrefetch = variant.prefetch
 				if (variant.diagnostics !== undefined) { settings.logging.verbose = variant.diagnostics; settings.logging.generationDiagnostics = variant.diagnostics }
