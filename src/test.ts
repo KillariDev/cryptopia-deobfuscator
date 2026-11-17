@@ -531,11 +531,78 @@ assert.ok(middle && middle.length === 1)
 assert.equal(functionKey(middle!, 2), functionKey([not0], 2))
 assert.equal(meetInMiddle(unsafe, 2, catalog, 2, 100, 500), undefined)
 assert.equal(truthKey(generateCombinations(4).flat()).length, 8)
-const { synthesizeSMT } = await import('./smt.js')
-const smtResult = await synthesizeSMT([singleGate[0], singleGate[0], singleGate[0]], 2, 1, 5000)
-assert.ok(smtResult && smtResult.length <= 1)
-assert.equal(functionKey(smtResult!, 2), functionKey(singleGate, 2))
-console.log('Template, semantic generation, meet-in-the-middle, equality graph and SMT regressions passed')
+const { forwardSemanticSearch } = await import('./semantic.js')
+const forwardResult = forwardSemanticSearch([singleGate[0], singleGate[0], singleGate[0]], 2, 1, 2000, 5000)
+assert.ok(forwardResult && forwardResult.length === 1)
+assert.equal(functionKey(forwardResult!, 2), functionKey(singleGate, 2))
+const erased = forwardSemanticSearch(unsafe, 2, 1, 2000, 5000)
+assert.ok(erased && erased.length === 1)
+assert.equal(functionKey(erased!, 2), functionKey(unsafe, 2))
+assert.deepEqual(forwardSemanticSearch([not0, not0], 2, 1, 2000, 5000), [])
+assert.equal(forwardSemanticSearch([not0, not1], 2, 1, 2000, 5000), undefined)
+assert.equal(forwardSemanticSearch([not0, not1, not0], 2, 2, 0, 5000), undefined)
+assert.equal(forwardSemanticSearch([not0, not1, not0], 2, 2, 2000, 0), undefined)
+assert.throws(() => forwardSemanticSearch(unsafe, 5, 1, 2000, 5000))
+// Every two-wire single-gate transformation, including repeated controls and
+// non-bijective gates, must be recoverable from an equivalent padded circuit.
+const allSingle = new Map<string, Gate>()
+for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) for (let target = 0; target < 2; target++) for (let gate_i = 0; gate_i < 16; gate_i++) {
+	const gate = { a, b, target, gate_i }
+	allSingle.set(functionKey([gate], 2), gate)
+}
+for (const gate of allSingle.values()) {
+	const padded = [gate, not0, not0]
+	const result = forwardSemanticSearch(padded, 2, 1, 2000, 5000)
+	assert.ok(result)
+	assert.equal(functionKey(result!, 2), functionKey(padded, 2))
+}
+const pair = [singleGate[0], not0]
+const pairResult = forwardSemanticSearch([...pair, not1, not1], 2, 2, 2000, 5000)
+assert.ok(pairResult && pairResult.length === 2)
+assert.deepEqual(circuitState(pairResult!, 2), circuitState(pair, 2))
+const { resetStrategyStats, recordStrategy, strategySnapshot } = await import('./strategy-stats.js')
+const { formatStrategyActivity } = await import('./logging.js')
+resetStrategyStats()
+recordStrategy('forward-semantic-search', { states: 2000 }, performance.now(), 4, 2, true)
+recordStrategy('forward-semantic-search', { states: 2000 }, performance.now(), 4, 4, false)
+const activityStats = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const, strategies: strategySnapshot() }
+const summary = formatStrategyActivity([{ activity: activityStats, updatedAtMs: 0, done: true }, { activity: activityStats, updatedAtMs: 0, done: false }])
+assert.match(summary, /4 gates removed, 2\/4 improving attempts/)
+assert.match(summary, /"states":2000/)
+assert.match(formatStrategyActivity([]), /awaiting worker reports/)
+resetStrategyStats()
+assert.deepEqual(strategySnapshot(), [])
+assert.equal(parseConfig({}).synthesis.smt, true)
+assert.equal(parseConfig({}).synthesis.forwardSemanticSearch, true)
+assert.equal(parseConfig({}).synthesis.meetInMiddle, true)
+assert.equal(parseConfig({}).synthesis.equalitySaturation, true)
+assert.equal(parseConfig({ synthesis: { forwardSemanticSearch: true } }).synthesis.forwardSemanticSearch, true)
+
+// A failed forward semantic search attempt must leave Z3 eligible on exactly the same window.
+const { advancedRewrite } = await import('./strategies.js')
+const synthesisOptions = { ...config.synthesis }
+try {
+	Object.assign(config.synthesis, { forwardSemanticSearch: true, smt: true, meetInMiddle: false, equalitySaturation: false, attemptEvery: 1, maximumWires: 3, timeoutMs: 5000, states: 2000, maximumReplacementGates: 0 })
+	const input = [singleGate[0], singleGate[0], singleGate[0]]
+	resetStrategyStats()
+	assert.equal(await advancedRewrite(input, () => 0), undefined)
+	assert.deepEqual(strategySnapshot().map(stat => stat.strategy), ['forward-semantic-search'])
+	assert.equal(await advancedRewrite(input, () => 0), undefined)
+	assert.deepEqual(strategySnapshot().map(stat => stat.strategy), ['forward-semantic-search', 'z3'])
+	const count = strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0)
+	assert.equal(await advancedRewrite(input, () => 0), undefined)
+	assert.equal(strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0), count)
+	// A different window chooses Z3 directly when the random draw selects it.
+	config.synthesis.maximumReplacementGates = 1
+	const recovered = await advancedRewrite([not0, not0, not0], () => 0.75)
+	assert.ok(recovered && recovered.length === 1)
+	assert.equal(functionKey(recovered!, 2), functionKey([not0], 2))
+	assert.equal(strategySnapshot()[strategySnapshot().length - 1].strategy, 'z3')
+} finally {
+	Object.assign(config.synthesis, synthesisOptions)
+	resetStrategyStats()
+}
+console.log('Template, semantic generation, meet-in-the-middle, equality graph, forward semantic search and strategy summary regressions passed')
 
 assert.equal(parseConfig({ database: { memoryMapBytes: 0 } }).database.memoryMapBytes, 0)
 assert.throws(() => parseConfig({ database: { format: 'unknown' } }))

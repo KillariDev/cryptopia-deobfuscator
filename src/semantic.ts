@@ -100,3 +100,51 @@ export function meetInMiddle(gates: Gate[], wires: number, catalog: Gate[], maxD
 	}
 	return undefined
 }
+
+/** Bounded forward synthesis over all Boolean gates, including target/control overlap.
+ * Full truth states merge equivalent prefixes. A collision of two inputs that the
+ * target distinguishes can never be undone by any suffix, so prune it immediately.
+ */
+export function forwardSemanticSearch(original: Gate[], wires: number, maxGates: number, limit: number, timeoutMs: number): Gate[] | undefined {
+	if (!Number.isInteger(wires) || wires < 1 || wires > 4) throw new Error('Forward semantic search supports 1-4 wires')
+	const end = performance.now() + timeoutMs
+	const target = circuitState(original, wires), identity = circuitState([], wires)
+	const goal = stateKey(target)
+	if (goal === stateKey(identity)) return original.length ? [] : undefined
+	if (limit < 1 || maxGates < 1) return undefined
+	// Deduplicate single-gate transformations, including unused/repeated controls.
+	const catalog = new Map<string, Gate>()
+	for (let target = 0; target < wires; target++) for (let a = 0; a < wires; a++) for (let b = 0; b < wires; b++) for (let gate_i = 1; gate_i < 16; gate_i++) {
+		if (performance.now() >= end) return undefined
+		const gate = { a, b, target, gate_i }, key = stateKey(applyState(identity, gate))
+		const old = catalog.get(key)
+		if (!old || isReplacementSimpler([gate], [old])) catalog.set(key, gate)
+	}
+	let frontier = [{ state: identity, gates: [] as Gate[] }]
+	const seen = new Set([stateKey(identity)])
+	for (let depth = 1; depth <= Math.min(maxGates, original.length - 1); depth++) {
+		const next: typeof frontier = []
+		for (const entry of frontier) for (const gate of catalog.values()) {
+			if (performance.now() >= end) return undefined
+			const state = applyState(entry.state, gate), key = stateKey(state)
+			if (seen.has(key)) continue
+			const candidate = [...entry.gates, gate]
+			if (key === goal) return isReplacementSimpler(candidate, original) && functionKey(candidate, wires) === functionKey(original, wires) ? candidate : undefined
+			if (depth === Math.min(maxGates, original.length - 1)) continue
+			const outputs = new Map<number, number>()
+			let compatible = true
+			for (let i = 0; i < state.length; i++) {
+				const prior = outputs.get(state[i])
+				if (prior !== undefined && prior !== target[i]) { compatible = false; break }
+				outputs.set(state[i], target[i])
+			}
+			if (!compatible) continue
+			if (seen.size >= limit) return undefined
+			seen.add(key)
+			next.push({ state, gates: candidate })
+		}
+		frontier = next
+		if (!frontier.length) break
+	}
+	return undefined
+}

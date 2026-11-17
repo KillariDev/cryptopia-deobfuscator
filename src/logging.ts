@@ -1,3 +1,4 @@
+import type { StrategyStat } from './strategy-stats.js'
 import { config } from './config.js'
 import { logTimed } from './utils.js'
 import type { RainbowTableStats } from './rainbow-portfolio.js'
@@ -20,6 +21,7 @@ export type WorkerActivity = {
 	checks: number
 	improvements: number
 	stage: 'searching' | 'shuffling' | 'verifying'
+	strategies?: StrategyStat[]
 	rainbowTables?: RainbowTableStats[]
 	resources?: { databaseMs: number, elapsedMs: number, heapUsedBytes: number }
 }
@@ -79,4 +81,16 @@ export function formatRainbowActivity(statuses: WorkerStatus[]) {
 		totals.set(id, total)
 	}
 	return totals.size ? ' Tables: ' + [...totals.entries()].map(([id, stat]) => `${id}: ${stat.gatesRemoved} gates removed, ${stat.rewrites} rewrites, ${stat.windows ? (stat.matches / stat.windows * 100).toFixed(1) : '0.0'}% improving matches, ${(stat.lookupMs / 1000).toFixed(2)} lookup worker-seconds`).join('; ') + '.' : ''
+}
+
+/** Latest per-job snapshots prevent repeated progress reports counting twice. */
+export function formatStrategyActivity(statuses: WorkerStatus[]) {
+	const totals = new Map<string, StrategyStat>()
+	for (const status of statuses) for (const stat of status.activity?.strategies ?? []) {
+		const key = `${stat.strategy}:${stat.settings}`
+		const total = totals.get(key) ?? { ...stat, attempts: 0, rewrites: 0, gatesRemoved: 0, elapsedMs: 0 }
+		for (const field of ['attempts', 'rewrites', 'gatesRemoved', 'elapsedMs'] as const) total[field] += stat[field]
+		totals.set(key, total)
+	}
+	return 'Strategies this round: ' + ([...totals.values()].sort((a, b) => b.gatesRemoved - a.gatesRemoved).map(stat => `${stat.strategy} ${stat.settings}: ${stat.gatesRemoved} gates removed, ${stat.rewrites}/${stat.attempts} improving attempts, ${(stat.elapsedMs / 1000).toFixed(3)} worker-seconds`).join('; ') || 'awaiting worker reports') + '.'
 }
