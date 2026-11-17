@@ -182,10 +182,10 @@ The last expansion layer merges candidates directly into the lookup table;
 there is no final-depth visited/frontier write followed by a separate drain.
 A SQL merge ranks candidates by gate count, distinct used wires, then read count,
 matching the solver's replacement ordering. Those three integer cost columns
-remain in the output table so resumed generation can compare candidates without
-fetching and decoding existing gate payloads in JavaScript.
+are used only during generation to compare candidates without fetching and decoding
+existing gate payloads in JavaScript. Final cleanup removes them.
 
-Generation settings (the obsolete `insertBatchSize` setting has been removed):
+Generation settings (the obsolete `insertBatchSize` and `keepGenerationState` settings have been removed):
 
 - `database.queryBatchSize`: SQL parameter budget (at most 900), independent of generation transaction size.
 - `database.generationReadRows: 4096`: maximum frontier rows consumed per transaction. Larger values amortize commits but increase staging space and work repeated after interruption.
@@ -195,7 +195,6 @@ Generation settings (the obsolete `insertBatchSize` setting has been removed):
 - `database.generationSynchronous: "full"`: conservative commit durability. `"normal"` is configurable; in WAL mode it can lose recent committed transactions on power loss, while application interruption remains resumable. No unsafe `OFF` setting is provided.
 - `database.generationBatchRows`: maximum raw candidate expansions per CPU task and maximum rows staged in JavaScript before a bulk SQL write. The gate catalog is split too if it exceeds this limit.
 - `database.generationStates`: optional distinct-function limit; `0` means unlimited disk-backed generation. Hitting a limit rolls back the current batch; increase the limit or set it to `0`, then restart to resume.
-- `database.keepGenerationState`: retain working tables after completion for inspection. By default they are dropped; SQLite may retain freed pages in the database file.
 - `database.memoryMapBytes`: mmap setting per connection; `0` disables mapping. SQLite can cap or disable mmap depending on its build.
 
 Only build one copy of a particular table at a time. Disk requirements can still
@@ -313,8 +312,29 @@ rate with `database.etaSmoothing`. Layer transitions reset speed learning becaus
 processing cost can change. Estimates remain approximate, especially early on.
 Per-layer totals and committed progress survive a restart; speed samples relearn
 without counting pre-restart work as new processing. Stalls are labeled as
-waiting for progress. `100.00%` is reported after build-table cleanup succeeds.
+waiting for progress. `100.00%` is reported after cleanup and compaction succeed.
 Phase timings and other internal counters appear only with verbose logging.
+
+### Automatic cleanup and compaction
+
+Generation automatically removes `BuildSeen`, `BuildFrontier`, `BuildLayers`,
+the three replacement-cost columns, and unnecessary build counters. It retains
+only the lookup key/payload table and the small signature/depth/completion records
+used to establish canonical coverage. An ordered table rewrite strips all three
+cost columns together. SQLite `VACUUM` then compacts the file; WAL checkpoints
+truncate the journal before and after compaction.
+
+Cleanup commits atomically with a durable “awaiting compaction” status. If cleanup
+fails, its transaction rolls back. If vacuum fails or the process stops, restart
+the same job: it retries finalization without regenerating the completed output.
+Normal progress stays at `99.99% complete | ETA finishing` until this succeeds;
+ready tables are reused without repeating compaction. The old
+`keepGenerationState` option is removed because completed tables always clean up.
+
+Compaction adds disk work and needs temporary free space. SQLite documents that
+`VACUUM` can require up to twice the database file size in additional free space:
+[SQLite VACUUM documentation](https://sqlite.org/lang_vacuum.html). The generator
+does not report success if compaction fails, including insufficient disk space.
 
 ### Generation benchmarks
 
@@ -665,11 +685,11 @@ order. Small fixtures (3/3 and 4/2) used 1/2/4 configured workers; larger fixtur
 median build times of approximately 35.7s → 14.9s at one worker and 33.4s → 15.0s
 at four. The 3/4 medians improved approximately 1.3–1.4×; smaller fixtures improved
 approximately 2.0–2.3×. Every coverage/cost digest matched across implementations
-and worker counts. File sizes were also smaller in these fixtures, before vacuum.
+and worker counts. These earlier measurements had smaller file sizes even before vacuum; they preceded automatic completion compaction.
 
 These are combined changes on a shared host, not isolated-feature estimates or
 significance tests. They do not establish throughput or final size for the full
 4-variable/5-gate build. Per-trial samples and database controls are included in
 the summary. Measurements preceded removal of the unused `insertBatchSize` knob
-and minor validation/progress-only cleanup; measured compiled fingerprints are
+and minor validation/progress-only cleanup, and preceded automatic completion compaction. The generation benchmark now includes that finalization work; measured compiled fingerprints are
 retained separately from the base git revision.

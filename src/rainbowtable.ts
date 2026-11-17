@@ -1,3 +1,4 @@
+import { finalizeGeneration } from './generation-finalize.js'
 import { generationLookupSchema, generationSignature } from './generation-storage.js'
 import { LookupStatements } from './lookup-statements.js'
 import { LookupBatcher } from './lookup-batcher.js'
@@ -138,17 +139,30 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 	await databaseReady(db)
 	try {
 		const columns = await allSQL<{ name: string }>(db, 'PRAGMA table_info(InputOutputReplacers)')
-		if (columns.length && !['gateCount', 'wireCount', 'readCount'].every(name => columns.some(column => column.name === name))) throw new Error('Incompatible rainbow schema. Keep the database and finish it with its original version, or select a fresh database directory; tables are not migrated.')
+		const costColumns = ['gateCount', 'wireCount', 'readCount'].filter(name => columns.some(column => column.name === name))
+		const catalog = [...generateAllGates(wires)]
+		const hasMeta = (await allSQL(db, "SELECT name FROM sqlite_master WHERE name='BuildMeta'")).length > 0
+		const meta = hasMeta ? (await allSQL<{ signature: string, depth: number }>(db, 'SELECT signature,depth FROM BuildMeta WHERE id=1'))[0] : undefined
+		if (meta && meta.signature !== generationSignature(wires, gates, hashGates(catalog))) throw new Error('Incompatible generation checkpoint; keep it with its original version or use a fresh database directory')
+		const finished = meta && meta.depth > gates
+		if (columns.length && (costColumns.length !== 3 && !(costColumns.length === 0 && finished))) throw new Error('Incompatible rainbow schema. Keep the database and finish it with its original version, or select a fresh database directory; tables are not migrated.')
 		await runSQL(db, generationLookupSchema)
 		await runSQL(db, 'CREATE TABLE IF NOT EXISTS GenerationStatus(id INTEGER PRIMARY KEY,complete INTEGER NOT NULL)')
-		if ((await allSQL<{ complete: number }>(db, 'SELECT complete FROM GenerationStatus WHERE id=1'))[0]?.complete === 1) {
-			if (!await hasCanonicalCoverage(db, wires, gates)) throw new Error('Incompatible completed rainbow table; use a fresh database directory')
+		const status = (await allSQL<{ complete: number }>(db, 'SELECT complete FROM GenerationStatus WHERE id=1'))[0]?.complete
+		if (finished) {
+			if (status !== 1 || costColumns.length) {
+				const finishing = () => logTimed('Rainbow generation: 99.99% complete | ETA finishing')
+				finishing()
+				const timer = setInterval(finishing, config.timing.databaseLogSeconds * 1000)
+				try { await finalizeGeneration(db) } finally { clearInterval(timer) }
+				logTimed('Rainbow generation: 100.00% complete | ETA 0s')
+			}
 			logTimed(`Using rainbow table ${databaseFilename(wires, gates)}`)
 			return db
 		}
+		if (status === 1 || status === 2) throw new Error('Rainbow completion metadata is inconsistent')
 		await configureGenerationDatabase(db)
 		await runSQL(db, 'INSERT OR REPLACE INTO GenerationStatus VALUES(1,0)')
-		const catalog = [...generateAllGates(wires)]
 		logTimed(`Generating rainbow table: ${wires} wires, up to ${gates} gates, ${catalog.length} gate choices`)
 		const started = performance.now(), estimator = new GenerationEstimator(config.database.etaWindowSamples, config.database.etaWarmupSamples, config.database.etaSmoothing)
 		let lastReport = started, current: SemanticProgress | undefined
@@ -169,15 +183,17 @@ export const createRainbowTable = async (wires: number, gates: number) => {
 			await generateOnDisk(db, wires, gates, catalog, {
 				readRows: config.database.generationReadRows, stageRows: config.database.generationBatchRows,
 				parameterLimit: config.database.queryBatchSize, stateLimit: config.database.generationStates,
-				keepState: config.database.keepGenerationState,
+				keepState: true,
 				workers, queueBatches: config.database.generationQueueBatches, minimumWork: config.database.generationMinimumWork,
 				onProfile: value => { profile = value },
 			}, progress => {
 				const newLayer = current?.depth !== progress.depth
-				current = progress
+				current = { ...progress, complete: false }
 				report(newLayer)
 			})
-			await runSQL(db, 'INSERT OR REPLACE INTO GenerationStatus VALUES(1,1)')
+			await finalizeGeneration(db, phase => { if (profile) profile = { ...profile, phase, phaseStarted: performance.now() } })
+			if (current) current.complete = true
+			report(true)
 			logTimed(`Rainbow generation complete in ${generationDuration(performance.now() - started)}.`)
 			if (profile) logVerbose(`Generation profile: ${profile.workersUsed} CPU threads started; ${profile.candidates} candidates expanded, ${profile.emitted} emitted after local deduplication; ${(profile.expansionMs / 1000).toFixed(2)} expansion worker-seconds; ${((profile.writeMs + profile.readMs) / 1000).toFixed(2)}s database work; ${(profile.waitMs / 1000).toFixed(2)}s waiting for expansion; peak ${profile.peakPending} pending tasks. Times can overlap.`)
 		} finally { clearInterval(timer) }

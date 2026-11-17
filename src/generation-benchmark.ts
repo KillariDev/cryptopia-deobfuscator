@@ -18,7 +18,7 @@ mkdirSync(dirname(output), { recursive: true })
 const revision = (root: string) => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { try { return readFileSync(join(root, '.generation-reference-revision'), 'utf8').trim() } catch { return null } } }
 const runtimeFingerprint = (root: string) => {
 	const hash = createHash('sha256')
-	for (const file of ['disk-generation', 'generation-expansion', 'generation-storage', 'generation-pipeline', 'generation-pool', 'generation-progress', 'rainbowtable', 'semantic', 'sql', 'config']) {
+	for (const file of ['generation-finalize', 'disk-generation', 'generation-expansion', 'generation-storage', 'generation-pipeline', 'generation-pool', 'generation-progress', 'rainbowtable', 'semantic', 'sql', 'config']) {
 		try { hash.update(file); hash.update(readFileSync(join(root, 'dist', `${file}.js`))) } catch { hash.update('absent') }
 	}
 	return hash.digest('hex')

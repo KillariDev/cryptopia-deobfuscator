@@ -101,7 +101,6 @@
     "memoryMapBytes": 268435456,
     "generationStates": 0,
     "generationBatchRows": 3000,
-    "keepGenerationState": false,
     "etaWindowSamples": 5,
     "etaWarmupSamples": 3,
     "etaSmoothing": 0.2,
