@@ -897,3 +897,5 @@ await import('./staging-benchmark-test.js')
 await import('./generation-merge-test.js')
 await import('./generation-diagnostics-test.js')
 await import('./generation-prefetch-test.js')
+
+await import('./generation-shards-test.js')

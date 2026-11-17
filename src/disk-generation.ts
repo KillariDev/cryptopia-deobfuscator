@@ -1,4 +1,6 @@
 import { GenerationPrefetch, GenerationActivity } from './generation-prefetch.js'
+import { ShardedStagingWriter } from './generation-shards.js'
+import { logVerbose } from './logging.js'
 import { candidateMergeSQL } from './generation-merge.js'
 import { StagingWriter, StagingRow } from './generation-staging.js'
 import { frontierCandidatesSQL, countNewFinalFunctionsSQL } from './generation-dedup.js'
@@ -17,7 +19,7 @@ type Meta = { signature: string, depth: number, processed: number, total: number
 type Parent = Omit<Entry, 'state'> & { state: Uint8Array }
 type PreparedBatch = { batch: Entry[], depth: number, expansion?: GenerationPrefetch<ExpansionChunk<Parent>> }
 type Entry = { id: number, state: Buffer, mask: number, reads: number, gates: Buffer }
-export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, appendStaging?: boolean, aggregateMerge?: boolean, directInputMerge?: boolean, prefetch?: boolean, prefetchMegabytes?: number, onActivity?: (read: () => GenerationActivity) => void, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
+export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, appendStaging?: boolean, compactBindings?: boolean, stagingWriters?: number, stagingDirectory?: string, stagingCacheMegabytes?: number, aggregateMerge?: boolean, directInputMerge?: boolean, prefetch?: boolean, prefetchMegabytes?: number, onActivity?: (read: () => GenerationActivity) => void, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
 
 /** A transaction commits output, discovered states and input consumption together. */
 export async function generateOnDisk(db: sqlite3.Database, wires: number, maximumDepth: number, catalog: Gate[], options: DiskGenerationOptions,
@@ -25,6 +27,8 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	if (!Number.isInteger(wires) || wires < 1 || wires > 8 || !Number.isSafeInteger(maximumDepth) || maximumDepth < 1) throw new Error('Invalid generation wire/depth limits')
 	const workers = options.workers ?? 1, queueBatches = options.queueBatches ?? 2, minimumWork = options.minimumWork ?? 100000
 	for (const value of [workers, queueBatches, minimumWork, options.readRows, options.stageRows, options.parameterLimit]) if (!Number.isSafeInteger(value) || value < 1) throw new Error('Invalid generation pipeline limits')
+	const stagingWriters = options.stagingWriters ?? 1
+	if (![1, 2, 4].includes(stagingWriters) || (stagingWriters > 1 && options.appendStaging)) throw new Error('Choose 1, 2 or 4 staging writers; parallel writers require indexed staging')
 	const signature = generationSignature(wires, maximumDepth, hashGates(catalog))
 	// Check before any schema/data mutation: older unfinished builds are never migrated.
 	const hasMeta = (await allSQL(db, "SELECT name FROM sqlite_master WHERE name='BuildMeta'")).length > 0
@@ -67,14 +71,16 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	}
 	const encoded = catalog.map(gate => encodeGates([gate])), kernel = new ExpansionKernel(wires, catalog), pool = new GenerationPool(workers, wires, catalog)
 	const layers = await allSQL<{ depth: number, total: number, processed: number }>(db, 'SELECT * FROM BuildLayers ORDER BY depth')
-	const staging = await StagingWriter.create(db, { parameterLimit: options.parameterLimit, cacheEntries: options.statementCacheEntries ?? 8, prepared: options.preparedInserts ?? true, sort: options.sortStaging ?? false, append: options.appendStaging ?? false })
+	const stagingOptions = { parameterLimit: options.parameterLimit, cacheEntries: options.statementCacheEntries ?? 8, prepared: options.preparedInserts ?? true, sort: options.sortStaging ?? false, append: options.appendStaging ?? false, compactBindings: options.compactBindings ?? false }
+	const staging = await StagingWriter.create(db, stagingOptions)
+	let shards: ShardedStagingWriter | undefined
 	const budget = (options.prefetchMegabytes ?? 16) * 1048576
 	if (!Number.isSafeInteger(budget) || budget < 1) throw new Error('Invalid generation lookahead budget')
 	const prefetchEnabled = (options.prefetch ?? false) && workers > 1
 	let queued: PreparedBatch | undefined, consuming: PreparedBatch | undefined
 	const parentsOf = (batch: Entry[]): Parent[] => batch.map(entry => ({ ...entry, state: unpackState(entry.state, wires) }))
 	const expand = (parents: Parent[]) => expandBatch(parents, catalog.length, kernel, pool, { stageRows: options.stageRows, workers, queueBatches, minimumWork }, pending => { profile.peakPending = Math.max(profile.peakPending, pending) })
-	options.onActivity?.(() => ({ ...pool.activity, lookaheadBatches: queued ? 1 : 0, bufferedBytes: (queued?.expansion?.bufferedBytes ?? 0) + (consuming?.expansion?.bufferedBytes ?? 0), bufferLimitBytes: prefetchEnabled ? budget * 2 : 0 }))
+	options.onActivity?.(() => ({ ...pool.activity, lookaheadBatches: queued ? 1 : 0, bufferedBytes: (queued?.expansion?.bufferedBytes ?? 0) + (consuming?.expansion?.bufferedBytes ?? 0), bufferLimitBytes: prefetchEnabled ? budget * 2 : 0, ...(shards?.activity ?? { stagingWriters: 1, activeStagingWriters: profile.phase === 'staging' ? 1 : 0 }) }))
 	let failed = false
 	let startDepth = meta.depth, startProcessed = meta.processed
 	const report = () => {
@@ -83,6 +89,8 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 		onProgress?.({ depth: meta!.depth, processed: meta!.processed, total: meta!.total, states: meta!.functions, complete: profile.phase === 'complete', ...overallGenerationWork(layers, maximumDepth, meta!.depth > maximumDepth, catalog.length), processedThisRun: meta!.processed - startProcessed, disk: true })
 	}
 	try {
+		if (stagingWriters > 1) shards = await ShardedStagingWriter.create(db, { ...stagingOptions, writers: stagingWriters, directory: options.stagingDirectory, cacheMegabytes: options.stagingCacheMegabytes ?? 64 })
+		logVerbose(`Generation staging: ${stagingWriters} writer(s), ${options.compactBindings ? 3 : 5} bindings per candidate${shards ? `; disposable scratch databases: ${shards.directory}` : ''}`)
 		// The last expanded layer writes directly to output: no depth-maximum frontier.
 		while (meta.depth < maximumDepth) {
 			if (meta.depth !== startDepth) { startDepth = meta.depth; startProcessed = 0 }
@@ -105,7 +113,10 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				continue
 			}
 			const priorFunctions = meta.functions
-			await run('BEGIN IMMEDIATE')
+			await shards?.beginBatch()
+			// IMMEDIATE would reserve write locks on attached scratch databases,
+			// blocking their independent connections. Only main is authoritative.
+			await run(shards ? 'BEGIN' : 'BEGIN IMMEDIATE')
 			try {
 				if (prefetchEnabled) {
 					// Current-depth rows after this prefix cannot be changed by expansion,
@@ -129,7 +140,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				let candidates: StagingRow[] = []
 				const flush = async () => {
 					if (!candidates.length) return
-					await phase('staging', () => staging.write(candidates))
+					await phase('staging', () => (shards ?? staging).write(candidates))
 					candidates = []
 				}
 				const expanding = () => { profile.phase = 'expanding'; profile.phaseStarted = performance.now(); options.onProfile?.({ ...profile }) }
@@ -149,7 +160,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 					expanding()
 				}
 				await flush()
-				await phase('deduplicating', () => staging.materialize())
+				await phase('deduplicating', () => (shards ?? staging).materialize())
 				const final = meta.depth + 1 === maximumDepth
 				await phase('deduplicating', async () => {
 					if (final) {
@@ -178,7 +189,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 		return true
 	} catch (error) { failed = true; throw error } finally {
 		queued?.expansion?.cancel(); consuming?.expansion?.cancel()
-		const cleanup = await Promise.allSettled([staging.close(), pool.close()])
+		const cleanup = await Promise.allSettled([shards?.close(), staging.close(), pool.close()])
 		await Promise.allSettled([queued?.expansion?.settled, consuming?.expansion?.settled])
 		if (!failed) for (const result of cleanup) if (result.status === 'rejected') throw result.reason
 		profile.elapsedMs = performance.now() - started; profile.workersUsed = pool.workerCount

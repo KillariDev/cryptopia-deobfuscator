@@ -23,6 +23,8 @@ const variants = [
 	{ name: 'prepared-large-sorted', wide: false, prepared: true, large: true, sort: true },
 	{ name: 'prepared-wide', wide: true, prepared: true, large: true, sort: false },
 	{ name: 'prepared-wide-sorted', wide: true, prepared: true, large: true, sort: true },
+	{ name: 'compact-large', wide: false, prepared: true, large: true, sort: false, compact: true },
+	{ name: 'compact-wide', wide: true, prepared: true, large: true, sort: false, compact: true },
 	{ name: 'append-large', wide: false, prepared: true, large: true, sort: false, append: true },
 	{ name: 'append-window', wide: false, prepared: true, large: true, sort: false, append: true, appendGrouping: false },
 ]
@@ -39,7 +41,7 @@ try {
 				await configureGenerationDatabase(db)
 				await runSQL(db, 'CREATE TEMP TABLE BuildCandidates(state BLOB NOT NULL,mask INTEGER NOT NULL,reads INTEGER NOT NULL,gates BLOB NOT NULL,wires INTEGER NOT NULL,PRIMARY KEY(state,mask)) WITHOUT ROWID')
 				const parameters = await stagingParameterLimit(db, variant.wide ? config.benchmark.stagingWideSqlParameters : variant.large ? config.database.generationSqlParameters : config.database.queryBatchSize)
-				if (variant.prepared) writer = await StagingWriter.create(db, { prepared: true, sort: variant.sort, parameterLimit: parameters, cacheEntries: config.database.generationStatementCacheEntries, append: 'append' in variant && variant.append === true, appendGrouping: !('appendGrouping' in variant) || variant.appendGrouping !== false })
+				if (variant.prepared) writer = await StagingWriter.create(db, { prepared: true, sort: variant.sort, parameterLimit: parameters, cacheEntries: config.database.generationStatementCacheEntries, append: 'append' in variant && variant.append === true, compactBindings: 'compact' in variant && variant.compact === true, appendGrouping: !('appendGrouping' in variant) || variant.appendGrouping !== false })
 				await runSQL(db, 'BEGIN')
 				const started = performance.now()
 				for (let offset = 0; offset < fixture.length; offset += config.database.generationBatchRows) {

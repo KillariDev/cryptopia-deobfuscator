@@ -188,7 +188,7 @@ existing gate payloads in JavaScript. Final cleanup removes them.
 Generation settings (the obsolete `insertBatchSize` and `keepGenerationState` settings have been removed):
 
 - `database.queryBatchSize`: lookup SQL parameter budget (at most 900). Generation staging has its own budget.
-- `database.generationSqlParameters: 8192`: requested bind-variable budget for staging statements, capped at SQLite's compiled variable ceiling (portable 999 ceiling if compile diagnostics omit it). Five columns per candidate means at most 1,638 rows per statement at the default. This does not change lookup query limits or transaction/checkpoint size.
+- `database.generationSqlParameters: 8192`: requested bind-variable budget for staging statements, capped at SQLite's compiled variable ceiling (portable 999 ceiling if compile diagnostics omit it). Compact bindings use three parameters per candidate, allowing at most 2,730 rows per statement at the default (1,638 with compact bindings disabled). This does not change lookup query limits or transaction/checkpoint size.
 - `database.generationPreparedInserts: true`: reuse prepared staging inserts across flushes, with serialized bindings on the generation connection. Set `false` for a diagnostic comparison using ordinary SQL calls.
 - `database.generationStatementCacheEntries: 8`: bound the LRU by statement row-count shape, including varying tail batches. Statements are finalized on success, pause and failure, before output cleanup/compaction.
 - `database.generationSortStaging: false`: optional stable sorting by packed key/mask within each staging buffer. Equal-key tie order remains intact. Sorting is off because it did not improve the larger benchmark fixture consistently.
@@ -293,7 +293,7 @@ existing checkpoints can resume without regeneration.
 12 complete table builds. On the 500,000-candidate fixture, median staging time
 changed from about 3.57s with ordinary 900-parameter inserts to 2.75s with prepared
 8,192-parameter inserts. Sorting and the wider 16,384 budget did not improve the
-larger fixture consistently, so defaults retain unsorted prepared 8,192 batches.
+larger fixture consistently; those measurements selected unsorted prepared 8,192 batches. See the compact-binding comparison below for subsequent changes.
 The smaller fixture was noisier and did not show prepared inserts winning every
 comparison; these are descriptive measurements on a shared host.
 
@@ -908,3 +908,84 @@ without lookahead and 11.94s with it (about 8% less); 3-wire/4-gate builds were
 slightly slower with lookahead. The shared-host samples do not establish a
 universal speedup, diagnostic overhead, or production 4-wire/5-gate performance.
 Lower times with diagnostics enabled should be treated as measurement noise.
+
+## Compact bindings and parallel staging writers
+
+`database.generationCompactBindings: true` combines mask, uint32 read cost and wire
+count into one exactly represented 44-bit number. SQL unpacks it when inserting,
+so each candidate needs three bindings instead of five. The stored schema and
+solver lookup keys stay unchanged. Parameter arrays are filled directly without
+intermediate row slices or flattening. Normal and append staging both support
+compact bindings; first equal-cost winners are preserved.
+
+`database.generationStagingWriters: 1` accepts `1`, `2`, or `4`. Values above one
+route each exact function key to a dedicated SQLite connection and scratch file,
+so local `(state,mask)` deduplication runs concurrently. All masks for one function
+share the same writer. Each writer accumulates full prepared-statement batches;
+the remainder is flushed when the read batch finishes. Extra retained row buffers
+are bounded by one statement's row capacity per writer, in addition to the current
+input batch and its binding arrays.
+
+Completed scratch batches are imported into the main temporary candidate table
+with native `INSERT ... SELECT`, without copying rows back through JavaScript.
+Only then does the existing main transaction update discovered states, lookup
+output, consumed frontier rows and checkpoint progress. Global seen-state checks,
+lookup writes, the import and final compaction remain serialized; this is parallel
+candidate staging, not a fully partitioned generation database. Merge time is
+included in the diagnostic dedup phase. The main connection uses a deferred
+transaction in this mode so it does not lock the scratch writers. Independent
+scratch connections are drained before failure cleanup or rollback completes.
+
+Scratch files live in a unique `rainbow-staging-*` directory under
+`files.dataDirectory` / `files.workerDirectory` (normally `data/worker`). Their
+cache budget totals `database.generationCacheMegabytes` across the writers,
+in addition to the main connection's caches. Scratch files use WAL without
+fsync because they are disposable and never define saved progress. The main
+checkpoint keeps its configured durability. Successful completion, pause and
+handled failures close and detach the scratch connections and remove that run's
+scratch directory. A forcibly killed process can leave its scratch directory
+behind; it is never reused and can be deleted once that process has exited.
+
+Parallel staging requires `generationAppendStaging: false`. Writer count and
+compact bindings can change when restarting an existing compatible checkpoint;
+no regeneration or migration is required. Verbose logs show the scratch path,
+active staging writers and buffered rows. SQL diagnostic totals cover all writer
+connections; concurrent API/native time can exceed wall-clock interval time.
+
+To compare complete builds set `benchmark.generationWriterComparison: true`,
+leaving the other generation comparison modes false, then run
+`npm run benchmark:generation`. Its six fixed experimental controls are baseline
+(5 bindings, 3,000 batch rows, 8,192 parameters), compact bindings with those same
+limits, compact/16,384 parameters, compact/12,000 rows/32,766 parameters, and the
+last configuration with 2 or 4 writers. `--reference /path/to/compiled/reference`
+adds the previous implementation. `generationTables`, `workerCounts`, `repeats`
+and `generationTimeoutSeconds` control the experiments. Timing includes scratch
+creation, writing, import, disposal, checkpointing and final database compaction.
+Reports include process CPU time and sampled peak main-plus-scratch database file
+sizes. Peaks are sampled every 25ms and may miss short-lived files; they exclude
+SQLite's anonymous temporary files and are not physical disk usage measurements.
+Every replacement is exhaustively validated, and coverage/cost digests must match
+across variants. `npm test` runs small comparisons to keep this harness covered.
+`npm run benchmark:staging` additionally compares compact bindings on realistic
+4-wire/5-gate candidate data, separately from complete generation.
+
+`benchmarks/results/2026-11-17-parallel-staging.json` records 42 complete builds
+against main revision `1768f6b`, with three repetitions at two expansion workers.
+All output coverage/cost digests matched and every replacement was exhaustively
+verified. Compact bindings reduced median 4-wire/3-gate time from 10.49s to 8.77s
+and 3-wire/4-gate time from 1.81s to 1.54s against the controlled five-binding
+baseline. Wider statements gave similar times (8.75s and 1.52s); larger expansion
+batches did not improve these results. Two/four staging writers took 9.42s/9.52s
+on 4/3 and 2.07s/1.97s on 3/4, including import and cleanup. Thus compact bindings
+now default to true, while staging writers remain at one and batch/parameter
+budgets remain 3,000/8,192. Parallel staging is available for further production
+experiments, not assumed faster. These shared-host samples do not establish
+full 4/5 throughput, cold-disk behavior, or statistically significant differences.
+
+`benchmarks/results/2026-11-17-compact-bindings.json` records another 33
+staging-only trials on 200,000 realistic 4-wire/5-gate candidates. All variants
+produced the same 192,432 distinct `(state,mask)` rows and exact tie winners.
+Median prepared staging time at the 8,192-parameter limit was 925ms with five
+bindings and 727ms with compact bindings. These timings exclude transaction
+commit and setup, so the complete-build experiment above remains the basis for
+production defaults.

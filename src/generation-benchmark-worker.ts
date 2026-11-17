@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, statSync } from 'fs'
+import { readFileSync, writeFileSync, statSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { createHash } from 'crypto'
@@ -7,6 +7,7 @@ const [root, directory, wiresText, gatesText, workersText, output, settingsSourc
 const wires = Number(wiresText), gates = Number(gatesText), workers = Number(workersText)
 const settings = JSON.parse(readFileSync(settingsSource ?? join(root, 'solver.config.json'), 'utf8'))
 settings.files.databaseDirectory = directory
+settings.files.dataDirectory = directory
 settings.database.generationWorkers = workers
 settings.logging.verbose = false
 const settingsPath = join(directory, 'settings.json')
@@ -20,10 +21,18 @@ const { getVars } = await import(moduleAt('utils'))
 let peakBytes = 0
 const path = databaseFilename(wires, gates)
 const fileSize = (name: string) => { try { return statSync(name).size } catch { return 0 } }
-const sample = () => { peakBytes = Math.max(peakBytes, fileSize(path) + fileSize(path + '-wal') + fileSize(path + '-journal')) }
-const timer = setInterval(sample, 25), started = performance.now()
+const storageBytes = (root: string): number => {
+	let total = 0
+	try { for (const entry of readdirSync(root, { withFileTypes: true })) {
+		const name = join(root, entry.name)
+		total += entry.isDirectory() ? storageBytes(name) : /\.(db|db-wal|db-journal|db-shm)$/.test(name) ? fileSize(name) : 0
+	} } catch { /* Scratch files may disappear between samples. */ }
+	return total
+}
+const sample = () => { peakBytes = Math.max(peakBytes, storageBytes(directory)) }
+const timer = setInterval(sample, 25), cpuStarted = process.cpuUsage(), started = performance.now()
 try {
-	const db = await createRainbowTable(wires, gates), generationMs = performance.now() - started
+	const db = await createRainbowTable(wires, gates), generationMs = performance.now() - started, cpu = process.cpuUsage(cpuStarted)
 	sample()
 	let rows = 0
 	const hash = createHash('sha256')
@@ -37,5 +46,5 @@ try {
 		} catch (error) { reject(error) }
 	}, (error: Error | null) => error ? reject(error) : resolve()))
 	await closeRainbowTable(db); sample()
-	writeFileSync(output, JSON.stringify({ wires, gates, workers, generationMs, rows, semanticCostDigest: hash.digest('hex'), peakDatabaseBytes: peakBytes, finalFileBytes: fileSize(path), peakRssBytes: process.resourceUsage().maxRSS * 1024, settings, validation: 'all-replacements-exhaustive' }))
+	writeFileSync(output, JSON.stringify({ wires, gates, workers, generationMs, cpuMs: (cpu.user + cpu.system) / 1000, rows, semanticCostDigest: hash.digest('hex'), peakDatabaseBytes: peakBytes, storageMeasurement: '25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks', finalFileBytes: fileSize(path), peakRssBytes: process.resourceUsage().maxRSS * 1024, settings, validation: 'all-replacements-exhaustive' }))
 } finally { clearInterval(timer) }
