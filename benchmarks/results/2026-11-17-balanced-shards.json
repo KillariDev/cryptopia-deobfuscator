@@ -1,0 +1,273 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-17",
+  "referenceRevision": "ffc9ed2",
+  "distribution": {
+    "candidateRows": 200000,
+    "seed": 1729,
+    "batchRows": 3000,
+    "groups": [
+      {
+        "writers": 2,
+        "variant": "previous",
+        "rows": [
+          7246,
+          192754
+        ]
+      },
+      {
+        "writers": 2,
+        "variant": "mixed",
+        "rows": [
+          100329,
+          99671
+        ]
+      },
+      {
+        "writers": 4,
+        "variant": "previous",
+        "rows": [
+          3984,
+          142966,
+          3262,
+          49788
+        ]
+      },
+      {
+        "writers": 4,
+        "variant": "mixed",
+        "rows": [
+          50277,
+          49700,
+          50052,
+          49971
+        ]
+      }
+    ]
+  },
+  "completeBuildTrials": 12,
+  "controls": {
+    "wires": 4,
+    "gates": 3,
+    "expansionWorkers": 2,
+    "repeats": 3,
+    "batchRows": 3000,
+    "parameters": 8192,
+    "compactBindings": true
+  },
+  "validation": "Every replacement exhaustively validated; all coverage/cost digests matched.",
+  "limits": [
+    "Shared-host, three repeats per configuration; no consistent whole-build gain established",
+    "Production 4-wire/5-gate build not measured",
+    "Distribution fixture uses realistic 4-wire/5-gate candidates, not the user database",
+    "Elapsed timing includes setup, writes, imports, scratch disposal and final compaction; fixture validation excluded"
+  ],
+  "runs": [
+    {
+      "writers": 2,
+      "node": "v24.22.3",
+      "platform": "linux",
+      "variants": [
+        {
+          "name": "reference",
+          "root": "/tmp/cryptopia-shard-reference-4Vn3lb",
+          "revision": "ffc9ed2a9f6b9efd4fb5abdb130bd9e831fec4a6",
+          "workingTreeDirty": null,
+          "runtimeSha256": "ddf55a2a26ff8e4941d853247d1270d2ac0285e6671c1e46df4de83d7fa15ba9"
+        },
+        {
+          "name": "current",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "revision": "ffc9ed2a9f6b9efd4fb5abdb130bd9e831fec4a6",
+          "workingTreeDirty": true,
+          "runtimeSha256": "ef09bb94e1a04e39b172f0309baaf2820cd883278831fce815247c713cb37cfc"
+        }
+      ],
+      "groups": [
+        {
+          "variant": "reference",
+          "medianSeconds": 11.373482687,
+          "medianCpuSeconds": 12.501117,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 10496.076372,
+              "cpuMs": 11906.113,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 70751880,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1267847168
+            },
+            {
+              "repeat": 1,
+              "generationMs": 11852.908163,
+              "cpuMs": 13307.896,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 70751880,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1267023872
+            },
+            {
+              "repeat": 2,
+              "generationMs": 11373.482687,
+              "cpuMs": 12501.117,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 70751880,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1254457344
+            }
+          ]
+        },
+        {
+          "variant": "current",
+          "medianSeconds": 10.552738946,
+          "medianCpuSeconds": 14.218515,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 10552.738946,
+              "cpuMs": 14218.515,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 70751880,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1266745344
+            },
+            {
+              "repeat": 1,
+              "generationMs": 9834.809589999999,
+              "cpuMs": 13218.296,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 70751880,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1280376832
+            },
+            {
+              "repeat": 2,
+              "generationMs": 11814.715204,
+              "cpuMs": 15885.991,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 70751880,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1279410176
+            }
+          ]
+        }
+      ],
+      "pairedElapsedRatios": [
+        1.00539845290676,
+        0.8297381077076349,
+        1.0387948466747423
+      ],
+      "medianPairedElapsedRatio": 1.00539845290676
+    },
+    {
+      "writers": 4,
+      "node": "v24.22.3",
+      "platform": "linux",
+      "variants": [
+        {
+          "name": "reference",
+          "root": "/tmp/cryptopia-shard-reference-4Vn3lb",
+          "revision": "ffc9ed2a9f6b9efd4fb5abdb130bd9e831fec4a6",
+          "workingTreeDirty": null,
+          "runtimeSha256": "ddf55a2a26ff8e4941d853247d1270d2ac0285e6671c1e46df4de83d7fa15ba9"
+        },
+        {
+          "name": "current",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "revision": "ffc9ed2a9f6b9efd4fb5abdb130bd9e831fec4a6",
+          "workingTreeDirty": true,
+          "runtimeSha256": "ef09bb94e1a04e39b172f0309baaf2820cd883278831fce815247c713cb37cfc"
+        }
+      ],
+      "groups": [
+        {
+          "variant": "reference",
+          "medianSeconds": 12.428888928000001,
+          "medianCpuSeconds": 14.993383,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 12428.888928,
+              "cpuMs": 14318.821,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 70751880,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1286406144
+            },
+            {
+              "repeat": 1,
+              "generationMs": 12585.668659,
+              "cpuMs": 16203.743,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 70751880,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1286717440
+            },
+            {
+              "repeat": 2,
+              "generationMs": 11656.20452,
+              "cpuMs": 14993.383,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 70751880,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1307693056
+            }
+          ]
+        },
+        {
+          "variant": "current",
+          "medianSeconds": 12.619243145999999,
+          "medianCpuSeconds": 17.473012999999998,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 12619.243145999999,
+              "cpuMs": 17473.013,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 76331752,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1316012032
+            },
+            {
+              "repeat": 1,
+              "generationMs": 12690.523858,
+              "cpuMs": 17631.55,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 76331752,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1301467136
+            },
+            {
+              "repeat": 2,
+              "generationMs": 9778.303368,
+              "cpuMs": 13436.312,
+              "rows": 832167,
+              "semanticCostDigest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+              "peakDatabaseBytes": 76331752,
+              "finalFileBytes": 19238912,
+              "peakRssBytes": 1294475264
+            }
+          ]
+        }
+      ],
+      "pairedElapsedRatios": [
+        1.0153154653728673,
+        1.0083313172975532,
+        0.8388925701519865
+      ],
+      "medianPairedElapsedRatio": 1.0083313172975532
+    }
+  ]
+}

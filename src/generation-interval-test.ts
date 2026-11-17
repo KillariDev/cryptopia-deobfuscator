@@ -18,12 +18,14 @@ assert.deepEqual(writers.snapshot(), { writerMs: 100, allBusyMs: 30 })
 now = 80; await assert.rejects(writers.measure(async () => { now = 90; throw new Error('writer failed') }), /writer failed/)
 now = 100; assert.deepEqual(writers.snapshot(), { writerMs: 110, allBusyMs: 30 }, 'failed operations release their slot')
 
-const base = { phase: 'between operations', at: 1000, cpu: { user: 0, system: 0 }, io: process.resourceUsage(), loop: { active: 0, idle: 0, utilization: 0 }, sql: { calls: 0, awaitMs: 0, nativeCalls: 0, nativeMs: 0, active: 0, oldestMs: 0, maxMs: 0 }, phases: [0, 0, 0, 0, 0, 0], writerMs: 20, allBusyMs: 0, committedParents: 100 }
-const next = { ...base, at: 2000, phases: [0, 200, 100, 0, 0, 500], writerMs: 1220, allBusyMs: 400, committedParents: 350 }
+const base = { phase: 'between operations', at: 1000, cpu: { user: 0, system: 0 }, io: process.resourceUsage(), loop: { active: 0, idle: 0, utilization: 0 }, sql: { calls: 0, awaitMs: 0, nativeCalls: 0, nativeMs: 0, active: 0, oldestMs: 0, maxMs: 0 }, phases: [0, 0, 0, 0, 0, 0], writerMs: 20, allBusyMs: 0, committedParents: 100, stagingRows: [100, 300] }
+const next = { ...base, at: 2000, phases: [0, 200, 100, 0, 0, 500], writerMs: 1220, allBusyMs: 400, committedParents: 350, stagingRows: [400, 400] }
 const sample = diagnosticDelta(base, next, 0, 0, 24)
+assert.deepEqual(sample.stagingShares, [.75, .25]);
 assert.equal(sample.averageWriters, 1.2); assert.equal(sample.allBusyFraction, .4); assert.equal(sample.parentsPerSecond, 250)
 const text = formatDiagnosticSample(sample, { running: 0, queued: 0, lookaheadBatches: 0, bufferedBytes: 0, bufferLimitBytes: 0, stagingWriters: 2, activeStagingWriters: 0 }).join('\n')
 assert.match(text, /utilization 60% of 2 slot\(s\), all busy 40% of interval/)
+assert.match(text, /candidate split 75%\/25%/);
 assert.match(text, /250.0 committed parents\/s/); assert.match(text, /scratch import 0.5s/)
 assert.match(text, /snapshot between operations/); assert.doesNotMatch(text, /Staging writers 0\/2 active/)
 

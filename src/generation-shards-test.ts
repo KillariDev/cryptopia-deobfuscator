@@ -7,6 +7,7 @@ import { allSQL, runSQL } from './sql.js'
 import { SQLObserver } from './sql-observer.js'
 import { ShardedStagingWriter, stagingShard } from './generation-shards.js'
 import { StagingRow, StagingWriter } from './generation-staging.js'
+import { makeStagingFixture } from './staging-fixture.js'
 import { parseConfig } from './config.js'
 const directory = await mkdtemp(join(tmpdir(), 'staging-shards-test-'))
 const db = new sqlite3.Database(join(directory, 'owner.db'))
@@ -67,3 +68,21 @@ try {
 	await rm(directory, { recursive: true, force: true })
 }
 console.log('Independent staging writers: exact ties, repeated batches, rollback, shard errors, diagnostics and file cleanup passed')
+
+// Structured packed truth tables are the real routing workload. Uniform random
+// bytes (or every one-byte key) miss the severe low-bit bias of the old hash.
+for (const seed of [1729, 1927, 8128]) {
+	const candidates = makeStagingFixture(20000, 3000, seed)
+	for (const count of [2, 4]) {
+		const buckets = Array(count).fill(0)
+		const owners = new Map<string, number>()
+		for (const [state] of candidates) {
+			const shard = stagingShard(state, count), key = state.toString('hex')
+			if (owners.has(key)) assert.equal(shard, owners.get(key), 'all masks and repeated keys keep one owner')
+			owners.set(key, shard); buckets[shard]++
+		}
+		const expected = candidates.length / count
+		assert.ok(buckets.every(rows => rows > expected * .8 && rows < expected * 1.2), `Structured routing is unbalanced: ${buckets}`)
+	}
+}
+console.log('Packed 4-wire/5-gate candidate routing stays balanced across two/four writers and multiple seeds')

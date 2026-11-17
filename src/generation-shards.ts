@@ -8,12 +8,20 @@ import { observeRelatedSQL } from './sql-observer.js'
 import { StagingOptions, StagingRow, StagingWriter } from './generation-staging.js'
 
 export type ShardOptions = StagingOptions & { writers: number, directory?: string, cacheMegabytes: number }
-type Shard = { db: sqlite3.Database, alias: string, attached: boolean, writer?: StagingWriter, observing: () => void, transaction: boolean, pending: StagingRow[], pageRows: number }
+type Shard = { db: sqlite3.Database, alias: string, attached: boolean, writer?: StagingWriter, observing: () => void, transaction: boolean, pending: StagingRow[], pageRows: number, submittedRows: number }
 const closeDB = (db: sqlite3.Database) => new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
 /** Hash only the exact function key: all masks and ties for a function share an owner. */
 export function stagingShard(state: Buffer, count: number) {
 	let hash = 2166136261
 	for (const byte of state) hash = Math.imul(hash ^ byte, 16777619)
+	// Packed circuit keys have structured low bits. FNV's raw low bits sent
+	// almost all such keys to one shard when count was 2 or 4. Avalanche the
+	// full hash before reducing it to a power-of-two writer count.
+	hash ^= hash >>> 16
+	hash = Math.imul(hash, 0x85ebca6b)
+	hash ^= hash >>> 13
+	hash = Math.imul(hash, 0xc2b2ae35)
+	hash ^= hash >>> 16
 	return (hash >>> 0) % count
 }
 
@@ -28,7 +36,7 @@ export class ShardedStagingWriter {
 	private utilization!: WriterUtilization
 	private tail: Promise<unknown> = Promise.resolve()
 	private constructor(private owner: sqlite3.Database, readonly directory: string) {}
-	get activity() { return { ...this.utilization.snapshot(), stagingWriters: this.shards.length, activeStagingWriters: this.active, stagingBufferedRows: this.shards.reduce((sum, shard) => sum + shard.pending.length, 0) } }
+	get activity() { return { ...this.utilization.snapshot(), stagingWriters: this.shards.length, activeStagingWriters: this.active, stagingBufferedRows: this.shards.reduce((sum, shard) => sum + shard.pending.length, 0), stagingRows: this.shards.map(shard => shard.submittedRows) } }
 	static async create(owner: sqlite3.Database, options: ShardOptions) {
 		if (!Number.isSafeInteger(options.writers) || options.writers < 2 || options.writers > 4 || !Number.isSafeInteger(options.cacheMegabytes) || options.cacheMegabytes < 1) throw new Error('Invalid staging writer limits (2–4 writers)')
 		const root = options.directory ?? tmpdir()
@@ -38,7 +46,7 @@ export class ShardedStagingWriter {
 		try {
 			for (let i = 0; i < options.writers; i++) {
 				const path = join(instance.directory, `writer-${i}.db`), db = new sqlite3.Database(path)
-				const shard: Shard = { db, alias: `generation_stage_${i}`, attached: false, observing: () => {}, transaction: false, pending: [], pageRows: 1 }
+				const shard: Shard = { db, alias: `generation_stage_${i}`, attached: false, observing: () => {}, transaction: false, pending: [], pageRows: 1, submittedRows: 0 }
 				instance.shards.push(shard); shard.observing = observeRelatedSQL(owner, db)
 				// Regenerated from the main checkpoint after any failure: scratch data
 				// needs no fsync. WAL lets the main connection read completed batches.
@@ -80,6 +88,7 @@ export class ShardedStagingWriter {
 			const results = await Promise.allSettled(groups.map(async (group, i) => {
 				if (!group.length) return
 				const shard = this.shards[i]
+				shard.submittedRows += group.length
 				for (const row of group) shard.pending.push(row)
 				await this.flush(shard)
 			}))

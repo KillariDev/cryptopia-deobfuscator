@@ -5,15 +5,18 @@ import { monitorEventLoopDelay, performance } from 'perf_hooks'
 import { SQLObserver, SQLSnapshot } from './sql-observer.js'
 import { GenerationProfile } from './generation-progress.js'
 
-type Counters = { phase: string, at: number, cpu: NodeJS.CpuUsage, io: NodeJS.ResourceUsage, loop: ReturnType<typeof performance.eventLoopUtilization>, sql: SQLSnapshot, phases: number[], writerMs?: number, allBusyMs?: number, committedParents?: number }
-export type DiagnosticSample = { phase: string, seconds: number, cores: number, available: number, loopBusy: number, loopP95Ms: number, rssMiB: number, sqlCalls: number, nativeCalls: number, nativeMs: number, apiMs: number, activeSQL: number, oldestSQLMs: number, ioRead: number, ioWrite: number, phases: number[], averageWriters: number, allBusyFraction: number, parentsPerSecond: number }
+type Counters = { phase: string, at: number, cpu: NodeJS.CpuUsage, io: NodeJS.ResourceUsage, loop: ReturnType<typeof performance.eventLoopUtilization>, sql: SQLSnapshot, phases: number[], writerMs?: number, allBusyMs?: number, committedParents?: number, stagingRows?: number[] }
+export type DiagnosticSample = { phase: string, seconds: number, cores: number, available: number, loopBusy: number, loopP95Ms: number, rssMiB: number, sqlCalls: number, nativeCalls: number, nativeMs: number, apiMs: number, activeSQL: number, oldestSQLMs: number, ioRead: number, ioWrite: number, phases: number[], averageWriters: number, allBusyFraction: number, parentsPerSecond: number, stagingShares?: number[] }
 const fields = ['readMs', 'stagingMs', 'dedupMs', 'outputMs', 'commitMs', 'importMs'] as const
 const names = ['reading', 'staging', 'deduplicating', 'writing lookup', 'committing', 'importing scratch']
 export function diagnosticDelta(previous: Counters, current: Counters, p95: number, rss: number, available: number): DiagnosticSample {
 	const ms = Math.max(1, current.at - previous.at)
+	const routed = current.stagingRows?.map((value, i) => Math.max(0, value - (previous.stagingRows?.[i] ?? 0)))
+	const totalRouted = routed?.reduce((sum, value) => sum + value, 0) ?? 0
 	const active = current.loop.active - previous.loop.active, idle = current.loop.idle - previous.loop.idle
 	return { phase: current.phase, seconds: ms / 1000, cores: Math.max(0, current.cpu.user + current.cpu.system - previous.cpu.user - previous.cpu.system) / (ms * 1000), available,
 		loopBusy: active + idle > 0 ? active / (active + idle) : 0, loopP95Ms: Number.isFinite(p95) ? p95 : 0, rssMiB: rss / 1048576,
+		stagingShares: totalRouted ? routed!.map(value => value / totalRouted) : undefined,
 		averageWriters: Math.max(0, (current.writerMs ?? 0) - (previous.writerMs ?? 0)) / ms,
 		allBusyFraction: Math.min(1, Math.max(0, (current.allBusyMs ?? 0) - (previous.allBusyMs ?? 0)) / ms),
 		parentsPerSecond: Math.max(0, (current.committedParents ?? 0) - (previous.committedParents ?? 0)) * 1000 / ms,
@@ -29,7 +32,7 @@ export function formatDiagnosticSample(sample: DiagnosticSample, activity?: Gene
 	return [
 		`Generation resources (last ${sample.seconds.toFixed(0)}s): CPU ${sample.cores.toFixed(2)} core-equivalents / ${sample.available} available; main loop ${(sample.loopBusy * 100).toFixed(0)}% busy, delay p95 ${sample.loopP95Ms.toFixed(1)}ms; RSS ${sample.rssMiB.toFixed(0)}MiB.`,
 		`Generation SQL: ${sample.sqlCalls} API calls; API elapsed ${(sample.apiMs / 1000).toFixed(1)}s (includes native; concurrent calls overlap); ${sample.nativeCalls} completed native profiles (all writers), ${(sample.nativeMs / 1000).toFixed(1)}s; in flight ${sample.activeSQL}${sample.activeSQL ? ` (${(sample.oldestSQLMs / 1000).toFixed(1)}s oldest)` : ''}; OS I/O counters R/W ${sample.ioRead}/${sample.ioWrite} (not bytes/latency).`,
-		`Generation work (same interval; snapshot ${sample.phase}): ${split || 'no measured phase yet'}; ${sample.parentsPerSecond.toFixed(1)} committed parents/s; ${hint}.${activity ? ` Staging writer utilization ${(Math.min(1, sample.averageWriters / (activity.stagingWriters ?? 1)) * 100).toFixed(0)}% of ${activity.stagingWriters ?? 1} slot(s)${(activity.stagingWriters ?? 1) > 1 ? `, all busy ${(sample.allBusyFraction * 100).toFixed(0)}% of interval` : ''}; snapshot expansion workers ${activity.running} active/${activity.queued} queued; lookahead ${activity.lookaheadBatches} batch, ${(activity.bufferedBytes / 1048576).toFixed(1)}MiB buffered (target ${(activity.bufferLimitBytes / 1048576).toFixed(0)}MiB across current/next buffers; chunk/worker buffers extra).` : ''}`
+		`Generation work (same interval; snapshot ${sample.phase}): ${split || 'no measured phase yet'}; ${sample.parentsPerSecond.toFixed(1)} committed parents/s; ${hint}.${activity ? ` Staging writer utilization ${(Math.min(1, sample.averageWriters / (activity.stagingWriters ?? 1)) * 100).toFixed(0)}% of ${activity.stagingWriters ?? 1} slot(s)${(activity.stagingWriters ?? 1) > 1 ? `, all busy ${(sample.allBusyFraction * 100).toFixed(0)}% of interval` : ''}${sample.stagingShares && sample.stagingShares.length > 1 ? `, candidate split ${sample.stagingShares.map(value => `${(value * 100).toFixed(0)}%`).join('/')}` : ''}; snapshot expansion workers ${activity.running} active/${activity.queued} queued; lookahead ${activity.lookaheadBatches} batch, ${(activity.bufferedBytes / 1048576).toFixed(1)}MiB buffered (target ${(activity.bufferLimitBytes / 1048576).toFixed(0)}MiB across current/next buffers; chunk/worker buffers extra).` : ''}`
 	]
 }
 export class GenerationDiagnostics {
@@ -46,7 +49,7 @@ export class GenerationDiagnostics {
 	}
 	private counters(profile?: GenerationProfile, phase?: string, activity?: GenerationActivity): Counters {
 		const at = performance.now()
-		return { phase: phase ?? (profile ? profile.phaseActive || profile.phase === 'complete' ? profile.phase : 'between operations' : 'initializing'), at, cpu: process.cpuUsage(), io: process.resourceUsage(), loop: performance.eventLoopUtilization(), sql: this.observer.snapshot(at), writerMs: activity?.writerMs, allBusyMs: activity?.allBusyMs, committedParents: profile?.committedParents, phases: fields.map((field, i) => (profile?.[field] ?? 0) + (profile?.phaseActive && profile.phase === names[i] ? Math.max(0, at - profile.phaseStarted) : 0)) }
+		return { phase: phase ?? (profile ? profile.phaseActive || profile.phase === 'complete' ? profile.phase : 'between operations' : 'initializing'), at, cpu: process.cpuUsage(), io: process.resourceUsage(), loop: performance.eventLoopUtilization(), sql: this.observer.snapshot(at), stagingRows: activity?.stagingRows, writerMs: activity?.writerMs, allBusyMs: activity?.allBusyMs, committedParents: profile?.committedParents, phases: fields.map((field, i) => (profile?.[field] ?? 0) + (profile?.phaseActive && profile.phase === names[i] ? Math.max(0, at - profile.phaseStarted) : 0)) }
 	}
 	sample(profile?: GenerationProfile, phase?: string, activity?: GenerationActivity) {
 		if (this.closed) return undefined
