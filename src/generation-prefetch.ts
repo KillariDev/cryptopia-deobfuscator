@@ -42,4 +42,4 @@ export class GenerationPrefetch<T extends { waitMs: number }> {
 	}
 	cancel() { this.stopped = true; this.queue = []; this.bufferedBytes = 0; this.wake(this.spaceWaiters); this.wake(this.dataWaiters) }
 }
-export type GenerationActivity = { running: number, queued: number, lookaheadBatches: number, bufferedBytes: number, bufferLimitBytes: number, stagingWriters?: number, activeStagingWriters?: number, stagingBufferedRows?: number, writerMs?: number, allBusyMs?: number, stagingRows?: number[], operations?: OperationTiming[] }
+export type GenerationActivity = { running: number, queued: number, lookaheadBatches: number, bufferedBytes: number, bufferLimitBytes: number, stagingWriters?: number, activeStagingWriters?: number, stagingBufferedRows?: number, writerMs?: number, allBusyMs?: number, stagingRows?: number[], operations?: OperationTiming[], streamingStaging?: boolean, stagingQueueBatches?: number, stagingQueueCapacity?: number, stagingQueuePeakBatches?: number, candidateCacheChecked?: number, candidateCacheSkipped?: number, candidateCacheBytes?: number }

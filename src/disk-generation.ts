@@ -1,3 +1,5 @@
+import { GenerationCandidateCache } from './generation-candidate-cache.js'
+import { GenerationStagingStream } from './generation-staging-stream.js'
 import { GenerationOperations } from './generation-operations.js'
 import { installFinalCounter, removeFinalCounter, startFinalCounterSQL, readFinalCounterSQL, stopFinalCounterSQL } from './generation-final-lookup.js'
 import { WriterUtilization } from './generation-utilization.js'
@@ -22,7 +24,7 @@ type Meta = { signature: string, depth: number, processed: number, total: number
 type Parent = Omit<Entry, 'state'> & { state: Uint8Array }
 type PreparedBatch = { batch: Entry[], depth: number, expansion?: GenerationPrefetch<ExpansionChunk<Parent>> }
 type Entry = { id: number, state: Buffer, mask: number, reads: number, gates: Buffer }
-export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, appendStaging?: boolean, compactBindings?: boolean, stagingWriters?: number, stagingDirectory?: string, stagingCacheMegabytes?: number, aggregateMerge?: boolean, countFinalInserts?: boolean, directInputMerge?: boolean, prefetch?: boolean, prefetchMegabytes?: number, onActivity?: (read: () => GenerationActivity) => void, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
+export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, appendStaging?: boolean, compactBindings?: boolean, stagingWriters?: number, stagingDirectory?: string, stagingCacheMegabytes?: number, aggregateMerge?: boolean, countFinalInserts?: boolean, candidateCacheMegabytes?: number, streamStaging?: boolean, stagingQueueBatches?: number, directInputMerge?: boolean, prefetch?: boolean, prefetchMegabytes?: number, onActivity?: (read: () => GenerationActivity) => void, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
 
 /** A transaction commits output, discovered states and input consumption together. */
 export async function generateOnDisk(db: sqlite3.Database, wires: number, maximumDepth: number, catalog: Gate[], options: DiskGenerationOptions,
@@ -80,6 +82,9 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	const staging = await StagingWriter.create(db, stagingOptions)
 	let shards: ShardedStagingWriter | undefined
 	let finalCounterInstalled = false
+	const candidateCache = new GenerationCandidateCache(Math.ceil(2 ** wires * wires / 8), (options.candidateCacheMegabytes ?? 0) * 1048576)
+	let stageStream: GenerationStagingStream | undefined
+	let peakStagingBatches = 0
 	const singleWriter = new WriterUtilization(1), operations = new GenerationOperations()
 	const budget = (options.prefetchMegabytes ?? 16) * 1048576
 	if (!Number.isSafeInteger(budget) || budget < 1) throw new Error('Invalid generation lookahead budget')
@@ -87,7 +92,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 	let queued: PreparedBatch | undefined, consuming: PreparedBatch | undefined
 	const parentsOf = (batch: Entry[]): Parent[] => batch.map(entry => ({ ...entry, state: unpackState(entry.state, wires) }))
 	const expand = (parents: Parent[]) => expandBatch(parents, catalog.length, kernel, pool, { stageRows: options.stageRows, workers, queueBatches, minimumWork }, pending => { profile.peakPending = Math.max(profile.peakPending, pending) })
-	options.onActivity?.(() => ({ ...pool.activity, operations: operations.snapshot(), lookaheadBatches: queued ? 1 : 0, bufferedBytes: (queued?.expansion?.bufferedBytes ?? 0) + (consuming?.expansion?.bufferedBytes ?? 0), bufferLimitBytes: prefetchEnabled ? budget * 2 : 0, ...(shards?.activity ?? { ...singleWriter.snapshot(), stagingWriters: 1, activeStagingWriters: singleWriter.activeCount }) }))
+	options.onActivity?.(() => ({ ...pool.activity, streamingStaging: options.streamStaging ?? false, stagingQueueBatches: stageStream?.batches ?? 0, stagingQueueCapacity: options.stagingQueueBatches ?? 2, stagingQueuePeakBatches: Math.max(peakStagingBatches, stageStream?.peakBatches ?? 0), candidateCacheChecked: candidateCache.checked, candidateCacheSkipped: candidateCache.skipped, candidateCacheBytes: candidateCache.bytes, operations: operations.snapshot(), lookaheadBatches: queued ? 1 : 0, bufferedBytes: (queued?.expansion?.bufferedBytes ?? 0) + (consuming?.expansion?.bufferedBytes ?? 0), bufferLimitBytes: prefetchEnabled ? budget * 2 : 0, ...(shards?.activity ?? { ...singleWriter.snapshot(), stagingWriters: 1, activeStagingWriters: singleWriter.activeCount }) }))
 	let failed = false
 	let startDepth = meta.depth, startProcessed = meta.processed
 	const report = () => {
@@ -100,6 +105,7 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 		logVerbose(`Generation staging: ${stagingWriters} writer(s), ${options.compactBindings ? 3 : 5} bindings per candidate; final lookup ${options.countFinalInserts ? 'count output inserts' : 'count candidate functions'}${shards ? `; disposable scratch databases: ${shards.directory}` : ''}`)
 		// The last expanded layer writes directly to output: no depth-maximum frontier.
 		while (meta.depth < maximumDepth) {
+			candidateCache.beginDepth(meta.depth)
 			if (meta.depth !== startDepth) { startDepth = meta.depth; startProcessed = 0 }
 			report()
 			if (shouldPause?.()) return false
@@ -144,12 +150,16 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 					await phase('writing lookup', () => operations.measure('input lookup', () => run(candidateMergeSQL(options.aggregateMerge ?? true), [meta!.depth])))
 					await phase('staging', () => run('DELETE FROM BuildCandidates'))
 				}
+				const writeCandidates = (rows: StagingRow[]) => shards ? shards.write(rows) : singleWriter.measure(() => staging.write(rows))
+				stageStream = options.streamStaging ? new GenerationStagingStream(options.stagingQueueBatches ?? 2, writeCandidates) : undefined
 				const parents = consuming?.expansion ? undefined : parentsOf(batch)
 				let candidates: StagingRow[] = []
 				const flush = async () => {
 					if (!candidates.length) return
-					await phase('staging', () => shards ? shards.write(candidates) : singleWriter.measure(() => staging.write(candidates)))
-					candidates = []
+					const rows = candidates
+					await phase('staging', () => stageStream ? stageStream.submit(rows) : writeCandidates(rows))
+					peakStagingBatches = Math.max(peakStagingBatches, stageStream?.peakBatches ?? 0)
+					candidates = []; expanding()
 				}
 				const expanding = () => { profile.phase = 'expanding'; profile.phaseActive = true; profile.phaseStarted = performance.now(); options.onProfile?.({ ...profile }) }
 				expanding()
@@ -162,12 +172,15 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 					for (let i = 0; i < result.count; i++) {
 						const offset = i * stride, parent = chunk[view.getUint32(offset + kernel.stateBytes, true)], gate = view.getUint32(offset + kernel.stateBytes + 4, true)
 						const mask = view.getUint32(offset + kernel.stateBytes + 8, true)
-						candidates.push([packState(new Uint8Array(result.candidates, offset, kernel.stateBytes), wires), mask, view.getUint32(offset + kernel.stateBytes + 12, true), Buffer.concat([parent.gates, encoded[gate]]), usedWires(mask)])
+						const state = packState(new Uint8Array(result.candidates, offset, kernel.stateBytes), wires), reads = view.getUint32(offset + kernel.stateBytes + 12, true)
+						if (candidateCache.capacity && !candidateCache.accept(state, mask, reads)) continue
+						candidates.push([state, mask, reads, Buffer.concat([parent.gates, encoded[gate]]), usedWires(mask)])
 						if (candidates.length >= options.stageRows) await flush()
 					}
 					expanding()
 				}
 				await flush()
+				if (stageStream) await phase('staging', () => stageStream!.finish())
 				if (shards) {
 					await phase('staging', () => shards!.materialize())
 					await phase('importing scratch', () => shards!.importBatch())
@@ -202,13 +215,14 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				await phase('committing', () => run('COMMIT'))
 				profile.committedParents += batch.length;
 				meta.processed += batch.length; layers.find(layer => layer.depth === meta!.depth)!.processed += batch.length; profile.batches++
-			} catch (error) { meta.functions = priorFunctions; await run('ROLLBACK'); throw error }
+			} catch (error) { await stageStream?.abort(); meta.functions = priorFunctions; await run('ROLLBACK'); throw error }
 		}
 		if (!options.keepState) { await run('DROP TABLE BuildFrontier'); await run('DROP TABLE BuildSeen') }
 		profile.phase = 'complete'; profile.phaseActive = false; report()
 		return true
 	} catch (error) { failed = true; throw error } finally {
 		queued?.expansion?.cancel(); consuming?.expansion?.cancel()
+		await stageStream?.abort()
 		const cleanup = await Promise.allSettled([shards?.close(), staging.close(), pool.close()])
 		await Promise.allSettled([queued?.expansion?.settled, consuming?.expansion?.settled])
 		if (finalCounterInstalled) {

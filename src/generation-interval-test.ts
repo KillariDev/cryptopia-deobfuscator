@@ -106,3 +106,7 @@ const afterOps = { ...next, operations: timings.snapshot() }
 const opDelta = diagnosticDelta(beforeOps, afterOps, 0, 0, 24)
 assert.deepEqual(opDelta.operations, [{ name: 'final lookup', ms: 500, calls: 1 }, { name: 'consume frontier', ms: 250, calls: 1 }])
 assert.match(formatDiagnosticSample(opDelta).join('\n'), /Generation SQL operations .*final lookup 0.5s; consume frontier 0.3s/)
+
+const cachedDelta = diagnosticDelta({ ...base, candidateCacheChecked: 100, candidateCacheSkipped: 40 }, { ...next, candidateCacheChecked: 200, candidateCacheSkipped: 90 }, 0, 0, 24)
+assert.equal(cachedDelta.candidateSkipFraction, .5)
+assert.match(formatDiagnosticSample(cachedDelta, { running: 0, queued: 0, lookaheadBatches: 0, bufferedBytes: 0, bufferLimitBytes: 0, streamingStaging: true, stagingQueueBatches: 1, stagingQueueCapacity: 2, candidateCacheBytes: 28 * 1048576 }).join('\n'), /staging queue 1\/2 batches; exact candidate cache 28MiB, skipped 50% of rows before SQL/)

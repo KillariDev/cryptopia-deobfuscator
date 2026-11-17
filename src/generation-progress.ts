@@ -93,7 +93,7 @@ export function formatGenerationProgress(progress: SemanticProgress | undefined,
 
 export function formatGenerationProfile(profile: GenerationProfile, now = performance.now()) {
 	const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
-	return `Generation work: ${profile.phaseActive ? `${profile.phase} (${generationDuration(now - profile.phaseStarted)})` : profile.phase === 'complete' ? 'complete' : 'between operations'} | expansion ${seconds(profile.expansionMs)} worker-time | read ${seconds(profile.readMs)} | stage ${seconds(profile.stagingMs)} | scratch import ${seconds(profile.importMs)} | deduplicate ${seconds(profile.dedupMs)} | lookup ${seconds(profile.outputMs)} | commit ${seconds(profile.commitMs)} | expansion wait ${seconds(profile.waitMs)}. Cumulative timings overlap.`
+	return `Generation work: ${profile.phaseActive ? `${profile.phase} (${generationDuration(now - profile.phaseStarted)})` : profile.phase === 'complete' ? 'complete' : 'between operations'} | expansion ${seconds(profile.expansionMs)} worker-time | read ${seconds(profile.readMs)} | stage wait ${seconds(profile.stagingMs)} | scratch import ${seconds(profile.importMs)} | deduplicate ${seconds(profile.dedupMs)} | lookup ${seconds(profile.outputMs)} | commit ${seconds(profile.commitMs)} | expansion wait ${seconds(profile.waitMs)}. Cumulative timings overlap.`
 }
 
 /** Input-row work estimate; future layer growth is projected, never claimed exact. */

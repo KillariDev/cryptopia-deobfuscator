@@ -10,6 +10,7 @@ try {
 	const settings = structuredClone(config)
 	settings.files.dataDirectory = directory
 	settings.database.generationMinimumWork = 1
+	settings.benchmark.generationStreamingComparison = false
 	settings.benchmark.generationFinalComparison = false
 	settings.benchmark.generationWriterComparison = false
 	settings.benchmark.generationStagingComparison = false
@@ -60,6 +61,23 @@ try {
 	for (const result of final.results) {
 		assert.equal(result.settings.database.generationCountFinalInserts, result.variant === 'count-inserts')
 		assert.ok(result.operations.some((row: { name: string }) => row.name === (result.variant === 'count-inserts' ? 'arm final counter' : 'final membership/count')))
+	}
+
+	settings.benchmark.generationFinalComparison = false
+	settings.benchmark.generationStreamingComparison = true
+	writeFileSync(settingsFile, JSON.stringify(settings))
+	await new Promise<void>((resolve, reject) => {
+		const child = spawn(process.execPath, [fileURLToPath(new URL('./generation-benchmark.js', import.meta.url)), '--smoke'], { env: { ...process.env, OPTIMIZER_CONFIG: settingsFile }, stdio: ['ignore', 'ignore', 'inherit'] })
+		child.once('error', reject)
+		child.once('exit', code => code === 0 ? resolve() : reject(new Error(`Streaming comparison failed (${code})`)))
+	})
+	const streaming = JSON.parse(readFileSync(join(directory, 'generation-benchmark-smoke.json'), 'utf8'))
+	assert.equal(streaming.results.length, 16)
+	for (const result of streaming.results) {
+		assert.equal(result.settings.database.generationStreamStaging, ['streaming', 'cache-streaming'].includes(result.variant))
+		assert.equal(result.settings.database.generationCandidateCacheMegabytes, ['candidate-cache', 'cache-streaming'].includes(result.variant) ? 32 : 0)
+		assert.ok(result.staging.peakBatches <= result.settings.database.generationStagingQueueBatches)
+		if (result.settings.database.generationCandidateCacheMegabytes) assert.ok(result.staging.checked > 0 && result.staging.cacheBytes <= 32 * 1048576)
 	}
 
 } finally { rmSync(directory, { recursive: true, force: true }) }

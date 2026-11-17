@@ -145,6 +145,9 @@ try {
 		} finally { await close(db) }
 	}
 	for (const [index, controls] of [
+		{ candidateCacheMegabytes: 1, streamStaging: true, stagingQueueBatches: 2, aggregateMerge: true, directInputMerge: true },
+		{ candidateCacheMegabytes: 1, streamStaging: true, stagingWriters: 2, countFinalInserts: true },
+		{ candidateCacheMegabytes: 1, streamStaging: true, appendStaging: true, directInputMerge: false },
 		{ countFinalInserts: true, aggregateMerge: true, directInputMerge: true },
 		{ countFinalInserts: true, stagingWriters: 2, compactBindings: true, aggregateMerge: true, directInputMerge: true },
 		{ countFinalInserts: true, stagingWriters: 4, aggregateMerge: false, directInputMerge: false },
@@ -167,6 +170,7 @@ try {
 			assert.equal(lastProfile!.committedParents, committed)
 			assert.equal(lastProfile!.phaseActive, false)
 			if ('stagingWriters' in controls) assert.ok(lastProfile!.importMs > 0)
+			if ('candidateCacheMegabytes' in controls) assert.ok(activity!().candidateCacheSkipped! > 0, 'cache removes real redundant SQL candidates')
 		}
 		finally { await close(db) }
 	}
@@ -175,7 +179,7 @@ try {
 	let db = await open('resume.db')
 	try {
 		let polls = 0
-		assert.equal(await generateOnDisk(db, 2, 3, gates, { ...options, prefetch: true, stagingWriters: 2, compactBindings: true }, undefined, () => ++polls > 3), false)
+		assert.equal(await generateOnDisk(db, 2, 3, gates, { ...options, prefetch: true, candidateCacheMegabytes: 1, streamStaging: true, stagingWriters: 2, compactBindings: true }, undefined, () => ++polls > 3), false)
 	} finally { await close(db) }
 	db = await open('resume.db')
 	try {
@@ -214,7 +218,7 @@ try {
 			}
 			return statement
 		}) as typeof db.prepare
-		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, stageRows: 1, appendStaging: true, prefetch: true }), /staging write failed/)
+		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, stageRows: 1, appendStaging: true, prefetch: true, candidateCacheMegabytes: 1, streamStaging: true }), /staging write failed/)
 		assert.equal((await rows(db)).length, 0)
 		assert.equal((await allSQL<{ processed: number }>(db, 'SELECT processed FROM BuildMeta'))[0].processed, 0)
 		await generateOnDisk(db, 2, 3, gates, options)
@@ -245,7 +249,7 @@ try {
 	db = await open('final-resume.db')
 	try {
 		let failed = false, finalBatches = 0
-		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, countFinalInserts: true, keepState: true, stagingWriters: 4, compactBindings: true, prefetch: true, beforeCommit: async () => {
+		await assert.rejects(generateOnDisk(db, 2, 3, gates, { ...options, candidateCacheMegabytes: 1, streamStaging: true, countFinalInserts: true, keepState: true, stagingWriters: 4, compactBindings: true, prefetch: true, beforeCommit: async () => {
 			const depth = (await allSQL<{ depth: number }>(db, 'SELECT depth FROM BuildMeta'))[0].depth
 			assert.equal((await allSQL<{ count: number }>(db, 'SELECT count(*) AS count FROM BuildFrontier WHERE depth=3'))[0].count, 0, 'last-depth candidates never enter the frontier')
 			if (depth === 2 && ++finalBatches === 2) { failed = true; throw new Error('final-layer interruption') }

@@ -135,7 +135,10 @@
     "etaTrendWindowSamples": 60,
     "etaTrendMinimumSamples": 10,
     "etaTrendMinimumWorkGrowth": 0.25,
-    "generationCountFinalInserts": false
+    "generationCountFinalInserts": false,
+    "generationCandidateCacheMegabytes": 32,
+    "generationStreamStaging": true,
+    "generationStagingQueueBatches": 2
   },
   "synthesis": {
     "templates": true,
@@ -196,6 +199,7 @@
     "generationPrefetchComparison": false,
     "generationWriterComparison": false,
     "generationFinalComparison": false,
-    "finalLookupOutputName": "final-lookup-benchmark.json"
+    "finalLookupOutputName": "final-lookup-benchmark.json",
+    "generationStreamingComparison": false
   }
 }
