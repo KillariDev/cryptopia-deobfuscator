@@ -34,6 +34,7 @@
     },
     "synthesis": {
       "native": false,
+      "smt": false,
       "meetInMiddle": false,
       "equalitySaturation": false
     }

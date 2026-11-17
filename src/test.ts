@@ -572,8 +572,36 @@ assert.match(summary, /"states":2000/)
 assert.match(formatStrategyActivity([]), /awaiting worker reports/)
 resetStrategyStats()
 assert.deepEqual(strategySnapshot(), [])
-assert.throws(() => parseConfig({ synthesis: { smt: true } }), /Unknown config setting/)
+assert.equal(parseConfig({}).synthesis.smt, true)
+assert.equal(parseConfig({}).synthesis.native, true)
+assert.equal(parseConfig({}).synthesis.meetInMiddle, true)
+assert.equal(parseConfig({}).synthesis.equalitySaturation, true)
 assert.equal(parseConfig({ synthesis: { native: true } }).synthesis.native, true)
+
+// A failed native attempt must leave Z3 eligible on exactly the same window.
+const { advancedRewrite } = await import('./strategies.js')
+const synthesisOptions = { ...config.synthesis }
+try {
+	Object.assign(config.synthesis, { native: true, smt: true, meetInMiddle: false, equalitySaturation: false, attemptEvery: 1, maximumWires: 3, timeoutMs: 5000, states: 2000, maximumReplacementGates: 0 })
+	const input = [singleGate[0], singleGate[0], singleGate[0]]
+	resetStrategyStats()
+	assert.equal(await advancedRewrite(input, () => 0), undefined)
+	assert.deepEqual(strategySnapshot().map(stat => stat.strategy), ['native'])
+	assert.equal(await advancedRewrite(input, () => 0), undefined)
+	assert.deepEqual(strategySnapshot().map(stat => stat.strategy), ['native', 'z3'])
+	const count = strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0)
+	assert.equal(await advancedRewrite(input, () => 0), undefined)
+	assert.equal(strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0), count)
+	// A different window chooses Z3 directly when the random draw selects it.
+	config.synthesis.maximumReplacementGates = 1
+	const recovered = await advancedRewrite([not0, not0, not0], () => 0.75)
+	assert.ok(recovered && recovered.length === 1)
+	assert.equal(functionKey(recovered!, 2), functionKey([not0], 2))
+	assert.equal(strategySnapshot()[strategySnapshot().length - 1].strategy, 'z3')
+} finally {
+	Object.assign(config.synthesis, synthesisOptions)
+	resetStrategyStats()
+}
 console.log('Template, semantic generation, meet-in-the-middle, equality graph, native synthesis and strategy summary regressions passed')
 
 assert.equal(parseConfig({ database: { memoryMapBytes: 0 } }).database.memoryMapBytes, 0)
