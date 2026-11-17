@@ -890,3 +890,4 @@ console.log('Multi-table generation, reuse and connection lifecycle regressions 
 await import('./generation-test.js')
 await import('./search-reuse-test.js')
 await import('./work-elimination-test.js')
+await import('./resource-search-test.js')

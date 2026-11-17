@@ -37,11 +37,14 @@ export const improving = (old: Gate[]) => {
 }
 
 export type SearchArm = { subset: number, slice: number, method?: 'all' | 'variables' | 'rainbow' }
-type Score = { count: number, milliseconds: number, removed: number }
+type Score = { count: number, milliseconds: number, removed: number, epoch: number }
 export class SearchScheduler {
 	private scores = new Map<string, Score>()
 	private choices = 0
-	constructor(private explorationEvery: number, private decay = 0.98) {
+	private epoch = 0
+	get historySize() { return this.scores.size }
+	constructor(private explorationEvery: number, private decay = 0.98, private maximumHistory = 128) {
+		if (!Number.isSafeInteger(maximumHistory) || maximumHistory < 1) throw new Error('Invalid scheduler history limit')
 		if (!(decay > 0 && decay <= 1)) throw new Error('Invalid scheduler decay')
 	}
 	choose(options: SearchArm[], random = Math.random) {
@@ -60,16 +63,51 @@ export class SearchScheduler {
 		})
 	}
 	record(option: SearchArm, elapsed: number, removed: number) {
-		for (const score of this.scores.values()) {
-			score.count *= this.decay; score.milliseconds *= this.decay; score.removed *= this.decay
-		}
+		const epoch = ++this.epoch
 		const key = `${option.subset}:${option.slice}:${option.method ?? 'all'}`
-		const score = this.scores.get(key) ?? { count: 0, milliseconds: 0, removed: 0 }
+		const score = this.scores.get(key) ?? { count: 0, milliseconds: 0, removed: 0, epoch }
+		const factor = this.decay ** (epoch - score.epoch)
+		score.count *= factor; score.milliseconds *= factor; score.removed *= factor; score.epoch = epoch
+		this.scores.delete(key)
+		if (this.scores.size >= this.maximumHistory) this.scores.delete(this.scores.keys().next().value!)
 		score.count++
 		score.milliseconds += Math.max(1e-9, elapsed)
 		score.removed += Math.max(0, removed)
 		this.scores.set(key, score)
 	}
+}
+
+/** Stable, bounded choices keep persistent worker observations relevant across jobs. */
+export function createSearchArms(count: number, subsetMinimum: number, subsetMaximum: number, sliceMinimum: number, sliceMaximum: number): SearchArm[] {
+	return Array.from({ length: count }, (_, index) => {
+		const step = Math.floor(index / 3), steps = Math.max(1, Math.ceil(count / 3) - 1)
+		const subset = Math.round(subsetMinimum * (subsetMaximum / subsetMinimum) ** (step / steps))
+		const maximum = Math.min(sliceMaximum, subset)
+		const slice = Math.max(sliceMinimum, Math.round(sliceMinimum * (Math.max(sliceMinimum, maximum) / sliceMinimum) ** ((step % 3 + 1) / 3)))
+		return { method: (['all', 'variables', 'rainbow'] as const)[index % 3], subset, slice }
+	})
+}
+
+/** Gates in different components use disjoint wires and commute with one another. */
+export function independentComponents(gates: Gate[]): Gate[][] {
+	const parents = new Map<number, number>()
+	const root = (wire: number): number => {
+		if (!parents.has(wire)) parents.set(wire, wire)
+		let current = wire
+		while (parents.get(current)! !== current) current = parents.get(current)!
+		while (wire !== current) { const next = parents.get(wire)!; parents.set(wire, current); wire = next }
+		return current
+	}
+	for (const gate of gates) for (const wire of getVars(gate)) {
+		const a = root(gate.target), b = root(wire)
+		if (a !== b) parents.set(b, a)
+	}
+	const components = new Map<number, Gate[]>()
+	for (const gate of gates) {
+		const key = root(gate.target), component = components.get(key) ?? []
+		component.push(gate); components.set(key, component)
+	}
+	return [...components.values()]
 }
 
 /** Index seeds are rebuilt after each edit; broad traversal periodically goes first. */

@@ -18,7 +18,13 @@
     "shareTemplates": true,
     "sharedTemplateSeconds": 15,
     "sharedTemplateEntries": 64,
-    "sharedTemplateBatch": 16
+    "sharedTemplateBatch": 16,
+    "adaptiveConcurrency": true,
+    "initialConcurrency": 4,
+    "concurrencySampleRounds": 2,
+    "concurrencyDatabaseFraction": 0.6,
+    "concurrencyRateTolerance": 0.05,
+    "memoryBudgetMegabytes": 8192
   },
   "timing": {
     "roundMinutes": 25,
@@ -63,14 +69,18 @@
     "localSearchSeeds": 32,
     "localSearchRadius": 16,
     "localSearchBroadEvery": 5,
-    "circuitChunkGates": 128
+    "circuitChunkGates": 128,
+    "stableSearchArms": true,
+    "schedulerHistoryEntries": 128,
+    "independentComponents": true
   },
   "cache": {
     "lookupEntries": 1000000,
     "processedEntries": 1000000,
     "shuffleEntries": 100000,
     "subsetEntries": 100000,
-    "windowKeyBytes": 16777216
+    "windowKeyBytes": 16777216,
+    "lookupPolicy": "lru"
   },
   "database": {
     "tables": [
@@ -100,7 +110,10 @@
     "generationWorkers": 4,
     "generationQueueBatches": 2,
     "generationMinimumWork": 100000,
-    "statementCacheEntries": 16
+    "statementCacheEntries": 16,
+    "sharedTables": true,
+    "sharedTableBytes": 33554432,
+    "sharedTableMaximumRows": 100000
   },
   "synthesis": {
     "templates": true,
@@ -114,5 +127,18 @@
     "smt": false,
     "meetInMiddle": false,
     "equalitySaturation": false
+  },
+  "benchmark": {
+    "seconds": 10,
+    "repeats": 3,
+    "seed": 1729,
+    "workerCounts": [
+      1,
+      2,
+      4
+    ],
+    "maximumChecks": 0,
+    "outputName": "benchmark.json",
+    "maximumOverrunSeconds": 30
   }
 }

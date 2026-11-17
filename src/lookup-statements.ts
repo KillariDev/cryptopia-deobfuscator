@@ -1,5 +1,10 @@
 import sqlite3 from 'sqlite3'
 
+let active = 0, started = 0, elapsed = 0
+export const lookupDatabaseTime = () => elapsed + (active ? performance.now() - started : 0)
+const beginWait = () => { if (!active++) started = performance.now() }
+const endWait = () => { if (!--active) elapsed += performance.now() - started }
+
 /** A bounded LRU, serialized per connection so bindings are never shared concurrently. */
 export class LookupStatements {
 	private statements = new Map<number, sqlite3.Statement>()
@@ -12,6 +17,7 @@ export class LookupStatements {
 	query<T>(ids: Buffer[]): Promise<T[]> {
 		if (this.closing) return Promise.reject(new Error('Lookup statements are closed'))
 		if (!ids.length) return Promise.resolve([])
+		beginWait()
 		const task = this.tail.then(async () => {
 			let statement = this.statements.get(ids.length)
 			if (!statement) {
@@ -36,6 +42,7 @@ export class LookupStatements {
 			}
 		})
 		this.tail = task.catch(() => {})
+		task.then(endWait, endWait)
 		return task
 	}
 	close() {

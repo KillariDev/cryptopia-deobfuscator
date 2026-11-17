@@ -398,3 +398,107 @@ still uses the full reference graph path.
 These changes are covered by reference and randomized correctness tests.
 Full-job throughput and the best chunk/cache sizes remain workload-dependent
 and have not been benchmarked on the full circuit.
+
+## Resource-aware search and benchmarks
+
+Scheduler choices are retained in each persistent worker. With
+`search.stableSearchArms: true`, a deterministic spread of subset/slice sizes and
+methods is reused across jobs, rather than replacing all choices with new random
+ones. `search.schedulerHistoryEntries: 128` bounds history even when stable arms
+are disabled. Decay is applied lazily to the updated score, avoiding a scan of
+all historical scores on every pass. Set `stableSearchArms` to `false` to retain
+random job-specific choices for comparisons.
+
+Cache updates no longer evict unrelated entries when a full cache already holds
+the updated key. `cache.lookupPolicy` is `"lru"` by default for lookup caches;
+`"fifo"` retains insertion-order eviction. Other caches keep FIFO behavior.
+
+### Shared small tables
+
+`database.sharedTables: true` admits completed tables with verified canonical
+metadata to a shared-memory lookup index before search workers start.
+`sharedTableBytes: 33554432` is the total backing-buffer budget across tables;
+`sharedTableMaximumRows: 100000` bounds each table and the admission scan. Tables
+that exceed either limit continue using SQLite. Snapshot creation has temporary
+JavaScript allocation overhead in addition to the retained buffer budget.
+
+One parent builds the indexes; workers read the same `SharedArrayBuffer` backing
+storage, without their own full copies or small-table database connections.
+Exact key comparison resolves hash collisions, empty replacements remain hits,
+and missing keys return misses. The implementation exposes only reader operations
+to workers; shared memory is not an operating-system-enforced read-only mapping.
+Do not modify table files during a job. Shared hits are decoded on demand and do
+not populate the per-worker lookup cache with duplicate table rows/misses.
+
+`search.independentComponents: true` groups gates connected by used wires at each
+search pass. Disjoint groups commute, so each group can be optimized separately
+while preserving its internal gate order. Controls aliased with targets and
+unused control fields are handled through the same used-wire definition as the
+solver. A fully connected circuit remains one group. Component grouping can
+change output gate order while preserving all outputs. The normal inner-chunk
+limit applies within this partitioning; there can be more components than that
+limit, bounded by the circuit's used wires.
+
+### Adaptive worker concurrency
+
+With `workers.adaptiveConcurrency: true`, search starts with up to
+`initialConcurrency: 4` workers, still respecting CPU/configuration/environment
+caps and circuit-size limits. `concurrencySampleRounds: 2` aggregates completed
+rounds before throughput/database-driven changes. The controller probes adjacent
+worker counts, rejects unproductive increases, and can accept fewer workers when
+productivity stays within `concurrencyRateTolerance: 0.05`. Small-circuit caps are
+not treated as trials of a larger requested target, and zero reductions alone do
+not justify increasing concurrency.
+
+`concurrencyDatabaseFraction: 0.6` triggers conservative backoff when SQLite
+lookups are outstanding for a high fraction of observed worker time. This uses
+the union of outstanding lookup intervals per worker, including queue/native SQL
+time, rather than summing overlapping calls. It is a pressure heuristic, not a
+measurement of purely idle CPU time. Memory pressure compares process RSS with
+`memoryBudgetMegabytes: 8192`, also capped by 80% of physical/constrained memory
+when available. Memory-driven reductions retire idle workers to release their
+caches. Active jobs are not terminated to change concurrency.
+
+Changes apply between rounds, with a compact log only when the next target
+changes. Round workloads and circuit difficulty also change; this is heuristic
+control, not an isolated causal experiment. Set `adaptiveConcurrency` to `false`
+to retain the existing fixed-cap scheduling behavior. `OPTIMIZER_WORKERS` is a
+hard cap; disable adaptation if you want to avoid automatic reductions below it.
+
+### Reproducible benchmark harness
+
+```sh
+npm run benchmark -- data/latest.json data/obfuscated.json
+```
+
+The original file is optional; omitting it validates against the starting input.
+The harness uses existing completed canonical tables and never generates new
+ones. It does not update working/latest/progress circuits. It writes a JSON
+report to `files.dataDirectory` / `benchmark.outputName` (default
+`data/benchmark.json`) and refuses to overwrite its input or settings files.
+
+The `benchmark` section controls `seconds: 10`, `repeats: 3`,
+`workerCounts: [1, 2, 4]`, `seed: 1729`, `maximumChecks: 0`, and
+`maximumOverrunSeconds: 30`. Each trial gets a fresh process and worker caches,
+the same starting circuit, and the same seed for each paired repetition. Order
+alternates across repetitions. The optional positive `maximumChecks` is an
+additional **per-job** work cap; zero disables it. Requested worker counts are
+fixed during a trial to compare concurrency independently of the controller.
+
+The `reference` variant disables shared indexes, component partitioning and
+stable choices, uses lifetime scheduler scores and FIFO lookup eviction. It still
+contains correctness fixes and bounded scheduler history. `tuned` uses the
+configured features. Both disable adaptive concurrency for fixed-count trials;
+actual control overrides are recorded per result. This is a feature comparison,
+not execution of an older git revision or an ablation of each individual feature.
+
+Reports include input/original hashes, settings, git revision, Node/platform/CPU
+metadata, seeds, startup time, actual wall time, requested budget, gate counts,
+reductions per second, peak sampled RSS, lookup/worker time and validation method.
+Shared-table admission is included in startup time; wall time includes worker
+startup, search and pool cleanup, and reduction rate uses that wall time. Small
+jobs may complete before the requested budget. Stops are cooperative, so actual
+time can exceed the budget; the overrun watchdog terminates stuck trial processes.
+Validation is exhaustive through eight wires and probabilistic above that limit.
+Seeds repeat random streams, not operating-system scheduling; multithreaded
+results and timings can vary. Full-circuit production gains remain unmeasured.

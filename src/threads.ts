@@ -1,3 +1,4 @@
+import type { SharedTable } from './shared-table.js'
 import { TemplateLibrary, TemplateRule } from './templates.js'
 import { config } from './config.js'
 import { Worker } from 'worker_threads'
@@ -14,12 +15,12 @@ export function configuredWorkerCount() {
 
 type Job = { budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
 export class WorkerPool {
-	private slots: { worker: Worker, job?: Job }[] = []
+	private slots: { worker: Worker, job?: Job, retiring?: boolean }[] = []
 	private queue: Job[] = []
 	private failure?: Error
 	private concurrency: number
 	private shared = new TemplateLibrary(config.workers.sharedTemplateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates)
-	constructor(private size: number, private workerUrl = new URL('./worker.js', import.meta.url)) {
+	constructor(private size: number, private workerUrl = new URL('./worker.js', import.meta.url), private sharedTables: SharedTable[] = [], private seed?: number, private maximumChecks = 0) {
 		if (!Number.isSafeInteger(size) || size < 1) throw new Error('Invalid worker pool size')
 		this.concurrency = size
 	}
@@ -27,6 +28,15 @@ export class WorkerPool {
 		if (!Number.isSafeInteger(limit) || limit < 1 || limit > this.size) throw new Error('Invalid worker concurrency')
 		this.concurrency = limit
 		this.dispatch()
+	}
+	async trimIdle() {
+		const retired: Worker[] = []
+		for (let i = this.slots.length - 1; i >= 0 && this.slots.length > this.concurrency; i--) {
+			const slot = this.slots[i]
+			if (slot.job) continue
+			slot.retiring = true; this.slots.splice(i, 1); retired.push(slot.worker)
+		}
+		await Promise.all(retired.map(worker => worker.terminate()))
 	}
 	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000): Promise<Gate[]> {
 		if (this.failure) return Promise.reject(this.failure)
@@ -47,7 +57,7 @@ export class WorkerPool {
 			let slot = this.slots.find(slot => !slot.job)
 			if (!slot) {
 				if (this.slots.length >= this.size) return
-				const worker = new Worker(this.workerUrl, { workerData: { solverConfig: config } })
+				const worker = new Worker(this.workerUrl, { workerData: { solverConfig: config, sharedTables: this.sharedTables, solverSeed: this.seed === undefined ? undefined : this.seed + this.slots.length, maximumChecks: this.maximumChecks } })
 				slot = { worker }
 				const current = slot
 				this.slots.push(current)
@@ -71,7 +81,7 @@ export class WorkerPool {
 				}
 				worker.on('error', error => this.fail(error))
 				worker.on('exit', code => {
-					if (!this.failure) this.fail(new Error(`Worker exited unexpectedly (${code})`))
+					if (!this.failure && !current.retiring) this.fail(new Error(`Worker exited unexpectedly (${code})`))
 				})
 			}
 			slot.job = this.queue.shift()!
