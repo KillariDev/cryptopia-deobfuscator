@@ -1,0 +1,716 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-17",
+  "baseRevision": "f7659c1",
+  "trials": 36,
+  "groups": [
+    {
+      "wires": 3,
+      "gates": 4,
+      "stagingWriters": 1,
+      "countFinalInserts": false,
+      "rows": 38016,
+      "digest": "bd2e7f51306776b25e377c0e00cffa7ea060c6314ddaf5b984bf8a9e3600ee59",
+      "variants": [
+        {
+          "name": "baseline",
+          "medianSeconds": 1.8403067610000001,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 1882.457119,
+              "cpuMs": 2082.349,
+              "peakRssBytes": 244535296,
+              "peakDatabaseBytes": 3922008,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 1840.306761,
+              "cpuMs": 2108.353,
+              "peakRssBytes": 249802752,
+              "peakDatabaseBytes": 6790368,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 1775.996695,
+              "cpuMs": 2128.688,
+              "peakRssBytes": 244137984,
+              "peakDatabaseBytes": 6790368,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 0
+              }
+            }
+          ]
+        },
+        {
+          "name": "candidate-cache",
+          "medianSeconds": 0.874295894,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 831.169293,
+              "cpuMs": 1107.193,
+              "peakRssBytes": 261849088,
+              "peakDatabaseBytes": 6790368,
+              "staging": {
+                "checked": 328425,
+                "skipped": 259658,
+                "cacheBytes": 18874368,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 874.295894,
+              "cpuMs": 1170.954,
+              "peakRssBytes": 262090752,
+              "peakDatabaseBytes": 4824288,
+              "staging": {
+                "checked": 328425,
+                "skipped": 259658,
+                "cacheBytes": 18874368,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 889.211049,
+              "cpuMs": 1145.657,
+              "peakRssBytes": 253005824,
+              "peakDatabaseBytes": 6790368,
+              "staging": {
+                "checked": 328425,
+                "skipped": 259658,
+                "cacheBytes": 18874368,
+                "peakBatches": 0
+              }
+            }
+          ]
+        },
+        {
+          "name": "streaming",
+          "medianSeconds": 1.608517502,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 1567.80723,
+              "cpuMs": 2012.109,
+              "peakRssBytes": 322772992,
+              "peakDatabaseBytes": 6790368,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 1659.2516759999999,
+              "cpuMs": 2143.486,
+              "peakRssBytes": 321196032,
+              "peakDatabaseBytes": 3922008,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 1608.517502,
+              "cpuMs": 2083.398,
+              "peakRssBytes": 323538944,
+              "peakDatabaseBytes": 6790368,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 2
+              }
+            }
+          ]
+        },
+        {
+          "name": "cache-streaming",
+          "medianSeconds": 0.8350060990000001,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 801.5804499999999,
+              "cpuMs": 1092.338,
+              "peakRssBytes": 308879360,
+              "peakDatabaseBytes": 6790368,
+              "staging": {
+                "checked": 328425,
+                "skipped": 259658,
+                "cacheBytes": 18874368,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 835.440832,
+              "cpuMs": 1180.712,
+              "peakRssBytes": 306765824,
+              "peakDatabaseBytes": 6790368,
+              "staging": {
+                "checked": 328425,
+                "skipped": 259658,
+                "cacheBytes": 18874368,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 835.0060990000001,
+              "cpuMs": 1196.34,
+              "peakRssBytes": 306044928,
+              "peakDatabaseBytes": 4824288,
+              "staging": {
+                "checked": 328425,
+                "skipped": 259658,
+                "cacheBytes": 18874368,
+                "peakBatches": 2
+              }
+            }
+          ]
+        }
+      ],
+      "pairedCombinedRatios": [
+        0.42581604749956586,
+        0.4539682457863882,
+        0.47016196671469596
+      ],
+      "runtimeVersions": [
+        {
+          "name": "baseline",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": false,
+          "candidateCache": 0,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        },
+        {
+          "name": "candidate-cache",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": false,
+          "candidateCache": 32,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        },
+        {
+          "name": "streaming",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": true,
+          "candidateCache": 0,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        },
+        {
+          "name": "cache-streaming",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": true,
+          "candidateCache": 32,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        }
+      ]
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "stagingWriters": 1,
+      "countFinalInserts": false,
+      "rows": 832167,
+      "digest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+      "variants": [
+        {
+          "name": "baseline",
+          "medianSeconds": 10.033438129999999,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 9993.253578,
+              "cpuMs": 11214.574,
+              "peakRssBytes": 1279049728,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 10033.438129999999,
+              "cpuMs": 11163.264,
+              "peakRssBytes": 1280221184,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 10612.578184,
+              "cpuMs": 11715.539,
+              "peakRssBytes": 1277071360,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 0
+              }
+            }
+          ]
+        },
+        {
+          "name": "candidate-cache",
+          "medianSeconds": 7.637462611,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 7311.880101,
+              "cpuMs": 8316.125,
+              "peakRssBytes": 1307979776,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 7637.462611,
+              "cpuMs": 8714.635,
+              "peakRssBytes": 1289482240,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 7731.385515,
+              "cpuMs": 8408.406,
+              "peakRssBytes": 1298862080,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 0
+              }
+            }
+          ]
+        },
+        {
+          "name": "streaming",
+          "medianSeconds": 10.249463032,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 10844.407193000001,
+              "cpuMs": 13915.957,
+              "peakRssBytes": 1276682240,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 10249.463032,
+              "cpuMs": 13259.492,
+              "peakRssBytes": 1253302272,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 9808.587257000001,
+              "cpuMs": 12699.162,
+              "peakRssBytes": 1263022080,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 2
+              }
+            }
+          ]
+        },
+        {
+          "name": "cache-streaming",
+          "medianSeconds": 6.9542834309999995,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 6291.236599999999,
+              "cpuMs": 8430.898,
+              "peakRssBytes": 1305292800,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 6994.677307,
+              "cpuMs": 9643.492,
+              "peakRssBytes": 1261293568,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 6954.283431,
+              "cpuMs": 9586.714,
+              "peakRssBytes": 1272614912,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 2
+              }
+            }
+          ]
+        }
+      ],
+      "pairedCombinedRatios": [
+        0.6295483799040248,
+        0.6971366361532546,
+        0.6552868973426825
+      ],
+      "runtimeVersions": [
+        {
+          "name": "baseline",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": false,
+          "candidateCache": 0,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        },
+        {
+          "name": "candidate-cache",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": false,
+          "candidateCache": 32,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        },
+        {
+          "name": "streaming",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": true,
+          "candidateCache": 0,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        },
+        {
+          "name": "cache-streaming",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": true,
+          "candidateCache": 32,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        }
+      ]
+    },
+    {
+      "wires": 4,
+      "gates": 3,
+      "stagingWriters": 2,
+      "countFinalInserts": true,
+      "rows": 832167,
+      "digest": "89f61651c5ca7ec1d8bb82bad7099fda4ed8f8b01416736c8ac0f27bf8bd34b1",
+      "variants": [
+        {
+          "name": "baseline",
+          "medianSeconds": 10.165610085,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 10566.396527,
+              "cpuMs": 14198.168,
+              "peakRssBytes": 1296556032,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 10165.610085,
+              "cpuMs": 13252.24,
+              "peakRssBytes": 1276444672,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 9917.860237,
+              "cpuMs": 13001.11,
+              "peakRssBytes": 1278566400,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 0
+              }
+            }
+          ]
+        },
+        {
+          "name": "candidate-cache",
+          "medianSeconds": 7.495873198,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 7167.717652,
+              "cpuMs": 9660.876,
+              "peakRssBytes": 1311965184,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 7612.976629,
+              "cpuMs": 10116.869,
+              "peakRssBytes": 1274748928,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 0
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 7495.873198,
+              "cpuMs": 10199.729,
+              "peakRssBytes": 1302732800,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 0
+              }
+            }
+          ]
+        },
+        {
+          "name": "streaming",
+          "medianSeconds": 10.198335397,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 10198.335396999999,
+              "cpuMs": 14344.769,
+              "peakRssBytes": 1287282688,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 9621.304850999999,
+              "cpuMs": 13531.203,
+              "peakRssBytes": 1255837696,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 10245.671738000001,
+              "cpuMs": 14347.077,
+              "peakRssBytes": 1292845056,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 0,
+                "skipped": 0,
+                "cacheBytes": 0,
+                "peakBatches": 2
+              }
+            }
+          ]
+        },
+        {
+          "name": "cache-streaming",
+          "medianSeconds": 6.779020433,
+          "samples": [
+            {
+              "repeat": 0,
+              "generationMs": 6779.020433000001,
+              "cpuMs": 9481.107,
+              "peakRssBytes": 1306136576,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 1,
+              "generationMs": 6622.165576,
+              "cpuMs": 9330.969,
+              "peakRssBytes": 1303732224,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 2
+              }
+            },
+            {
+              "repeat": 2,
+              "generationMs": 7224.417049000001,
+              "cpuMs": 10123.255,
+              "peakRssBytes": 1302327296,
+              "peakDatabaseBytes": 70751880,
+              "staging": {
+                "checked": 1750865,
+                "skipped": 809311,
+                "cacheBytes": 29360128,
+                "peakBatches": 2
+              }
+            }
+          ]
+        }
+      ],
+      "pairedCombinedRatios": [
+        0.6415640768049704,
+        0.6514282488339214,
+        0.7284249703427234
+      ],
+      "runtimeVersions": [
+        {
+          "name": "baseline",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": false,
+          "candidateCache": 0,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        },
+        {
+          "name": "candidate-cache",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": false,
+          "candidateCache": 32,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        },
+        {
+          "name": "streaming",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": true,
+          "candidateCache": 0,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        },
+        {
+          "name": "cache-streaming",
+          "root": "/workspace/cryptopia-deobfuscator",
+          "stream": true,
+          "candidateCache": 32,
+          "revision": "f7659c190602821212fbbb991ab8774fc909ddcc",
+          "workingTreeDirty": true,
+          "runtimeSha256": "c4c69635ff7c9d9290c741c85e10225da3d3eadf85848624e2141454cdadd28f"
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "Shared host, three repetitions per configuration; no significance test",
+    "Production 4-wire/5-gate table not built",
+    "Generation timing includes setup, scratch work and final compaction; validation excluded",
+    "Measurements preceded selecting the cache/stream defaults; comparison variants explicitly set both controls"
+  ],
+  "node": "v24.22.3",
+  "platform": "linux",
+  "validation": "Every replacement exhaustively checked; every coverage/cost digest matched."
+}

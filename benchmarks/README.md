@@ -43,6 +43,7 @@ Enable at most one generation comparison mode:
 
 | Setting | Comparison |
 | --- | --- |
+| `generationStreamingComparison` | Baseline, exact candidate cache, bounded staging stream, and both |
 | `generationFinalComparison` | Candidate counting versus output-insert counting |
 | `generationWriterComparison` | Compact bindings, statement/batch sizes and 1/2/4 staging writers |
 | `generationPrefetchComparison` | Serialized expansion, lookahead, and lookahead with diagnostics |
@@ -87,3 +88,36 @@ Insert-time counting is off by default. The recorded comparison in
 contains 18 complete builds and 108 query-only trials. Isolated query costs
 improved, but whole-build results varied and regressed with two staging writers.
 Keep the default unless a comparison on your workload supports changing it.
+
+
+## Reducing and streaming candidate writes
+
+`database.generationCandidateCacheMegabytes` controls fixed typed-array storage
+for an exact, same-depth candidate cache; `0` disables it. It rejects repeated
+function/wire-mask keys only when their read cost cannot improve an earlier row.
+Hash collisions evict entries, never reject a different key. The cache resets at
+depth changes and starts empty on resume; it does not replace saved database state.
+The configured budget covers retained typed-array payloads, not other job buffers.
+
+`database.generationStreamStaging` feeds staging through an ordered asynchronous
+queue. `generationStagingQueueBatches` bounds admitted batches, including the one
+being written. The producer can additionally hold its current batch; worker,
+lookahead, shard partial-row and native SQLite buffers remain separate bounds.
+The queue drains before results are merged or committed. On handled failure it
+settles active writes before rollback and drops queued writes. Existing checkpoint
+transactions and durability are unchanged; queued rows are not checkpoints.
+
+Verbose logs show the queue snapshot and the percentage of redundant candidate
+rows rejected before SQL. `stage wait` measures producer waits for queue capacity,
+drain and staging setup; background writes can overlap candidate preparation.
+SQLite caching, commits and WAL checkpoints can still produce physical I/O bursts.
+Judge streaming by complete-build time or committed parents/s, not disk smoothness.
+
+Defaults are a 32 MiB candidate-cache budget, streaming enabled, and two admitted
+staging batches. [Recorded comparisons](results/2026-11-17-staging-streaming.json)
+cover 36 complete builds with matching outputs: cache-only, stream-only, combined
+and baseline variants on 3/4 and 4/3 tables. Combined medians were 0.84s versus
+1.84s on 3/4, and 6.95s versus 10.03s on 4/3 with one staging writer. At two
+staging writers with insert-time counting enabled, 4/3 medians were 6.78s versus
+10.17s. Three shared-host samples per variant do not establish production 4/5
+throughput. Streaming alone did not consistently help; the combined pipeline did.

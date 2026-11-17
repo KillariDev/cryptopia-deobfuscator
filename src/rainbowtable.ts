@@ -196,7 +196,7 @@ export const createRainbowTable = async (wires: number, gates: number, onMetrics
 			await generateOnDisk(db, wires, gates, catalog, {
 				readRows: config.database.generationReadRows, stageRows: config.database.generationBatchRows,
 				parameterLimit: config.database.generationSqlParameters, preparedInserts: config.database.generationPreparedInserts, appendStaging: config.database.generationAppendStaging, aggregateMerge: config.database.generationAggregateMerge, directInputMerge: config.database.generationDirectInputMerge, sortStaging: config.database.generationSortStaging, statementCacheEntries: config.database.generationStatementCacheEntries, stateLimit: config.database.generationStates,
-				keepState: true, countFinalInserts: config.database.generationCountFinalInserts,
+				keepState: true, candidateCacheMegabytes: config.database.generationCandidateCacheMegabytes, streamStaging: config.database.generationStreamStaging, stagingQueueBatches: config.database.generationStagingQueueBatches, countFinalInserts: config.database.generationCountFinalInserts,
 				compactBindings: config.database.generationCompactBindings, stagingWriters: config.database.generationStagingWriters, stagingDirectory: join(config.files.dataDirectory, config.files.workerDirectory), stagingCacheMegabytes: config.database.generationCacheMegabytes,
 				prefetch: config.database.generationPrefetch, prefetchMegabytes: config.database.generationPrefetchMegabytes, onActivity: read => { activity = read },
 				workers, queueBatches: config.database.generationQueueBatches, minimumWork: config.database.generationMinimumWork,

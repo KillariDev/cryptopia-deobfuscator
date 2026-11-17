@@ -32,8 +32,8 @@ const storageBytes = (root: string): number => {
 const sample = () => { peakBytes = Math.max(peakBytes, storageBytes(directory)) }
 const timer = setInterval(sample, 25), cpuStarted = process.cpuUsage(), started = performance.now()
 try {
-	let operations: unknown, profile: unknown
-	const db = await createRainbowTable(wires, gates, (value: unknown, activity: { operations?: unknown } | undefined) => { profile = value; operations = activity?.operations }), generationMs = performance.now() - started, cpu = process.cpuUsage(cpuStarted)
+	let operations: unknown, profile: unknown, staging: unknown
+	const db = await createRainbowTable(wires, gates, (value: unknown, activity: { operations?: unknown, candidateCacheChecked?: number, candidateCacheSkipped?: number, candidateCacheBytes?: number, stagingQueuePeakBatches?: number } | undefined) => { profile = value; operations = activity?.operations; staging = { checked: activity?.candidateCacheChecked ?? 0, skipped: activity?.candidateCacheSkipped ?? 0, cacheBytes: activity?.candidateCacheBytes ?? 0, peakBatches: activity?.stagingQueuePeakBatches ?? 0 } }), generationMs = performance.now() - started, cpu = process.cpuUsage(cpuStarted)
 	sample()
 	let rows = 0
 	const hash = createHash('sha256')
@@ -47,5 +47,5 @@ try {
 		} catch (error) { reject(error) }
 	}, (error: Error | null) => error ? reject(error) : resolve()))
 	await closeRainbowTable(db); sample()
-	writeFileSync(output, JSON.stringify({ wires, gates, workers, generationMs, operations, profile, cpuMs: (cpu.user + cpu.system) / 1000, rows, semanticCostDigest: hash.digest('hex'), peakDatabaseBytes: peakBytes, storageMeasurement: '25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks', finalFileBytes: fileSize(path), peakRssBytes: process.resourceUsage().maxRSS * 1024, settings, validation: 'all-replacements-exhaustive' }))
+	writeFileSync(output, JSON.stringify({ wires, gates, workers, generationMs, operations, profile, staging, cpuMs: (cpu.user + cpu.system) / 1000, rows, semanticCostDigest: hash.digest('hex'), peakDatabaseBytes: peakBytes, storageMeasurement: '25ms sampled main and scratch database/WAL/journal/SHM bytes; may miss transient peaks', finalFileBytes: fileSize(path), peakRssBytes: process.resourceUsage().maxRSS * 1024, settings, validation: 'all-replacements-exhaustive' }))
 } finally { clearInterval(timer) }
