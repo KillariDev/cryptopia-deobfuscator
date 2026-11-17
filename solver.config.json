@@ -35,7 +35,7 @@
     "standaloneSaveSeconds": 60
   },
   "logging": {
-    "verbose": false,
+    "verbose": true,
     "generationDiagnostics": true,
     "generationDiagnosticsMinimumSeconds": 5,
     "eventLoopResolutionMilliseconds": 20
@@ -131,7 +131,7 @@
     "generationPrefetch": true,
     "generationPrefetchMegabytes": 16,
     "generationCompactBindings": true,
-    "generationStagingWriters": 1,
+    "generationStagingWriters": 2,
     "etaTrendWindowSamples": 60,
     "etaTrendMinimumSamples": 10,
     "etaTrendMinimumWorkGrowth": 0.25,
