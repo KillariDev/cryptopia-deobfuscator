@@ -23,22 +23,25 @@ try {
 		const shards = await ShardedStagingWriter.create(db, { ...options, compactBindings, writers, directory, cacheMegabytes: 4 })
 		try {
 			assert.equal((await allSQL(db, 'PRAGMA database_list')).length, writers + 2)
+			await assert.rejects(shards.importBatch(), /No committed/)
 			for (let batch = 0; batch < 2; batch++) {
 				await shards.beginBatch(); await runSQL(db, 'BEGIN')
 				await runSQL(db, 'DELETE FROM BuildCandidates')
 				await Promise.all([shards.write(rows.slice(0, 101)), shards.write(rows.slice(101))])
-				await shards.materialize()
+				await shards.materialize(); await shards.importBatch()
+				await assert.rejects(shards.importBatch(), /No committed/)
 				assert.deepEqual(await select(), expected, 'exact representatives, including equal-cost ties, survive partition and merge')
 				await runSQL(db, batch ? 'ROLLBACK' : 'COMMIT')
 			}
 			await shards.beginBatch(); await runSQL(db, 'BEGIN')
 			await runSQL(db, 'DELETE FROM BuildCandidates')
 			await shards.write([[Buffer.from([201]), 255, 0xffffffff, Buffer.from([99]), 8]])
-			await shards.materialize()
+			await shards.materialize(); await shards.importBatch()
 			const maximum = (await allSQL<{ mask: number, reads: number, wires: number }>(db, 'SELECT mask,reads,wires FROM BuildCandidates'))[0]
 			assert.deepEqual(maximum, { mask: 255, reads: 0xffffffff, wires: 8 })
 			await runSQL(db, 'ROLLBACK')
 		} finally { await shards.close(); await shards.close() }
+		assert.ok(shards.activity.writerMs > 0 && shards.activity.allBusyMs > 0, 'completed scratch work retains interval occupancy and overlap')
 		assert.deepEqual(await select(), expected, 'rollback preserves the authoritative checkpoint')
 		assert.equal((await allSQL(db, 'PRAGMA database_list')).length, 2)
 		assert.deepEqual((await readdir(directory)).filter(name => name.startsWith('rainbow-staging-')), [])
@@ -49,6 +52,7 @@ try {
 		await shards.beginBatch(); await runSQL(db, 'BEGIN')
 		await assert.rejects(shards.write(rows), /injected shard failure/)
 		await assert.rejects(shards.materialize(), /injected shard failure/)
+		await assert.rejects(shards.importBatch(), /No committed/)
 		await runSQL(db, 'ROLLBACK')
 	} finally { await shards.close() }
 	assert.equal(observer.snapshot().active, 0)

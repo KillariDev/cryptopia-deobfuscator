@@ -1,4 +1,4 @@
-export type GenerationProfile = { phase: 'reading' | 'staging' | 'deduplicating' | 'writing lookup' | 'committing' | 'expanding' | 'cleaning up' | 'compacting' | 'complete', phaseStarted: number, stagingMs: number, dedupMs: number, outputMs: number, commitMs: number, elapsedMs: number, expansionMs: number, writeMs: number, readMs: number, waitMs: number, candidates: number, emitted: number, batches: number, workersUsed: number, peakPending: number }
+export type GenerationProfile = { phase: 'reading' | 'staging' | 'deduplicating' | 'writing lookup' | 'committing' | 'importing scratch' | 'expanding' | 'cleaning up' | 'compacting' | 'complete', phaseActive: boolean, phaseStarted: number, stagingMs: number, dedupMs: number, outputMs: number, commitMs: number, importMs: number, committedParents: number, elapsedMs: number, expansionMs: number, writeMs: number, readMs: number, waitMs: number, candidates: number, emitted: number, batches: number, workersUsed: number, peakPending: number }
 export type SemanticProgress = { depth: number, processed: number, total: number, states: number, processedThisRun?: number, disk?: boolean, overallDone?: number, overallTotal?: number, overallEstimated?: boolean, complete?: boolean }
 export function progressPercent(done: bigint, total: bigint) {
 	if (total <= 0n) return '0.00%'
@@ -18,7 +18,8 @@ const median = (values: number[]) => {
 	const sorted = values.slice().sort((a, b) => a - b), middle = Math.floor(sorted.length / 2)
 	return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
 }
-/** Conservative recent throughput plus a bounded, robust slowdown forecast. */
+export type EtaTrendOptions = { windowSamples: number, minimumSamples: number, minimumWorkGrowth: number }
+/** Recent measured throughput by default; optional trend needs substantial history. */
 export class GenerationEstimator {
 	private depth = -1
 	private done = 0
@@ -26,7 +27,7 @@ export class GenerationEstimator {
 	private rates: number[] = []
 	private samples: { work: number, cost: number }[] = []
 	private smoothed?: number
-	constructor(private windowSize: number, private warmup: number, private smoothing: number, private maximumSlowdown = 4) {}
+	constructor(private windowSize: number, private warmup: number, private smoothing: number, private maximumSlowdown = 1, private trend: EtaTrendOptions = { windowSamples: 60, minimumSamples: 10, minimumWorkGrowth: .25 }) {}
 
 	/** Milliseconds, conditional on the supplied work projection; excludes final compaction. */
 	remainingMs(progress: SemanticProgress): number | undefined {
@@ -40,8 +41,10 @@ export class GenerationEstimator {
 		const rate = Math.min(this.smoothed, sorted[Math.floor(sorted.length / 4)])
 		if (!rate) return undefined
 		const cost = 1 / rate, slopes: number[] = []
-		if (this.samples.length >= 5) for (let i = 0; i < this.samples.length; i++) for (let j = i + 1; j < this.samples.length; j++) {
-			const a = this.samples[i], b = this.samples[j], distance = Math.log(b.work / a.work)
+		const history = this.samples.filter(sample => Number.isFinite(sample.cost))
+		const supported = this.maximumSlowdown > 1 && history.length >= this.trend.minimumSamples && history[history.length - 1].work / history[0].work >= 1 + this.trend.minimumWorkGrowth
+		if (supported) for (let i = 0; i < history.length; i++) for (let j = i + 1; j < history.length; j++) {
+			const a = history[i], b = history[j], distance = Math.log(b.work / a.work)
 			if (!Number.isFinite(a.cost) || !Number.isFinite(b.cost)) continue
 			if (distance > 0) slopes.push((b.cost - a.cost) / distance)
 		}
@@ -70,7 +73,7 @@ export class GenerationEstimator {
 			this.rates.push(rate)
 			if (this.rates.length > this.windowSize) this.rates.shift()
 			this.samples.push({ work: Math.max(1, (progress.processed + this.done) / 2), cost: rate ? 1 / rate : Infinity })
-			if (this.samples.length > this.windowSize) this.samples.shift()
+			if (this.samples.length > this.trend.windowSamples) this.samples.shift()
 			const observed = median(this.rates)
 			this.smoothed = this.smoothed === undefined ? observed : (1 - this.smoothing) * this.smoothed + this.smoothing * observed
 			this.done = progress.processed; this.at = now
@@ -90,7 +93,7 @@ export function formatGenerationProgress(progress: SemanticProgress | undefined,
 
 export function formatGenerationProfile(profile: GenerationProfile, now = performance.now()) {
 	const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
-	return `Generation work: ${profile.phase}${profile.phase === 'complete' ? '' : ` (${generationDuration(now - profile.phaseStarted)})`} | expansion ${seconds(profile.expansionMs)} worker-time | read ${seconds(profile.readMs)} | stage ${seconds(profile.stagingMs)} | deduplicate ${seconds(profile.dedupMs)} | lookup ${seconds(profile.outputMs)} | commit ${seconds(profile.commitMs)} | expansion wait ${seconds(profile.waitMs)}. Cumulative timings overlap.`
+	return `Generation work: ${profile.phaseActive ? `${profile.phase} (${generationDuration(now - profile.phaseStarted)})` : profile.phase === 'complete' ? 'complete' : 'between operations'} | expansion ${seconds(profile.expansionMs)} worker-time | read ${seconds(profile.readMs)} | stage ${seconds(profile.stagingMs)} | scratch import ${seconds(profile.importMs)} | deduplicate ${seconds(profile.dedupMs)} | lookup ${seconds(profile.outputMs)} | commit ${seconds(profile.commitMs)} | expansion wait ${seconds(profile.waitMs)}. Cumulative timings overlap.`
 }
 
 /** Input-row work estimate; future layer growth is projected, never claimed exact. */

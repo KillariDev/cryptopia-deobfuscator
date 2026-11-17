@@ -1,3 +1,4 @@
+import { WriterUtilization } from './generation-utilization.js'
 import sqlite3 from 'sqlite3'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -22,15 +23,18 @@ export class ShardedStagingWriter {
 	private shards: Shard[] = []
 	private closing?: Promise<void>
 	private accepting = false
+	private readyToImport = false
 	private active = 0
+	private utilization!: WriterUtilization
 	private tail: Promise<unknown> = Promise.resolve()
 	private constructor(private owner: sqlite3.Database, readonly directory: string) {}
-	get activity() { return { stagingWriters: this.shards.length, activeStagingWriters: this.active, stagingBufferedRows: this.shards.reduce((sum, shard) => sum + shard.pending.length, 0) } }
+	get activity() { return { ...this.utilization.snapshot(), stagingWriters: this.shards.length, activeStagingWriters: this.active, stagingBufferedRows: this.shards.reduce((sum, shard) => sum + shard.pending.length, 0) } }
 	static async create(owner: sqlite3.Database, options: ShardOptions) {
 		if (!Number.isSafeInteger(options.writers) || options.writers < 2 || options.writers > 4 || !Number.isSafeInteger(options.cacheMegabytes) || options.cacheMegabytes < 1) throw new Error('Invalid staging writer limits (2–4 writers)')
 		const root = options.directory ?? tmpdir()
 		await mkdir(root, { recursive: true })
 		const instance = new ShardedStagingWriter(owner, await mkdtemp(join(root, 'rainbow-staging-')))
+		instance.utilization = new WriterUtilization(options.writers)
 		try {
 			for (let i = 0; i < options.writers; i++) {
 				const path = join(instance.directory, `writer-${i}.db`), db = new sqlite3.Database(path)
@@ -51,12 +55,12 @@ export class ShardedStagingWriter {
 	}
 	/** Must run outside the owner's transaction, after its previous read locks end. */
 	async beginBatch() {
-		if (this.closing || this.accepting) throw new Error('Staging batch is already active or closed')
+		if (this.closing || this.accepting || this.readyToImport) throw new Error('Staging batch is already active or closed')
 		await this.tail
-		const results = await Promise.allSettled(this.shards.map(async shard => {
+		const results = await Promise.allSettled(this.shards.map(shard => this.utilization.measure(async () => {
 			await runSQL(shard.db, 'BEGIN IMMEDIATE'); shard.transaction = true
 			await runSQL(shard.db, 'DELETE FROM BuildCandidates')
-		}))
+		})))
 		for (const result of results) if (result.status === 'rejected') throw result.reason
 		this.accepting = true
 	}
@@ -65,7 +69,7 @@ export class ShardedStagingWriter {
 		if (!count) return
 		const rows = shard.pending.splice(0, count)
 		this.active++
-		try { await shard.writer!.write(rows) } finally { this.active-- }
+		try { await this.utilization.measure(() => shard.writer!.write(rows)) } finally { this.active-- }
 	}
 	write(rows: StagingRow[]): Promise<void> {
 		if (this.closing || !this.accepting) return Promise.reject(new Error('No active staging batch'))
@@ -90,9 +94,14 @@ export class ShardedStagingWriter {
 		await this.tail
 		const results = await Promise.allSettled(this.shards.map(async shard => {
 			await this.flush(shard, true)
-			await runSQL(shard.db, 'COMMIT'); shard.transaction = false
+			await this.utilization.measure(() => runSQL(shard.db, 'COMMIT')); shard.transaction = false
 		}))
 		for (const result of results) if (result.status === 'rejected') throw result.reason
+		this.readyToImport = true
+	}
+	async importBatch() {
+		if (this.closing || !this.readyToImport) throw new Error('No committed staging batch to import')
+		this.readyToImport = false
 		// State ownership makes these disjoint: no second deduplication pass or
 		// JS roundtrip is needed. Insertion order cannot change equal-cost ties.
 		for (const shard of this.shards) await runSQL(this.owner, `INSERT INTO temp.BuildCandidates SELECT * FROM ${shard.alias}.BuildCandidates`)

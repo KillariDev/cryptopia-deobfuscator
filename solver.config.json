@@ -120,7 +120,7 @@
     "generationTempStore": "file",
     "generationJournalMode": "wal",
     "generationSynchronous": "full",
-    "etaMaximumSlowdown": 4,
+    "etaMaximumSlowdown": 1,
     "generationSqlParameters": 8192,
     "generationPreparedInserts": true,
     "generationSortStaging": false,
@@ -131,7 +131,10 @@
     "generationPrefetch": true,
     "generationPrefetchMegabytes": 16,
     "generationCompactBindings": true,
-    "generationStagingWriters": 1
+    "generationStagingWriters": 1,
+    "etaTrendWindowSamples": 60,
+    "etaTrendMinimumSamples": 10,
+    "etaTrendMinimumWorkGrowth": 0.25
   },
   "synthesis": {
     "templates": true,
