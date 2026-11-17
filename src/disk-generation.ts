@@ -1,3 +1,4 @@
+import { frontierCandidatesSQL, countNewFinalFunctionsSQL } from './generation-dedup.js'
 import sqlite3 from 'sqlite3'
 import { Gate } from './types.js'
 import { circuitState, encodeGates } from './semantic.js'
@@ -128,10 +129,11 @@ export async function generateOnDisk(db: sqlite3.Database, wires: number, maximu
 				const final = meta.depth + 1 === maximumDepth
 				await phase('deduplicating', async () => {
 					if (final) {
-						meta!.functions += (await allSQL<{ count: number }>(db, 'SELECT count(*) AS count FROM (SELECT DISTINCT state FROM BuildCandidates c WHERE NOT EXISTS (SELECT 1 FROM BuildSeen s WHERE s.state=c.state) AND NOT EXISTS (SELECT 1 FROM InputOutputReplacers o WHERE o.ioIdentifier=c.state))'))[0].count
+						meta!.functions += (await allSQL<{ count: number }>(db, countNewFinalFunctionsSQL))[0].count
 					} else {
 						meta!.functions += await run('INSERT INTO BuildSeen SELECT state,? FROM BuildCandidates GROUP BY state ON CONFLICT(state) DO NOTHING', [meta!.depth + 1])
-						await run('INSERT INTO BuildFrontier(state,mask,reads,gates,depth) SELECT c.state,c.mask,c.reads,c.gates,? FROM BuildCandidates c JOIN BuildSeen s ON c.state=s.state WHERE s.depth=? ON CONFLICT(state,mask) DO UPDATE SET reads=excluded.reads,gates=excluded.gates WHERE excluded.reads<BuildFrontier.reads', [meta!.depth + 1, meta!.depth + 1])
+						// CROSS JOIN keeps the bounded batch outside the primary-key probe; ordinary JOIN scans all BuildSeen.
+						await run('INSERT INTO BuildFrontier(state,mask,reads,gates,depth) ' + frontierCandidatesSQL + ' ON CONFLICT(state,mask) DO UPDATE SET reads=excluded.reads,gates=excluded.gates WHERE excluded.reads<BuildFrontier.reads', [meta!.depth + 1, meta!.depth + 1])
 					}
 					if (options.stateLimit && meta!.functions > options.stateLimit) throw new Error('Disk generation state limit reached; increase database.generationStates or set it to 0')
 				})

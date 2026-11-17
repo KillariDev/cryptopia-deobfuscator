@@ -244,6 +244,40 @@ CPU expansion or database work limits a build. Extra CPU workers cannot eliminat
 a database bottleneck, and the defaults are conservative rather than a promise
 of linear speedup. Full 4-wire/5-gate build throughput has not been benchmarked.
 
+### Deduplication query scaling
+
+Frontier updates explicitly drive the join from the bounded candidate batch and
+probe `BuildSeen` by its primary key. An ordinary join allowed SQLite to choose
+a complete scan of the growing visited table for each batch. `CROSS JOIN` fixes
+the loop order without adding an index or changing persisted tables. Final-layer
+function counts group equal states before probing visited/output tables, so
+used-wire-mask variants share the same existence check. All checks remain exact;
+frontier masks and lowest-read-cost alternatives are preserved.
+
+```sh
+npm run benchmark:dedup
+npm run benchmark:dedup -- --smoke
+```
+
+This query-only benchmark holds the candidate batch constant while growing the
+visited table. JSON settings under `benchmark` control `dedupSeenRows` (default
+10,000/100,000/1,000,000), `dedupCandidateFunctions` (2,000),
+`dedupMasksPerFunction` (4), `repeats` and `dedupOutputName`. Reports include query
+plans, per-trial durations and exact result digests for old/new SQL. Setup and
+validation are outside query timings; alternating query order shares the page
+cache. These fixtures do not measure cold-disk or full production throughput.
+Query-plan regression tests check the actual frontier insertion as well as its
+selection, before/after `ANALYZE`, to prevent a future global-scan regression.
+No regeneration or checkpoint-format change is required for this optimization.
+
+`benchmarks/results/2026-11-17-dedup.json` records the query-scaling measurements
+and twelve complete reference/current builds. With 8,000 candidate rows and one
+million visited states, the frontier query median changed from about 109ms to
+14ms; the final count changed from about 4.2ms to 2.3ms. Complete 3/4 and 4/3
+builds had nearly unchanged overall duration and identical coverage/cost digests.
+The improvement targets repeated global scans when visited tables become much
+larger; full 4/5 production throughput has not been measured.
+
 ### CPU utilization during generation
 
 `database.generationWorkers` defaults to eight expansion slots, capped at available

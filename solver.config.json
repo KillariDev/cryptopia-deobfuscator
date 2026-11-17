@@ -160,6 +160,14 @@
       }
     ],
     "generationOutputName": "generation-benchmark.json",
-    "generationTimeoutSeconds": 600
+    "generationTimeoutSeconds": 600,
+    "dedupSeenRows": [
+      10000,
+      100000,
+      1000000
+    ],
+    "dedupCandidateFunctions": 2000,
+    "dedupMasksPerFunction": 4,
+    "dedupOutputName": "dedup-benchmark.json"
   }
 }
