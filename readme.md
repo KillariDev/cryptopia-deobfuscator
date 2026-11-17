@@ -310,3 +310,282 @@ time. Normal status distinguishes active workers from queued jobs, and queued
 jobs do not trigger stale-worker warnings. Smaller jobs may trade cross-boundary
 search opportunities for scheduling responsiveness; later rounds repartition and
 shuffle the circuit. Increasing job size can favor larger search neighborhoods.
+
+## Lookup reuse and search adaptation
+
+Rainbow windows are evaluated into packed bitsets once on their actual used
+wires. Keys are serialized directly to the existing packed table format. A wider
+table key extends the untouched inputs/outputs of that same function; fallback
+across widths or depths does not re-evaluate the gates. Keys for repeated table
+widths are cached for the lookup call. Sliding-window wire counts are updated as
+gates enter and leave each window, rejecting windows wider than the portfolio
+before allocating gate slices or mappings. No table regeneration is needed.
+
+Search settings:
+
+- `search.localSearch: true` tries convex subsets seeded near the boundaries of a recent rewrite before the ordinary traversal. The same dependency-convex subset constructor is used for both paths.
+- `localSearchSeeds: 32` and `localSearchRadius: 16` bound queued seed indices and their distance from the rewritten boundaries. Seeds are rebuilt after each edit, so stale circuit indices are not reused.
+- `localSearchBroadEvery: 5` makes every fifth traversal begin with ordinary broader search. Every traversal still falls through to the ordinary search after its bounded seed queue if no rewrite interrupts it; normal worker time budgets still apply.
+- `search.schedulerDecay: 0.98` discounts past scheduler observations after every recorded pass. Recent unproductive passes can outweigh earlier successes as the circuit changes. Set it to `1` for lifetime scoring; scheduled exploration remains enabled.
+
+Verified successes from small rewritten windows are learned as normalized
+structural templates. With `workers.shareTemplates: true`, each worker sends up
+to `sharedTemplateBatch: 16` queued rules on progress reports at most once per
+`sharedTemplateSeconds: 15`, plus one bounded batch at job completion. The timing
+is checked when a progress report occurs, so it is a target rather than an exact
+timer. `sharedTemplateEntries: 64` bounds each worker's pending export queue and
+the parent relay's retained bank. Newly created workers receive the retained
+rules in bounded batches; existing peers receive new successes. The ordinary
+local template cache is still bounded by `synthesis.templateEntries`.
+
+Senders, the relay, and receivers exhaustively check local equivalence before
+admitting a shared rule. Template windows remain limited by
+`synthesis.maximumWires` and `synthesis.maximumWindowGates`. Only improving rules
+are admitted, a better existing rule is retained, and imported rules are not
+echoed back. Subset failure keys include the local template revision, so newly
+learned/imported rules can retry previously unsuccessful subsets. Failed-search
+caches are not shared. Set `workers.shareTemplates`
+to `false` to keep learned rules local. Sharing and extra verification have costs;
+full-job gate reductions per second should be measured on the actual circuit
+before tuning these defaults. Full-scale throughput gains are not yet measured.
+
+## Eliminating repeated search work
+
+An unchanged subset shares its template scan and fingerprint encoding across
+slice sizes. Template revision changes invalidate the prepared template result;
+rewrites create a new preparation. Each valid slice size runs once, bounded by
+the subset length. Exact window keys slice a pre-encoded gate representation;
+rolling fingerprints remain prefilters only. The window-key memory estimate
+also charges the retained backing encoding, conservatively, once per preparation
+and cache budget cycle.
+
+A table fallback is omitted only when both tables have verified complete
+canonical generation metadata and an earlier table has enough wires for the
+window and at least the later table's gate depth. Verification checks completion,
+finished build depth, and the exact current catalogue signature in `BuildMeta`.
+Unknown, absent, mismatched or unreadable metadata disables this pruning, without
+changing table loading or its data format. A hit rejected for borrowing absent
+wires also disables that table's coverage proof for the window: its stored
+winner can hide an equally cheap permitted alternative. Tables must remain unchanged while a
+search uses them. This does not enable borrowing absent wires. For example, a
+verified 3-wire/6-gate table covers all permitted 3-wire replacements that a
+4-wire/5-gate table could return; 4-wire windows still consult the wider table.
+
+Rainbow matches in one pass are selected with weighted interval scheduling,
+maximizing total removed gates among the non-overlapping matches found. Ties
+prefer summed local used-wire savings, then read savings. These secondary scores
+are local costs, not a proof of globally minimal wire usage. Selection does not
+search new functions or compare every table after an improving match has already
+been found. Variable elimination retains its existing replacement selection.
+
+`database.statementCacheEntries` (default `16`) bounds prepared lookup statements
+per connection, keyed by batch size and evicted by least recent use. Lookups on
+each connection serialize statement bindings, reset statements after use, and
+discard failed statements. Closing a portfolio finalizes them before SQLite is
+closed. Internal callers opening lookup connections directly must use
+`closeRainbowTable` for the same cleanup.
+
+`search.circuitChunkGates` (default `128`) controls chunked gate and stable-ID
+storage. Edits copy affected chunks and coalesce small neighboring chunks;
+untouched chunks are retained. Stable IDs use chunk-local handles, avoiding a
+full gate-position map rebuild. Prefix offsets still update across chunks, and
+numeric dependency views still materialize for traversal. Wire-list updates can
+still touch many gates; this is not a claim that every graph operation is local.
+The production progress path retains chunk references and flattens them for
+requested snapshots or completed passes. Disabling incremental dependencies
+still uses the full reference graph path.
+
+These changes are covered by reference and randomized correctness tests.
+Full-job throughput and the best chunk/cache sizes remain workload-dependent
+and have not been benchmarked on the full circuit.
+
+## Resource-aware search and benchmarks
+
+Scheduler history is retained in each persistent worker. With
+`search.stableSearchArms: true` (now opt-in), a deterministic spread of subset/slice sizes and
+methods is reused across jobs, rather than replacing all choices with new random
+ones. `search.schedulerHistoryEntries: 128` bounds history even when stable arms
+are disabled. Decay is applied lazily to the updated score, avoiding a scan of
+all historical scores on every pass. Set `stableSearchArms` to `false` to retain
+random job-specific choices for comparisons.
+
+Cache updates no longer evict unrelated entries when a full cache already holds
+the updated key. `cache.lookupPolicy` is `"lru"` by default for lookup caches;
+`"fifo"` retains insertion-order eviction. Other caches keep FIFO behavior.
+
+### Shared small tables
+
+`database.sharedTables: true` admits completed tables with verified canonical
+metadata to a shared-memory lookup index before search workers start.
+`sharedTableBytes: 33554432` is the total backing-buffer budget across tables;
+`sharedTableMaximumRows: 100000` bounds each table and the admission scan. Tables
+that exceed either limit continue using SQLite. Snapshot creation has temporary
+JavaScript allocation overhead in addition to the retained buffer budget.
+
+One parent builds the indexes; workers read the same `SharedArrayBuffer` backing
+storage, without their own full copies or small-table database connections.
+Exact key comparison resolves hash collisions, empty replacements remain hits,
+and missing keys return misses. The implementation exposes only reader operations
+to workers; shared memory is not an operating-system-enforced read-only mapping.
+Do not modify table files during a job. Shared hits are decoded on demand and do
+not populate the per-worker lookup cache with duplicate table rows/misses.
+
+Enabling `search.independentComponents` (now opt-in) groups gates connected by used wires at each
+search pass. Disjoint groups commute, so each group can be optimized separately
+while preserving its internal gate order. Controls aliased with targets and
+unused control fields are handled through the same used-wire definition as the
+solver. A fully connected circuit remains one group. Component grouping can
+change output gate order while preserving all outputs. The normal inner-chunk
+limit applies within this partitioning; there can be more components than that
+limit, bounded by the circuit's used wires.
+
+### Adaptive worker concurrency
+
+With `workers.adaptiveConcurrency: true`, search starts with up to
+`initialConcurrency: 4` workers, still respecting CPU/configuration/environment
+caps and circuit-size limits. `concurrencySampleRounds: 2` aggregates completed
+rounds before throughput/database-driven changes. The controller probes adjacent
+worker counts, rejects unproductive increases, and can accept fewer workers when
+productivity stays within `concurrencyRateTolerance: 0.05`. Small-circuit caps are
+not treated as trials of a larger requested target, and zero reductions alone do
+not justify increasing concurrency.
+
+`concurrencyDatabaseFraction: 0.6` triggers conservative backoff when SQLite
+lookups are outstanding for a high fraction of observed worker time. This uses
+the union of outstanding lookup intervals per worker, including queue/native SQL
+time, rather than summing overlapping calls. It is a pressure heuristic, not a
+measurement of purely idle CPU time. Memory pressure compares process RSS with
+`memoryBudgetMegabytes: 8192`, also capped by 80% of physical/constrained memory
+when available. Memory-driven reductions retire idle workers to release their
+caches. Active jobs are not terminated to change concurrency.
+
+Changes apply between rounds, with a compact log only when the next target
+changes. Round workloads and circuit difficulty also change; this is heuristic
+control, not an isolated causal experiment. Set `adaptiveConcurrency` to `false`
+to retain the existing fixed-cap scheduling behavior. `OPTIMIZER_WORKERS` is a
+hard cap; disable adaptation if you want to avoid automatic reductions below it.
+
+### Reproducible benchmark harness
+
+```sh
+npm run benchmark -- data/latest.json data/obfuscated.json
+```
+
+The original file is optional; omitting it validates against the starting input.
+The harness uses existing completed canonical tables and never generates new
+ones. It does not update working/latest/progress circuits. It writes a JSON
+report to `files.dataDirectory` / `benchmark.outputName` (default
+`data/benchmark.json`) and refuses to overwrite its input or settings files.
+
+The `benchmark` section controls `seconds: 10`, `repeats: 3`,
+`workerCounts: [1, 2, 4]`, `seed: 1729`, `maximumChecks: 0`, and
+`maximumOverrunSeconds: 30`. Each trial gets a fresh process and worker caches,
+the same starting circuit, and the same seed for each paired repetition. Order
+alternates across repetitions. The optional positive `maximumChecks` is an
+additional **per-job** work cap; zero disables it. Requested worker counts are
+fixed during a trial to compare concurrency independently of the controller.
+
+The `reference` variant disables shared indexes, component partitioning and
+stable choices, uses lifetime scheduler scores and FIFO lookup eviction. It still
+contains correctness fixes and bounded scheduler history. `tuned` uses the
+configured features. Both disable adaptive concurrency for fixed-count trials;
+actual control overrides are recorded per result. This is a feature comparison,
+not execution of an older git revision or an ablation of each individual feature.
+
+Reports include input/original hashes, settings, git revision, Node/platform/CPU
+metadata, seeds, startup time, actual wall time, requested budget, gate counts,
+reductions per second, peak sampled RSS, lookup/worker time and validation method.
+Shared-table admission is included in startup time; wall time includes worker
+startup, search and pool cleanup, and reduction rate uses that wall time. Small
+jobs may complete before the requested budget. Stops are cooperative, so actual
+time can exceed the budget; the overrun watchdog terminates stuck trial processes.
+Validation is exhaustive through eight wires and probabilistic above that limit.
+Seeds repeat random streams, not operating-system scheduling; multithreaded
+results and timings can vary. Full-circuit production gains remain unmeasured.
+
+## Feature ablations and benchmark cases
+
+```sh
+npm run benchmark:ablate -- data/latest.json data/obfuscated.json
+npm run benchmark:cases
+npm run test:benchmark
+```
+
+`benchmark:ablate` (or `benchmark.mode: "ablation"`) runs seven configurations:
+`reference`, `shared-tables`, `components`, `stable-arms`, `decay`, `lru`, and
+`tuned`. Each single-feature configuration differs from the common reference in
+exactly one control. Shared tables, components, stable choices and LRU are forced
+on in their own variants; the decay variant uses `benchmark.decayFactor` (default `0.98`), independently
+of the production scheduler setting.
+The combined `tuned` configuration uses production settings. Fixed worker counts
+are still used in every trial, so this does not test the adaptive concurrency
+controller or individually ablate previous correctness fixes.
+
+Variant order is reversed/rotated across repetitions and worker counts. Summary
+rows report medians, ranges, and per-seed rate ratios paired with the reference
+at the same worker count. Missing or zero-progress references have no meaningful
+ratio and are excluded from the ratio summary. One-feature results describe
+changes around that reference; interactions can make their combined effect
+different. Short time budgets and parallel scheduling introduce variance.
+
+`benchmarks/cases.json` registers four versioned circuits: adjacent cancellations,
+interleaved independent components, connected mixed reversible gates, and
+non-bijective target/control aliasing. Each has a frozen complete truth table and
+a deterministic rewrite-coverage bound. The fixture suite builds only its small
+2-wire/2-gate and 3-wire/2-gate databases under
+`files.dataDirectory` / `benchmark.caseOutputDirectory`, then writes individual
+reports and `suite.json` there. It never generates the production table portfolio
+or changes working/latest checkpoints. Manifest settings control the case budgets;
+these default to two seconds, three repetitions, and 1/2/4 workers.
+
+`benchmark.caseManifest` selects the registry. Fixture paths are relative to that
+manifest. `benchmark:cases` verifies frozen truth tables and requires all trial
+results to pass exhaustive validation without increasing gate counts.
+`test:benchmark` runs the same seven variants on every case using a short smoke
+profile (one worker, one seed, 0.2 seconds, at most 32 checks per job). Smoke timings
+are diagnostic, not performance thresholds.
+
+`npm test` also runs deterministic fixed-work regression checks against all
+registered cases and configurations. These require the frozen function and known
+simple reductions to remain intact. They assert no machine-dependent speed ratio.
+Use the full timed case suite and a representative real-circuit ablation report
+when reviewing a performance feature, and retain the JSON reports with their git
+revision, settings and seeds for comparisons. Full workload reports need existing
+completed tables and are not bundled with the small fixture suite.
+
+Set `benchmark.variants` to an explicit list to run a focused comparison instead
+of the default comparison/ablation matrix. For example:
+
+```json
+"variants": ["reference", "tuned-no-stable", "tuned-conservative"]
+```
+
+`tuned-no-stable` uses configured tuning with stable arms disabled;
+`tuned-conservative` also disables component partitioning. Leave the list empty
+to use the selected mode's standard variants. Case suites explicitly reset this
+list so every registered feature is exercised. Adding a feature variant also
+requires a test that proves it changes only its intended reference control.
+
+### Recorded investigation and defaults
+
+The versioned summaries in `benchmarks/results/2026-11-17-ablation.json` and
+`2026-11-17-confirmation.json` record 63 one-feature trials and 27 focused
+confirmation trials on the 237,224-gate / 64-wire original circuit. They used
+3-wire/3-gate, 4-wire/2-gate and 5-wire/2-gate tables because the production 4/5
+library was unavailable. Every trial requested ten seconds, with three seeds at
+1/2/4 workers. These are descriptive, short-budget results, not significance tests
+or a guarantee for later solver phases.
+
+Stable arms and component partitioning showed short-budget regressions. Disabling
+stable arms alone did not resolve the combined slowdown; the confirmation with
+both disabled was more robust at two workers. Both features now default to
+`false`, while remaining available in the ablation variants and fixture suite.
+Shared tables, LRU and decaying scores remain configurable and enabled; the new
+combined default corresponds to the tested `tuned-conservative` settings. Benefits
+were not uniform across seeds or worker counts, and absolute and paired medians
+can disagree because search progress is bursty. Inspect the per-seed ratios and
+absolute rates rather than interpreting one aggregate as a universal speedup.
+
+These runs mostly exercise initial jobs and do not establish the long-running
+benefit of persistent scheduler learning. The small deterministic cases prove
+function preservation and simple rewrite coverage, not production throughput.

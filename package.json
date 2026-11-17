@@ -5,8 +5,12 @@
 	"type": "module",
 	"main": "index.js",
 	"scripts": {
+		"test:benchmark": "npx tsc && node dist/benchmark-cases.js --smoke",
 		"test": "npx tsc && node --max-old-space-size=16384 dist/test.js",
 		"optimize": "npx tsc && node dist/launch.js",
+		"benchmark:ablate": "npx tsc && node dist/benchmark.js --ablate",
+		"benchmark:cases": "npx tsc && node dist/benchmark-cases.js",
+		"benchmark": "npx tsc && node dist/benchmark.js",
 		"optimize-prof": "npx tsc && node dist/launch.js --profile"
 	},
 	"keywords": [],

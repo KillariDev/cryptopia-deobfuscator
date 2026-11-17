@@ -1,3 +1,5 @@
+import type { SharedTable } from './shared-table.js'
+import { TemplateLibrary, TemplateRule } from './templates.js'
 import { config } from './config.js'
 import { Worker } from 'worker_threads'
 import { availableParallelism } from 'os'
@@ -13,11 +15,12 @@ export function configuredWorkerCount() {
 
 type Job = { budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
 export class WorkerPool {
-	private slots: { worker: Worker, job?: Job }[] = []
+	private slots: { worker: Worker, job?: Job, retiring?: boolean }[] = []
 	private queue: Job[] = []
 	private failure?: Error
 	private concurrency: number
-	constructor(private size: number, private workerUrl = new URL('./worker.js', import.meta.url)) {
+	private shared = new TemplateLibrary(config.workers.sharedTemplateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates)
+	constructor(private size: number, private workerUrl = new URL('./worker.js', import.meta.url), private sharedTables: SharedTable[] = [], private seed?: number, private maximumChecks = 0) {
 		if (!Number.isSafeInteger(size) || size < 1) throw new Error('Invalid worker pool size')
 		this.concurrency = size
 	}
@@ -25,6 +28,15 @@ export class WorkerPool {
 		if (!Number.isSafeInteger(limit) || limit < 1 || limit > this.size) throw new Error('Invalid worker concurrency')
 		this.concurrency = limit
 		this.dispatch()
+	}
+	async trimIdle() {
+		const retired: Worker[] = []
+		for (let i = this.slots.length - 1; i >= 0 && this.slots.length > this.concurrency; i--) {
+			const slot = this.slots[i]
+			if (slot.job) continue
+			slot.retiring = true; this.slots.splice(i, 1); retired.push(slot.worker)
+		}
+		await Promise.all(retired.map(worker => worker.terminate()))
 	}
 	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000): Promise<Gate[]> {
 		if (this.failure) return Promise.reject(this.failure)
@@ -45,21 +57,31 @@ export class WorkerPool {
 			let slot = this.slots.find(slot => !slot.job)
 			if (!slot) {
 				if (this.slots.length >= this.size) return
-				const worker = new Worker(this.workerUrl, { workerData: { solverConfig: config } })
+				const worker = new Worker(this.workerUrl, { workerData: { solverConfig: config, sharedTables: this.sharedTables, solverSeed: this.seed === undefined ? undefined : this.seed + this.slots.length, maximumChecks: this.maximumChecks } })
 				slot = { worker }
 				const current = slot
 				this.slots.push(current)
-				worker.on('message', (message: { gates?: Gate[], error?: string, progress?: number, activity?: WorkerActivity, snapshot?: Gate[] }) => {
+				worker.on('message', (message: { gates?: Gate[], error?: string, progress?: number, activity?: WorkerActivity, snapshot?: Gate[], sharedTemplates?: TemplateRule[] }) => {
+					if (config.workers.shareTemplates && message.sharedTemplates?.length) {
+						this.shared.importShared(message.sharedTemplates, config.workers.sharedTemplateBatch, true)
+						const rules = this.shared.drainShared(config.workers.sharedTemplateBatch)
+						if (rules.length) for (const peer of this.slots) if (peer !== current) peer.worker.postMessage({ sharedTemplates: rules })
+					}
 					const job = current.job
 					if (message.progress !== undefined) { job?.onProgress?.(message.progress, message.activity, message.snapshot); return }
+					if (message.gates === undefined && message.error === undefined) return
 					current.job = undefined
 					if (message.error) { this.fail(new Error(message.error)); job?.reject(this.failure!); return }
 					job?.resolve(message.gates!)
 					this.dispatch()
 				})
+				if (config.workers.shareTemplates) {
+					const rules = this.shared.exportShared(config.workers.sharedTemplateEntries)
+					for (let i = 0; i < rules.length; i += config.workers.sharedTemplateBatch) worker.postMessage({ sharedTemplates: rules.slice(i, i + config.workers.sharedTemplateBatch) })
+				}
 				worker.on('error', error => this.fail(error))
 				worker.on('exit', code => {
-					if (!this.failure) this.fail(new Error(`Worker exited unexpectedly (${code})`))
+					if (!this.failure && !current.retiring) this.fail(new Error(`Worker exited unexpectedly (${code})`))
 				})
 			}
 			slot.job = this.queue.shift()!

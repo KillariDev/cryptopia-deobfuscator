@@ -1,0 +1,217 @@
+{
+  "date": "2026-11-17",
+  "solverRevision": "e5c78f7371a08e4d293185906c92b98ef0e1cc97",
+  "workingTreeDirty": true,
+  "inputHash": "70dc28eede0c20c49f9b70d526e03a902368cad923e7db00f5e7e2ec8a4b9322",
+  "initialGates": 237224,
+  "wireCount": 64,
+  "tables": [
+    {
+      "wires": 3,
+      "gates": 3
+    },
+    {
+      "wires": 4,
+      "gates": 2
+    },
+    {
+      "wires": 5,
+      "gates": 2
+    }
+  ],
+  "budgetSeconds": 10,
+  "seeds": [
+    1729,
+    1730,
+    1731
+  ],
+  "node": "v24.22.3",
+  "platform": "linux",
+  "availableCpus": 24,
+  "controlsByVariant": {
+    "reference": {
+      "adaptiveConcurrency": false,
+      "sharedTables": false,
+      "independentComponents": false,
+      "stableSearchArms": false,
+      "schedulerDecay": 1,
+      "lookupPolicy": "fifo"
+    },
+    "tuned-no-stable": {
+      "adaptiveConcurrency": false,
+      "sharedTables": true,
+      "independentComponents": true,
+      "stableSearchArms": false,
+      "schedulerDecay": 0.98,
+      "lookupPolicy": "lru"
+    },
+    "tuned-conservative": {
+      "adaptiveConcurrency": false,
+      "sharedTables": true,
+      "independentComponents": false,
+      "stableSearchArms": false,
+      "schedulerDecay": 0.98,
+      "lookupPolicy": "lru"
+    }
+  },
+  "summary": [
+    {
+      "workers": 1,
+      "variant": "reference",
+      "repetitions": 3,
+      "medianGatesPerSecond": 799.0833858331926,
+      "minGatesPerSecond": 70.26732807473402,
+      "maxGatesPerSecond": 851.7696913716045,
+      "medianRemoved": 8088,
+      "medianRssMiB": 672.015625,
+      "medianWallMs": 10138.890932,
+      "pairedReferenceRatios": [
+        1,
+        1,
+        1
+      ],
+      "medianPairedReferenceRatio": 1
+    },
+    {
+      "workers": 1,
+      "variant": "tuned-conservative",
+      "repetitions": 3,
+      "medianGatesPerSecond": 609.6780392158138,
+      "minGatesPerSecond": 72.82727106976348,
+      "maxGatesPerSecond": 850.0213750998356,
+      "medianRemoved": 6242,
+      "medianRssMiB": 827.2109375,
+      "medianWallMs": 10188.491057,
+      "pairedReferenceRatios": [
+        0.9979474307556617,
+        0.7629717373989843,
+        1.0364314833816761
+      ],
+      "medianPairedReferenceRatio": 0.9979474307556617
+    },
+    {
+      "workers": 1,
+      "variant": "tuned-no-stable",
+      "repetitions": 3,
+      "medianGatesPerSecond": 609.7939472228236,
+      "minGatesPerSecond": 72.33705726180499,
+      "maxGatesPerSecond": 835.5525666464727,
+      "medianRemoved": 6237,
+      "medianRssMiB": 840.6875,
+      "medianWallMs": 10160.767217,
+      "pairedReferenceRatios": [
+        0.9809606694281204,
+        0.7631167886027318,
+        1.0294550717065785
+      ],
+      "medianPairedReferenceRatio": 0.9809606694281204
+    },
+    {
+      "workers": 2,
+      "variant": "reference",
+      "repetitions": 3,
+      "medianGatesPerSecond": 2092.127658848174,
+      "minGatesPerSecond": 1113.5888247231874,
+      "maxGatesPerSecond": 3485.3157679966357,
+      "medianRemoved": 21093,
+      "medianRssMiB": 886.796875,
+      "medianWallMs": 10082.080752,
+      "pairedReferenceRatios": [
+        1,
+        1,
+        1
+      ],
+      "medianPairedReferenceRatio": 1
+    },
+    {
+      "workers": 2,
+      "variant": "tuned-conservative",
+      "repetitions": 3,
+      "medianGatesPerSecond": 2175.9924189327,
+      "minGatesPerSecond": 1308.0702842233782,
+      "maxGatesPerSecond": 4001.992791370888,
+      "medianRemoved": 21980,
+      "medianRssMiB": 1086.765625,
+      "medianWallMs": 10095.787787,
+      "pairedReferenceRatios": [
+        1.1482439634648194,
+        1.174643867810486,
+        1.0400858713041907
+      ],
+      "medianPairedReferenceRatio": 1.1482439634648194
+    },
+    {
+      "workers": 2,
+      "variant": "tuned-no-stable",
+      "repetitions": 3,
+      "medianGatesPerSecond": 1210.7988612274953,
+      "minGatesPerSecond": 620.9124139661312,
+      "maxGatesPerSecond": 1970.0899922994583,
+      "medianRemoved": 12216,
+      "medianRssMiB": 1078.32421875,
+      "medianWallMs": 10089.206714,
+      "pairedReferenceRatios": [
+        0.5652543767739784,
+        1.0872943714467251,
+        0.29678514661384287
+      ],
+      "medianPairedReferenceRatio": 0.5652543767739784
+    },
+    {
+      "workers": 4,
+      "variant": "reference",
+      "repetitions": 3,
+      "medianGatesPerSecond": 3753.551453697117,
+      "minGatesPerSecond": 3123.470820498555,
+      "maxGatesPerSecond": 4475.523242071575,
+      "medianRemoved": 37700,
+      "medianRssMiB": 1389.5234375,
+      "medianWallMs": 10056.254334,
+      "pairedReferenceRatios": [
+        1,
+        1,
+        1
+      ],
+      "medianPairedReferenceRatio": 1
+    },
+    {
+      "workers": 4,
+      "variant": "tuned-conservative",
+      "repetitions": 3,
+      "medianGatesPerSecond": 3885.296558821248,
+      "minGatesPerSecond": 3026.285841913255,
+      "maxGatesPerSecond": 4514.543267456793,
+      "medianRemoved": 39071,
+      "medianRssMiB": 1531.08984375,
+      "medianWallMs": 10071.090965,
+      "pairedReferenceRatios": [
+        1.008718539324836,
+        0.9688855814027462,
+        1.035098787574729
+      ],
+      "medianPairedReferenceRatio": 1.008718539324836
+    },
+    {
+      "workers": 4,
+      "variant": "tuned-no-stable",
+      "repetitions": 3,
+      "medianGatesPerSecond": 3458.1341369314864,
+      "minGatesPerSecond": 2319.163973972442,
+      "maxGatesPerSecond": 4032.6675084810954,
+      "medianRemoved": 34846,
+      "medianRssMiB": 1585.15234375,
+      "medianWallMs": 10076.532205,
+      "pairedReferenceRatios": [
+        0.9010493947551268,
+        0.7424958026668125,
+        0.9212965852713556
+      ],
+      "medianPairedReferenceRatio": 0.9010493947551268
+    }
+  ],
+  "limitations": [
+    "Smaller table portfolio, not production 4-variable/5-gate table.",
+    "Three seeds per worker count; descriptive short-budget results, not significance tests.",
+    "Mostly first-job behavior; does not establish long-running scheduler benefits."
+  ]
+}

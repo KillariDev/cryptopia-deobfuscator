@@ -42,7 +42,7 @@ const { calculateAllOutputsArray, evalCircuit, generateCombinations, getVars } =
 const { createDependencyGraph } = await import('./lineswapper.js')
 const { shuffleRowsWithDependentGateSwap, optimize, createOptimizerCaches } = await import('./processing.js')
 const { LimitedMap } = await import('./limitedMap.js')
-const { getReplacersByIds, isEmpty } = await import('./rainbowtable.js')
+const { getReplacersByIds, isEmpty, closeRainbowTable } = await import('./rainbowtable.js')
 const { RainbowPortfolio } = await import('./rainbow-portfolio.js')
 const { default: sqlite3 } = await import('sqlite3')
 const { WorkerPool, configuredWorkerCount } = await import('./threads.js')
@@ -101,7 +101,7 @@ for (let round = 0; round < 2; round++) {
 	assert.deepEqual(calculateAllOutputsArray(result!, generateCombinations(4)), calculateAllOutputsArray(singleGate, generateCombinations(4)))
 }
 assert.deepEqual(await optimize(testPortfolio, [], 4, 'test', true, optimizerCaches, 1), [])
-await new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
+await closeRainbowTable(db)
 // A cached miss and hit must work even after the database is closed.
 assert.deepEqual(await getReplacersByIds(db, cache, ['00', 'ff']), [{ ioIdentifier: 'ff', gates: [] }])
 const oldWorkerSetting = process.env.OPTIMIZER_WORKERS
@@ -467,7 +467,7 @@ try {
 	await optimizeSubset(integrationPortfolio, unchanged, lookups, processed, 3, 2, 'heavy', () => false, second, () => {}, tested, 'rainbow')
 	assert.ok(first.checks > 0)
 	assert.equal(second.checks, 0)
-} finally { await new Promise<void>((resolve, reject) => integrationDb.close(error => error ? reject(error) : resolve())) }
+} finally { await closeRainbowTable(integrationDb) }
 console.log('Solver integration regressions passed')
 
 const { formatStatus } = await import('./logging.js')
@@ -556,7 +556,7 @@ const openBuild = async (filename: string) => {
 	await runSQL(db, 'CREATE TABLE IF NOT EXISTS InputOutputReplacers (ioIdentifier BLOB PRIMARY KEY, replacerGates BLOB NOT NULL)')
 	return db
 }
-const closeBuild = (db: Database) => new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
+const closeBuild = closeRainbowTable
 const checkBuild = async (db: Database) => {
 	const rows = await allSQL<{ ioIdentifier: Buffer, replacerGates: Buffer }>(db, 'SELECT * FROM InputOutputReplacers')
 	assert.equal(rows.length, expectedEntries.size)
@@ -766,9 +766,9 @@ const coalescedDb = new sqlite3.Database(':memory:')
 try {
 	await runSQL(coalescedDb, 'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
 	await runSQL(coalescedDb, 'INSERT INTO InputOutputReplacers VALUES(?,?)', [Buffer.from('ff','hex'), Buffer.alloc(0)])
-	const nativeAll = coalescedDb.all.bind(coalescedDb)
+	const nativePrepare = coalescedDb.prepare.bind(coalescedDb)
 	let sqlCalls = 0
-	coalescedDb.all = ((...args: unknown[]) => { sqlCalls++; return (nativeAll as Function)(...args) }) as typeof coalescedDb.all
+	coalescedDb.prepare = ((...args: unknown[]) => { sqlCalls++; return (nativePrepare as Function)(...args) }) as typeof coalescedDb.prepare
 	const values = await Promise.all([
 		getReplacersByIds(coalescedDb, new LimitedMap(10), ['ff']),
 		getReplacersByIds(coalescedDb, new LimitedMap(10), ['ff','00']),
@@ -888,3 +888,7 @@ console.log('Rainbow portfolio routing, fallback, cache isolation, contribution 
 }
 console.log('Multi-table generation, reuse and connection lifecycle regressions passed')
 await import('./generation-test.js')
+await import('./search-reuse-test.js')
+await import('./work-elimination-test.js')
+await import('./resource-search-test.js')
+await import('./benchmark-regression-test.js')

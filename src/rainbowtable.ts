@@ -1,3 +1,4 @@
+import { LookupStatements } from './lookup-statements.js'
 import { LookupBatcher } from './lookup-batcher.js'
 import { join } from 'path'
 import { availableParallelism } from 'os'
@@ -7,7 +8,7 @@ import { config } from './config.js'
 import { Gate, InputOutputReplacer } from './types.js'
 import { encodeGates, decodeGates } from './semantic.js'
 import { LimitedMap } from './limitedMap.js'
-import { isReplacementSimpler, logTimed } from './utils.js'
+import { isReplacementSimpler, logTimed, hashGates } from './utils.js'
 import { runSQL, allSQL, insertRows } from './sql.js'
 import { generateOnDisk } from './disk-generation.js'
 import { GenerationEstimator, formatGenerationProgress, generationDuration, GenerationProfile, SemanticProgress } from './generation-progress.js'
@@ -57,11 +58,34 @@ export const storeReplacers = async (db: sqlite3.Database, replacers: Map<string
 
 
 const lookupBatchers = new WeakMap<sqlite3.Database, LookupBatcher>()
-export const getReplacersByIds = async (db: sqlite3.Database, cache: LimitedMap<string, Gate[] | null>, identifiers: string[], namespace = '') => {
+const lookupStatements = new WeakMap<sqlite3.Database, LookupStatements>()
+const closingLookups = new WeakSet<sqlite3.Database>()
+const activeLookups = new WeakMap<sqlite3.Database, Set<Promise<unknown>>>()
+export async function closeRainbowTable(db: sqlite3.Database) {
+	closingLookups.add(db)
+	await Promise.allSettled([...(activeLookups.get(db) ?? [])])
+	await lookupStatements.get(db)?.close()
+	await new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
+}
+
+/** Only complete builds with this exact canonical catalogue establish coverage. */
+export async function hasCanonicalCoverage(db: sqlite3.Database, wires: number, gates: number) {
+	try {
+		const names = await allSQL<{ name: string }>(db, "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('GenerationStatus','BuildMeta')")
+		if (names.length !== 2) return false
+		const status = await allSQL<{ complete: number }>(db, 'SELECT complete FROM GenerationStatus WHERE id=1')
+		const meta = await allSQL<{ signature: string, depth: number }>(db, 'SELECT signature,depth FROM BuildMeta WHERE id=1')
+		return status[0]?.complete === 1 && meta[0]?.depth > gates && meta[0]?.signature === `labeled-sorted-v1:${wires}:${gates}:${hashGates([...generateAllGates(wires)])}`
+	} catch { return false }
+}
+
+const lookupReplacers = async (db: sqlite3.Database, cache: LimitedMap<string, Gate[] | null>, identifiers: string[], namespace: string) => {
 	let batcher = lookupBatchers.get(db)
 	if (!batcher) {
 		batcher = new LookupBatcher(config.database.queryBatchSize, config.database.lookupBatchMilliseconds, async ids => {
-			const rows = await allSQL<{ ioIdentifier: Buffer, replacerGates: Buffer }>(db, 'SELECT ioIdentifier,replacerGates FROM InputOutputReplacers WHERE ioIdentifier IN (' + ids.map(() => '?').join(',') + ')', ids.map(keyToSql))
+			let statements = lookupStatements.get(db)
+			if (!statements) { statements = new LookupStatements(db, config.database.statementCacheEntries); lookupStatements.set(db, statements) }
+			const rows = await statements.query<{ ioIdentifier: Buffer, replacerGates: Buffer }>(ids.map(keyToSql))
 			return new Map(rows.map(row => [rowKey(row.ioIdentifier), decodeGates(row.replacerGates)]))
 		})
 		lookupBatchers.set(db, batcher)
@@ -73,6 +97,17 @@ export const getReplacersByIds = async (db: sqlite3.Database, cache: LimitedMap<
 		return gates === null ? undefined : { ioIdentifier: id, gates }
 	}))
 	return resolved.filter((entry): entry is { ioIdentifier: string, gates: Gate[] } => entry !== undefined)
+}
+
+export const getReplacersByIds = (db: sqlite3.Database, cache: LimitedMap<string, Gate[] | null>, identifiers: string[], namespace = '') => {
+	if (closingLookups.has(db) && identifiers.some(id => cache.get(namespace + id) === undefined)) return Promise.reject(new Error('Rainbow lookup connection is closing'))
+	const pending = lookupReplacers(db, cache, identifiers, namespace)
+	let active = activeLookups.get(db)
+	if (!active) { active = new Set(); activeLookups.set(db, active) }
+	active.add(pending)
+	const current = active
+	pending.then(() => current.delete(pending), () => current.delete(pending))
+	return pending
 }
 
 export const getReplacerById = async (db: sqlite3.Database, cache: LimitedMap<string, Gate[] | null>, id: string) => (await getReplacersByIds(db, cache, [id]))[0]?.gates ?? null

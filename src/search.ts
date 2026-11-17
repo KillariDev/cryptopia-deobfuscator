@@ -37,11 +37,16 @@ export const improving = (old: Gate[]) => {
 }
 
 export type SearchArm = { subset: number, slice: number, method?: 'all' | 'variables' | 'rainbow' }
-type Score = { count: number, milliseconds: number, removed: number }
+type Score = { count: number, milliseconds: number, removed: number, epoch: number }
 export class SearchScheduler {
 	private scores = new Map<string, Score>()
 	private choices = 0
-	constructor(private explorationEvery: number) {}
+	private epoch = 0
+	get historySize() { return this.scores.size }
+	constructor(private explorationEvery: number, private decay = 0.98, private maximumHistory = 128) {
+		if (!Number.isSafeInteger(maximumHistory) || maximumHistory < 1) throw new Error('Invalid scheduler history limit')
+		if (!(decay > 0 && decay <= 1)) throw new Error('Invalid scheduler decay')
+	}
 	choose(options: SearchArm[], random = Math.random) {
 		this.choices++
 		const key = (x: SearchArm) => `${x.subset}:${x.slice}:${x.method ?? 'all'}`
@@ -53,17 +58,76 @@ export class SearchScheduler {
 			return pool[Math.floor(random() * pool.length)]
 		}
 		return options.reduce((best, x) => {
-			const rate = (o: typeof x) => { const score = this.scores.get(key(o)); return score ? score.removed / Math.max(1, score.milliseconds) : -1 }
+			const rate = (o: typeof x) => { const score = this.scores.get(key(o)); return score ? score.removed / Math.max(1e-9, score.milliseconds) : -1 }
 			return rate(x) > rate(best) ? x : best
 		})
 	}
 	record(option: SearchArm, elapsed: number, removed: number) {
+		const epoch = ++this.epoch
 		const key = `${option.subset}:${option.slice}:${option.method ?? 'all'}`
-		const score = this.scores.get(key) ?? { count: 0, milliseconds: 0, removed: 0 }
+		const score = this.scores.get(key) ?? { count: 0, milliseconds: 0, removed: 0, epoch }
+		const factor = this.decay ** (epoch - score.epoch)
+		score.count *= factor; score.milliseconds *= factor; score.removed *= factor; score.epoch = epoch
+		this.scores.delete(key)
+		if (this.scores.size >= this.maximumHistory) this.scores.delete(this.scores.keys().next().value!)
 		score.count++
-		score.milliseconds += Math.max(0, elapsed)
+		score.milliseconds += Math.max(1e-9, elapsed)
 		score.removed += Math.max(0, removed)
 		this.scores.set(key, score)
+	}
+}
+
+/** Stable, bounded choices keep persistent worker observations relevant across jobs. */
+export function createSearchArms(count: number, subsetMinimum: number, subsetMaximum: number, sliceMinimum: number, sliceMaximum: number): SearchArm[] {
+	return Array.from({ length: count }, (_, index) => {
+		const step = Math.floor(index / 3), steps = Math.max(1, Math.ceil(count / 3) - 1)
+		const subset = Math.round(subsetMinimum * (subsetMaximum / subsetMinimum) ** (step / steps))
+		const maximum = Math.min(sliceMaximum, subset)
+		const slice = Math.max(sliceMinimum, Math.round(sliceMinimum * (Math.max(sliceMinimum, maximum) / sliceMinimum) ** ((step % 3 + 1) / 3)))
+		return { method: (['all', 'variables', 'rainbow'] as const)[index % 3], subset, slice }
+	})
+}
+
+/** Gates in different components use disjoint wires and commute with one another. */
+export function independentComponents(gates: Gate[]): Gate[][] {
+	const parents = new Map<number, number>()
+	const root = (wire: number): number => {
+		if (!parents.has(wire)) parents.set(wire, wire)
+		let current = wire
+		while (parents.get(current)! !== current) current = parents.get(current)!
+		while (wire !== current) { const next = parents.get(wire)!; parents.set(wire, current); wire = next }
+		return current
+	}
+	for (const gate of gates) for (const wire of getVars(gate)) {
+		const a = root(gate.target), b = root(wire)
+		if (a !== b) parents.set(b, a)
+	}
+	const components = new Map<number, Gate[]>()
+	for (const gate of gates) {
+		const key = root(gate.target), component = components.get(key) ?? []
+		component.push(gate); components.set(key, component)
+	}
+	return [...components.values()]
+}
+
+/** Index seeds are rebuilt after each edit; broad traversal periodically goes first. */
+export class NeighborhoodQueue {
+	private seeds: number[] = []
+	private rounds = 0
+	constructor(private maximum: number, private radius: number, private broadEvery: number) {}
+	afterRewrite(start: number, length: number, total: number) {
+		this.seeds = []
+		const anchors = [Math.min(start, Math.max(0, total - 1)), Math.min(start + Math.max(0, length - 1), Math.max(0, total - 1))]
+		const seen = new Set<number>()
+		for (let distance = 0; distance <= this.radius && this.seeds.length < this.maximum; distance++) {
+			for (const index of anchors.flatMap(anchor => distance ? [anchor - distance, anchor + distance] : [anchor])) {
+				if (index >= 0 && index < total && !seen.has(index) && this.seeds.length < this.maximum) { this.seeds.push(index); seen.add(index) }
+			}
+		}
+	}
+	take() {
+		const seeds = this.seeds; this.seeds = []
+		return ++this.rounds % this.broadEvery === 0 ? [] : seeds
 	}
 }
 

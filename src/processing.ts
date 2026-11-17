@@ -1,9 +1,15 @@
-import { patchCircuit, LazyCircuit } from './circuit-edit.js'
+import { selectIntervals } from './intervals.js'
+import { AdaptiveConcurrency, memoryPressure } from './concurrency.js'
+import { lookupDatabaseTime } from './lookup-statements.js'
+import { loadSharedTables } from './shared-table.js'
+import { ChunkedSequence } from './chunked-sequence.js'
+import { SlidingWindowWires } from './window-wires.js'
+import { LazyCircuit } from './circuit-edit.js'
 import { IncrementalGraph } from './incremental-graph.js'
 import { WindowFingerprints } from './fingerprints.js'
 import { templates, advancedRewrite } from './strategies.js'
 import { IncrementalEvaluator } from './packed.js'
-import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm } from './search.js'
+import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, createSearchArms, independentComponents } from './search.js'
 import { config } from './config.js'
 import { formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
 import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
@@ -244,28 +250,50 @@ const findUselessVars = (mapping: number[], gates: Gate[]) => {
 }
 
 
+/** Reused only while the subset and its template revision remain unchanged. */
+export class SubsetPreparation {
+	private revision = -1
+	private templated?: Gate[]
+	private fingerprints = new WeakMap<Gate[], WindowFingerprints>()
+	constructor(readonly gates: Gate[]) {}
+	templateGates() {
+		const revision = config.synthesis.templates ? templates.version : -2
+		if (!this.templated || revision !== this.revision) {
+			this.templated = config.synthesis.templates ? templates.rewrite(this.gates) : this.gates
+			this.revision = revision
+		}
+		return this.templated
+	}
+	fingerprint(gates: Gate[]) {
+		let value = this.fingerprints.get(gates)
+		if (!value) { value = new WindowFingerprints(gates); this.fingerprints.set(gates, value) }
+		return value
+	}
+}
+
 type PreparedWindow = { variableIndexMapping: number[], mappedGates: Gate[] }
 
-const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, rainbowTableWires: number, prepared: Map<number, PreparedWindow>): { gates: Gate[], changed: boolean } => {
+const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, rainbowTableWires: number, prepared: Map<number, PreparedWindow>, preparation: SubsetPreparation): { gates: Gate[], changed: boolean } => {
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
-	const fingerprints = new WindowFingerprints(gates)
+	const fingerprints = preparation.fingerprint(gates)
+	let nextStart = 0
 	let uselessVarsFound = 0
 	let uselessVarsFoundProb = 0
 	if (sliceSize <= 2 || !findUselessVarsSetting) return { gates, changed: false }
-	for (let a = 0; a <= gates.length - sliceSize; a++) {
-		const start = a
-		const end = a + sliceSize
+	for (const window = new SlidingWindowWires(gates, sliceSize); window.next();) {
+		const { start, end } = window
+		if (start < nextStart) continue
 		if (fingerprints.seen(processedGatesCache, start, end)) continue
 		const sliceGates = gates.slice(start, end)
 
-		const variableIndexMapping = mapVariablesToIndexes(sliceGates) // map variables to smaller amount of wires
+		const variableIndexMapping = window.mapping() // counts are maintained across adjacent windows
 		const mappedGates = mapCircuit(sliceGates, variableIndexMapping)
 		prepared.set(start, { variableIndexMapping, mappedGates })
 		const replacement = findUselessVars(variableIndexMapping, mappedGates)
 		if (replacement !== undefined) {
 			replacements.push({ start, end: end - 1, replacement: gateSimplifier(replacement) })
 			uselessVarsFound++
-			a += sliceSize - 1 // increment by slice amount that we don't optimize the same part again
+			nextStart = end
 			continue
 		}
 		if (useProbabilistically) {
@@ -273,7 +301,7 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 			if (replacement !== undefined) {
 				replacements.push({ start, end: end - 1, replacement: gateSimplifier(replacement) })
 				uselessVarsFoundProb++
-				a += sliceSize - 1 // increment by slice amount that we don't optimize the same part again
+				nextStart = end
 				continue
 			}
 		}
@@ -287,53 +315,58 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 	return { gates: newCircuit, changed: true }
 }
 
-export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, lookup = true): Promise<{ gates: Gate[], changed: boolean }> => {
+export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, lookup = true, preparation = new SubsetPreparation(originalGates)): Promise<{ gates: Gate[], changed: boolean }> => {
+	const finish = (result: { gates: Gate[], changed: boolean }) => {
+		if (result.changed && config.synthesis.templates) templates.learn(originalGates, result.gates)
+		return result
+	}
 	const prepared = new Map<number, PreparedWindow>()
-	const templateResult = config.synthesis.templates ? templates.rewrite(originalGates) : originalGates
-	const changes = optimizeVariables(processedGatesCache, templateResult, sliceSize, useProbabilistically, findUselessVarsSetting, lookup ? tables.maximumWires : 0, prepared)
+	if (preparation.gates !== originalGates) throw new Error('Subset preparation belongs to a different circuit')
+	const templateResult = preparation.templateGates()
+	const changes = optimizeVariables(processedGatesCache, templateResult, sliceSize, useProbabilistically, findUselessVarsSetting, lookup ? tables.maximumWires : 0, prepared, preparation)
 	changes.changed ||= templateResult !== originalGates
 	if (!lookup) {
-		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return { gates: candidate, changed: true } }
-		return changes
+		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return finish({ gates: candidate, changed: true }) }
+		return finish(changes)
 	}
 	const gates = changes.gates
-	const fingerprints = new WindowFingerprints(gates)
+	const fingerprints = preparation.fingerprint(gates)
 	const queries: { start: number, end: number, variableIndexMapping: number[], mappedGates: Gate[] }[] = []
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
-	for (let a = 0; a <= gates.length - sliceSize; a++) {
-		const start = a
-		const end = a + sliceSize
+	for (const window = new SlidingWindowWires(gates, sliceSize); window.next();) {
+		const { start, end } = window
+		if (window.wireCount > tables.maximumWires) continue
 		if (fingerprints.seen(processedGatesCache, start, end)) continue
 		// Window positions remain valid only when the variable pass made no changes.
 		const cached = changes.changed ? undefined : prepared.get(start)
 		const sliceGates = cached ? [] : gates.slice(start, end)
-		const variableIndexMapping = cached?.variableIndexMapping ?? mapVariablesToIndexes(sliceGates)
+		const variableIndexMapping = cached?.variableIndexMapping ?? window.mapping()
 		if (variableIndexMapping.length <= tables.maximumWires) {
 			const mappedGates = cached?.mappedGates ?? mapCircuit(sliceGates, variableIndexMapping)
 			queries.push({ start, end, variableIndexMapping, mappedGates })
 		}
 	}
 	const rainbowMatches = await tables.findReplacements(queries.map(query => ({ mappedGates: query.mappedGates, wires: query.variableIndexMapping.length })), ioIdentifierCache)
-	let currentIndex = 0
+	const candidates = []
 	for (const [index, query] of queries.entries()) {
 		const match = rainbowMatches.get(index)
-		if (!match) {
-			fingerprints.remember(processedGatesCache, query.start, query.end)
-			continue
-		}
-		if (query.start < currentIndex) continue
-		currentIndex = query.end
-		tables.recordApplied(match, query.mappedGates.length)
-		replacements.push({ start: query.start, end: query.end - 1, replacement: reverseMapCircuit(match.gates, query.variableIndexMapping) })
+		if (!match) { fingerprints.remember(processedGatesCache, query.start, query.end); continue }
+		const oldVariables = query.mappedGates.flatMap(getVars), newVariables = match.gates.flatMap(getVars)
+		candidates.push({ ...query, match, removed: query.mappedGates.length - match.gates.length, wireSavings: new Set(oldVariables).size - new Set(newVariables).size, readSavings: oldVariables.length - newVariables.length })
+	}
+	for (const query of selectIntervals(candidates)) {
+		tables.recordApplied(query.match, query.mappedGates.length)
+		if (config.synthesis.templates) templates.learn(query.mappedGates, query.match.gates)
+		replacements.push({ start: query.start, end: query.end - 1, replacement: reverseMapCircuit(query.match.gates, query.variableIndexMapping) })
 	}
 	if (replacements.length === 0) {
-		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return { gates: candidate, changed: true } }
-		return changes
+		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return finish({ gates: candidate, changed: true }) }
+		return finish(changes)
 	}
 	const newCircuit = replace(gates, replacements)
 	const diff = gates.length - newCircuit.length
 	if (diff > 0) logVerbose(`Rainbow: Removed ${ diff } gates with slice ${ sliceSize }`)
-	return { gates: newCircuit, changed: true }
+	return finish({ gates: newCircuit, changed: true })
 }
 
 const gateSimplifier = (gates: Gate[]) => gates.map((gate) => simplifyGate(gate))
@@ -478,59 +511,46 @@ function appendMissingNumbers(arr: number[], n: number): number[] {
 	return [...Array.from(allNumbers), ...arr]
 }
 
-export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method']): Promise<Gate[]> => {
+export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method'], onLazyCandidate?: (gates: ChunkedSequence<Gate>) => void): Promise<Gate[]> => {
 	const useProbabilistically = method !== 'rainbow' && phase === 'heavy' && config.search.probabilistic
 	const findUselessVarsSetting = method !== 'rainbow' && config.search.variableElimination
 	let regenerateGraph = false
-	let linesLooped = 0
 	let changedWires = new Set<number>()
-	const graph = config.search.incrementalDependencies ? new IncrementalGraph(slicedVersion) : undefined
+	const neighborhoods = new NeighborhoodQueue(config.search.localSearchSeeds, config.search.localSearchRadius, config.search.localSearchBroadEvery)
+	const circuit = new ChunkedSequence(slicedVersion, config.search.circuitChunkGates)
+	const graph = config.search.incrementalDependencies ? new IncrementalGraph(slicedVersion, config.search.circuitChunkGates) : undefined
 	do {
-		let graphIterator = findConvexSubsets(subsetSize, slicedVersion, config.search.prioritizeChangedWires ? changedWires : undefined, graph?.context())
+		let graphIterator = findConvexSubsets(subsetSize, circuit, config.search.prioritizeChangedWires ? changedWires : undefined, graph?.context(), config.search.localSearch ? neighborhoods.take() : [])
 		regenerateGraph = false
 		for (let lines of graphIterator) {
-			const subsetKey = `${maxSlice}:${method}:${hashGates(lines.map(line => slicedVersion[line]))}`
+			const subsetKey = `${config.synthesis.templates ? templates.version : 0}:${maxSlice}:${method}:${hashGates(lines.map(line => circuit.at(line)))}`
 			if (testedSubsets.has(subsetKey)) continue
 			let subsetChanged = false
-			let sliceToUse = config.search.sliceMinimum - 1
-			linesLooped++
 			activity.subsets++
-			while(true) {
-				const linesN = lines.length
-				if (linesN === 0) break
-				const inGates = lines.map((x) => slicedVersion[x])
-				let it = 0
-				for (;it < maxSlice; it++) {
-					sliceToUse++
-					if (sliceToUse > maxSlice) sliceToUse = config.search.sliceMinimum
-					if (sliceToUse > linesN) continue
-					if (timeToEndWorker()) {
-						logVerbose(`did not finish iteration loop: ${linesLooped}/${slicedVersion.length} sub${subsetSize} slice:${maxSlice}`)
-						return slicedVersion
-					}
-					const slice = sliceToUse
+			while (lines.length) {
+				const inGates = lines.map(line => circuit.at(line))
+				const preparation = new SubsetPreparation(inGates)
+				let changed = false
+				for (let slice = config.search.sliceMinimum; slice <= Math.min(maxSlice, lines.length); slice++) {
+					if (timeToEndWorker()) return circuit.toArray()
 					activity.checks++
-					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables')
-					if (optimizationOutput.changed) {
-						subsetChanged = true
-						activity.improvements++
-						changedWires = new Set([...inGates, ...optimizationOutput.gates].flatMap(getVars))
-						const nodes = createDependencyGraph(optimizationOutput.gates)
-						const dependantMap = dependencyGraphToMap(nodes)
-						const newGates = (nodes.length === 0 ? [] : appendMissingNumbers(dependencySort(dependantMap, nodes[nodes.length - 1], nodes.length, nodes, optimizationOutput.gates), nodes.length)).map((x) => optimizationOutput.gates[x])
-						const patched = patchCircuit(slicedVersion, lines, newGates)
-						graph?.replace(lines, newGates)
-						slicedVersion = patched.values
-						onCandidate(slicedVersion)
-						const offset = patched.start
-						lines = Array.from(Array(optimizationOutput.gates.length).keys()).map((x) => x + offset)
-						regenerateGraph = true
-						sliceToUse = config.search.sliceMinimum - 1
-						it = 0
-						break
-					}
+					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables', preparation)
+					if (!optimizationOutput.changed) continue
+					subsetChanged = true; changed = true; activity.improvements++
+					changedWires = new Set([...inGates, ...optimizationOutput.gates].flatMap(getVars))
+					const nodes = createDependencyGraph(optimizationOutput.gates)
+					const dependantMap = dependencyGraphToMap(nodes)
+					const newGates = (nodes.length === 0 ? [] : appendMissingNumbers(dependencySort(dependantMap, nodes[nodes.length - 1], nodes.length, nodes, optimizationOutput.gates), nodes.length)).map(x => optimizationOutput.gates[x])
+					const start = circuit.replace(lines, newGates)
+					graph?.replace(lines, newGates)
+					neighborhoods.afterRewrite(start, newGates.length, circuit.length)
+					if (onLazyCandidate) onLazyCandidate(circuit)
+					else onCandidate(circuit.toArray())
+					lines = Array.from({ length: newGates.length }, (_, i) => start + i)
+					regenerateGraph = true
+					break
 				}
-				if (it === maxSlice) break
+				if (!changed) break
 			}
 			if (!subsetChanged) testedSubsets.set(subsetKey, true)
 			if (regenerateGraph) {
@@ -538,19 +558,20 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 			}
 		}
 	} while(regenerateGraph)
-	//console.log(`completed iteration loop: ${slicedVersion.length} sub${subsetSize} slice:${maxSlice}. Loops: ${linesLooped}`)
-	return slicedVersion
+	return circuit.toArray()
 }
 
 export const createOptimizerCaches = () => ({
-	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(config.cache.lookupEntries),
+	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(config.cache.lookupEntries, config.cache.lookupPolicy),
 	processedGatesCache: new LimitedMap<string, boolean>(config.cache.processedEntries),
-	scheduler: new SearchScheduler(config.search.explorationEvery),
+	arms: createSearchArms(config.search.searchArms, config.search.subsetMinimum, config.search.subsetMaximum, config.search.sliceMinimum, config.search.sliceMaximum),
+	scheduler: new SearchScheduler(config.search.explorationEvery, config.search.schedulerDecay, config.search.schedulerHistoryEntries),
 	testedSubsets: new LimitedMap<string, boolean>(config.cache.subsetEntries),
 	methodCaches: new Map<string, LimitedMap<string, boolean>>(),
 })
 
-export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: () => boolean, wantsSnapshot?: (gates: number) => boolean) => {
+export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number) => boolean) => {
+	const jobStarted = performance.now(), databaseStarted = lookupDatabaseTime()
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	optimizedVersion = gateSimplifier(optimizedVersion)
@@ -562,25 +583,26 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	let subsetSize = getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1)
 	let maxSlice = getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1)
 	let phase: 'simplest' | 'heavy' = 'heavy'
-	const arms: SearchArm[] = Array.from({ length: config.search.searchArms }, (_, index) => ({ method: (['all', 'variables', 'rainbow'] as const)[index % 3], subset: getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1), slice: getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1) }))
+	const arms = config.search.stableSearchArms ? caches.arms : createSearchArms(config.search.searchArms, config.search.subsetMinimum, config.search.subsetMaximum, config.search.sliceMinimum, config.search.sliceMaximum).map(arm => ({ ...arm, subset: getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1), slice: getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1) }))
 	//logTimed(`optimizer started with subset ${subsetSize}`)
 	const activity: WorkerActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
+	const progressActivity = (): WorkerActivity => ({ ...activity, rainbowTables: tables.statistics(), resources: { databaseMs: lookupDatabaseTime() - databaseStarted, elapsedMs: performance.now() - jobStarted, heapUsedBytes: process.memoryUsage().heapUsed } })
 	let lastProgress = performance.now()
 	let candidateParts = new LazyCircuit([optimizedVersion])
-	onProgress?.(optimizedVersion.length, { ...activity, rainbowTables: tables.statistics() }, optimizedVersion)
+	onProgress?.(optimizedVersion.length, progressActivity(), optimizedVersion)
 	const finishWorker = () => {
 		activity.stage = 'verifying'
-		onProgress?.(optimizedVersion.length, { ...activity, rainbowTables: tables.statistics() }, optimizedVersion)
+		onProgress?.(optimizedVersion.length, progressActivity(), optimizedVersion)
 		verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
 		return optimizedVersion
 	}
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
 		if (onProgress && endTime - lastProgress >= config.timing.workerReportSeconds * 1000) {
-			onProgress(candidateParts.length, { ...activity, rainbowTables: tables.statistics() }, wantsSnapshot && !wantsSnapshot(candidateParts.length) ? undefined : candidateParts.materialize())
+			onProgress(candidateParts.length, progressActivity(), wantsSnapshot && !wantsSnapshot(candidateParts.length) ? undefined : candidateParts.materialize())
 			lastProgress = endTime
 		}
-		return shouldFinish?.() === true || endTime - lastSaved >= roundDurationMs
+		return shouldFinish?.(activity) === true || endTime - lastSaved >= roundDurationMs
 	}
 	while (true) {
 		if (workerMode && optimizedVersion.length === 0) return finishWorker()
@@ -604,13 +626,14 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		activity.stage = 'searching'
 		const startLength = optimizedVersion.length
 		const nChunks = Math.max(1, Math.min(config.search.maximumInnerChunks, Math.floor(optimizedVersion.length / config.search.minimumInnerChunkGates)))
-		const chunked = chunkArray(optimizedVersion, nChunks)
+		const components = config.search.independentComponents ? independentComponents(optimizedVersion) : [optimizedVersion]
+		const chunked = components.flatMap(component => chunkArray(component, Math.max(1, Math.min(component.length, Math.floor(nChunks / components.length)))))
 		candidateParts = new LazyCircuit(chunked)
 		await Promise.all(chunked.map(async (data, index) => {
-			const result = await optimizeSubset(tables, data, ioIdentifierCache, methodCache!, subsetSize, maxSlice, phase, timeToEndWorker, activity, gates => {
+			const result = await optimizeSubset(tables, data, ioIdentifierCache, methodCache!, subsetSize, maxSlice, phase, timeToEndWorker, activity, () => {}, caches.testedSubsets, method, gates => {
 				candidateParts.update(index, gates)
 				timeToEndWorker()
-			}, caches.testedSubsets, method)
+			})
 			candidateParts.update(index, result)
 			return result
 		}))
@@ -687,7 +710,9 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	if (originalGates.length < gates.length) throw new Error('Original circuit is bigger than working. Do you have arguments the right way?')
 	verifyCircuit(originalGates, gates, originalCircuit.wire_count, config.validation.checkpointInputs)
 	const nMaxWorkers = configuredWorkerCount()
-	const pool = new WorkerPool(nMaxWorkers)
+	const sharedTables = await loadSharedTables()
+	const pool = new WorkerPool(nMaxWorkers, undefined, sharedTables)
+	const concurrency = new AdaptiveConcurrency(nMaxWorkers, config.workers.initialConcurrency, config.workers.concurrencySampleRounds, config.workers.concurrencyDatabaseFraction, config.workers.concurrencyRateTolerance)
 	const paths = outputPaths(pathToFileWithoutExt)
 	prepareOutputDirectories()
 	let currentGates = gates.slice()
@@ -699,7 +724,8 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			let lastIterationTime = performance.now()
 			const nPrevGates = currentGates.length
 			const workersSize = getRandomNumberInRange(Math.min(config.workers.minimumChunkGates, currentGates.length), Math.max(1, currentGates.length * config.workers.maximumChunkFraction))
-			const nWorkers = Math.max(1, Math.min(Math.floor(currentGates.length / workersSize), nMaxWorkers, currentGates.length || 1))
+			const capacity = Math.max(1, Math.min(Math.floor(currentGates.length / workersSize), nMaxWorkers, currentGates.length || 1))
+			const nWorkers = config.workers.adaptiveConcurrency ? concurrency.limit(capacity) : capacity
 			pool.setConcurrency(nWorkers)
 			const jobCount = Math.min(currentGates.length, nWorkers * config.workers.jobsPerWorker)
 			const approxGates = config.search.balancedWorkers ? balancedChunks(currentGates, jobCount, wireCosts) : splitArrayIntoApproximatelyChunks(currentGates, jobCount)
@@ -765,6 +791,12 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const gatesRemoved = nPrevGates - currentGates.length
 			const endTime = performance.now()
 			const timeDiffMins = (endTime - lastIterationTime) / 60000
+			if (config.workers.adaptiveConcurrency) {
+				const resources = statuses.map(status => status.activity?.resources)
+				const reason = concurrency.observe({ concurrency: nWorkers, elapsedMs: endTime - lastIterationTime, removed: gatesRemoved, databaseMs: resources.reduce((sum, value) => sum + (value?.databaseMs ?? 0), 0), workerMs: resources.reduce((sum, value) => sum + (value?.elapsedMs ?? 0), 0), memoryPressure: memoryPressure(config.workers.memoryBudgetMegabytes) })
+				if (reason === 'memory budget pressure') { pool.setConcurrency(concurrency.limit(nMaxWorkers)); await pool.trimIdle() }
+				if (reason) logTimed(`Next round worker target: ${concurrency.limit(nMaxWorkers)} (${reason})`)
+			}
 			logTimed(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
 			shuffleRowsWithDependentGateSwap(currentGates, config.search.roundShufflePasses)
 		}

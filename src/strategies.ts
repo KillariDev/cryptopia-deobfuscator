@@ -9,7 +9,7 @@ import { synthesizeSMT } from './smt.js'
 import { reverseMapCircuit, isReplacementSimpler } from './utils.js'
 import { LimitedMap } from './limitedMap.js'
 
-export const templates = new TemplateLibrary(config.synthesis.templateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates)
+export const templates = new TemplateLibrary(config.synthesis.templateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates, config.workers.sharedTemplateEntries)
 const failed = new LimitedMap<string, boolean>(config.synthesis.templateEntries)
 let checks = 0
 // Serialize optional synthesis: Z3 module initialization and cleanup must not overlap.

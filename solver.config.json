@@ -14,7 +14,17 @@
     "minimumChunkGates": 100,
     "maximumChunkFraction": 0.5,
     "jobsPerWorker": 4,
-    "jobSeconds": 30
+    "jobSeconds": 30,
+    "shareTemplates": true,
+    "sharedTemplateSeconds": 15,
+    "sharedTemplateEntries": 64,
+    "sharedTemplateBatch": 16,
+    "adaptiveConcurrency": true,
+    "initialConcurrency": 4,
+    "concurrencySampleRounds": 2,
+    "concurrencyDatabaseFraction": 0.6,
+    "concurrencyRateTolerance": 0.05,
+    "memoryBudgetMegabytes": 8192
   },
   "timing": {
     "roundMinutes": 25,
@@ -53,14 +63,24 @@
     "prefixStride": 16,
     "normalizedCacheEntries": 10000,
     "balancedWorkers": true,
-    "incrementalDependencies": true
+    "incrementalDependencies": true,
+    "schedulerDecay": 0.98,
+    "localSearch": true,
+    "localSearchSeeds": 32,
+    "localSearchRadius": 16,
+    "localSearchBroadEvery": 5,
+    "circuitChunkGates": 128,
+    "stableSearchArms": false,
+    "schedulerHistoryEntries": 128,
+    "independentComponents": false
   },
   "cache": {
     "lookupEntries": 1000000,
     "processedEntries": 1000000,
     "shuffleEntries": 100000,
     "subsetEntries": 100000,
-    "windowKeyBytes": 16777216
+    "windowKeyBytes": 16777216,
+    "lookupPolicy": "lru"
   },
   "database": {
     "tables": [
@@ -89,7 +109,11 @@
     "lookupBatchMilliseconds": 0,
     "generationWorkers": 4,
     "generationQueueBatches": 2,
-    "generationMinimumWork": 100000
+    "generationMinimumWork": 100000,
+    "statementCacheEntries": 16,
+    "sharedTables": true,
+    "sharedTableBytes": 33554432,
+    "sharedTableMaximumRows": 100000
   },
   "synthesis": {
     "templates": true,
@@ -103,5 +127,23 @@
     "smt": false,
     "meetInMiddle": false,
     "equalitySaturation": false
+  },
+  "benchmark": {
+    "seconds": 10,
+    "repeats": 3,
+    "seed": 1729,
+    "workerCounts": [
+      1,
+      2,
+      4
+    ],
+    "maximumChecks": 0,
+    "outputName": "benchmark.json",
+    "maximumOverrunSeconds": 30,
+    "mode": "comparison",
+    "caseManifest": "benchmarks/cases.json",
+    "caseOutputDirectory": "benchmark-cases",
+    "variants": [],
+    "decayFactor": 0.98
   }
 }
