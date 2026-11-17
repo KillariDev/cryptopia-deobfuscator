@@ -1,0 +1,453 @@
+{
+  "date": "2026-11-17",
+  "solverRevision": "e5c78f7371a08e4d293185906c92b98ef0e1cc97",
+  "harnessNote": "Ablation harness changes from this PR were active; solver behavior was unchanged during these 63 trials.",
+  "inputHash": "70dc28eede0c20c49f9b70d526e03a902368cad923e7db00f5e7e2ec8a4b9322",
+  "initialGates": 237224,
+  "wireCount": 64,
+  "tables": [
+    {
+      "wires": 3,
+      "gates": 3
+    },
+    {
+      "wires": 4,
+      "gates": 2
+    },
+    {
+      "wires": 5,
+      "gates": 2
+    }
+  ],
+  "budgetSeconds": 10,
+  "seeds": [
+    1729,
+    1730,
+    1731
+  ],
+  "node": "v24.22.3",
+  "platform": "linux",
+  "availableCpus": 24,
+  "controlsByVariant": {
+    "reference": {
+      "adaptiveConcurrency": false,
+      "sharedTables": false,
+      "independentComponents": false,
+      "stableSearchArms": false,
+      "schedulerDecay": 1,
+      "lookupPolicy": "fifo"
+    },
+    "shared-tables": {
+      "adaptiveConcurrency": false,
+      "sharedTables": true,
+      "independentComponents": false,
+      "stableSearchArms": false,
+      "schedulerDecay": 1,
+      "lookupPolicy": "fifo"
+    },
+    "components": {
+      "adaptiveConcurrency": false,
+      "sharedTables": false,
+      "independentComponents": true,
+      "stableSearchArms": false,
+      "schedulerDecay": 1,
+      "lookupPolicy": "fifo"
+    },
+    "stable-arms": {
+      "adaptiveConcurrency": false,
+      "sharedTables": false,
+      "independentComponents": false,
+      "stableSearchArms": true,
+      "schedulerDecay": 1,
+      "lookupPolicy": "fifo"
+    },
+    "decay": {
+      "adaptiveConcurrency": false,
+      "sharedTables": false,
+      "independentComponents": false,
+      "stableSearchArms": false,
+      "schedulerDecay": 0.98,
+      "lookupPolicy": "fifo"
+    },
+    "lru": {
+      "adaptiveConcurrency": false,
+      "sharedTables": false,
+      "independentComponents": false,
+      "stableSearchArms": false,
+      "schedulerDecay": 1,
+      "lookupPolicy": "lru"
+    },
+    "tuned": {
+      "adaptiveConcurrency": false,
+      "sharedTables": true,
+      "independentComponents": true,
+      "stableSearchArms": true,
+      "schedulerDecay": 0.98,
+      "lookupPolicy": "lru"
+    }
+  },
+  "summary": [
+    {
+      "workers": 1,
+      "variant": "components",
+      "repetitions": 3,
+      "medianGatesPerSecond": 719.0452506851236,
+      "minGatesPerSecond": 65.65989947138922,
+      "maxGatesPerSecond": 826.9071601019313,
+      "medianRemoved": 7281,
+      "medianRssMiB": 670.41796875,
+      "medianWallMs": 10140.195181000001,
+      "pairedReferenceRatios": [
+        1.0703353192005827,
+        1.008122067270579,
+        0.982011599324228
+      ],
+      "medianPairedReferenceRatio": 1.008122067270579
+    },
+    {
+      "workers": 1,
+      "variant": "decay",
+      "repetitions": 3,
+      "medianGatesPerSecond": 723.8992124484158,
+      "minGatesPerSecond": 65.01022304669475,
+      "maxGatesPerSecond": 880.466829990713,
+      "medianRemoved": 7329,
+      "medianRssMiB": 677.39453125,
+      "medianWallMs": 10124.337579,
+      "pairedReferenceRatios": [
+        1.139662093876981,
+        1.0149274608985879,
+        0.9722950175141162
+      ],
+      "medianPairedReferenceRatio": 1.0149274608985879
+    },
+    {
+      "workers": 1,
+      "variant": "lru",
+      "repetitions": 3,
+      "medianGatesPerSecond": 698.17435286348,
+      "minGatesPerSecond": 64.96686346623193,
+      "maxGatesPerSecond": 887.7610120670365,
+      "medianRemoved": 7076,
+      "medianRssMiB": 666.828125,
+      "medianWallMs": 10135.004202,
+      "pairedReferenceRatios": [
+        1.14910356575879,
+        0.9788604698430172,
+        0.9716465302136617
+      ],
+      "medianPairedReferenceRatio": 0.9788604698430172
+    },
+    {
+      "workers": 1,
+      "variant": "reference",
+      "repetitions": 3,
+      "medianGatesPerSecond": 713.2521685909416,
+      "minGatesPerSecond": 66.86265163932191,
+      "maxGatesPerSecond": 772.5683206637858,
+      "medianRemoved": 7238,
+      "medianRssMiB": 647.41796875,
+      "medianWallMs": 10147.883622000001,
+      "pairedReferenceRatios": [
+        1,
+        1,
+        1
+      ],
+      "medianPairedReferenceRatio": 1
+    },
+    {
+      "workers": 1,
+      "variant": "shared-tables",
+      "repetitions": 3,
+      "medianGatesPerSecond": 606.9223916603821,
+      "minGatesPerSecond": 72.84856900414188,
+      "maxGatesPerSecond": 759.3718716803384,
+      "medianRemoved": 6242,
+      "medianRssMiB": 832.50390625,
+      "medianWallMs": 10185.51236,
+      "pairedReferenceRatios": [
+        0.9829187288289155,
+        0.8509226026741451,
+        1.0895255754604212
+      ],
+      "medianPairedReferenceRatio": 0.9829187288289155
+    },
+    {
+      "workers": 1,
+      "variant": "stable-arms",
+      "repetitions": 3,
+      "medianGatesPerSecond": 117.34807865035586,
+      "minGatesPerSecond": 82.7269013890962,
+      "maxGatesPerSecond": 700.1837006065763,
+      "medianRemoved": 1191,
+      "medianRssMiB": 675.2578125,
+      "medianWallMs": 10149.292717,
+      "pairedReferenceRatios": [
+        0.15189346432109865,
+        0.98167763301697,
+        1.2372662369920808
+      ],
+      "medianPairedReferenceRatio": 0.98167763301697
+    },
+    {
+      "workers": 1,
+      "variant": "tuned",
+      "repetitions": 3,
+      "medianGatesPerSecond": 123.07182488480117,
+      "minGatesPerSecond": 81.70086654912147,
+      "maxGatesPerSecond": 646.954294774242,
+      "medianRemoved": 1252,
+      "medianRssMiB": 833.8046875,
+      "medianWallMs": 10171.250748,
+      "pairedReferenceRatios": [
+        0.15930218932489834,
+        0.9070484791547516,
+        1.22192082644047
+      ],
+      "medianPairedReferenceRatio": 0.9070484791547516
+    },
+    {
+      "workers": 2,
+      "variant": "components",
+      "repetitions": 3,
+      "medianGatesPerSecond": 1036.3776766688475,
+      "minGatesPerSecond": 606.4450743857037,
+      "maxGatesPerSecond": 1750.7799229544582,
+      "medianRemoved": 10452,
+      "medianRssMiB": 897.7734375,
+      "medianWallMs": 10085.126528,
+      "pairedReferenceRatios": [
+        0.47546634426016693,
+        0.9880046551865073,
+        0.27761699222038
+      ],
+      "medianPairedReferenceRatio": 0.47546634426016693
+    },
+    {
+      "workers": 2,
+      "variant": "decay",
+      "repetitions": 3,
+      "medianGatesPerSecond": 2118.163084088358,
+      "minGatesPerSecond": 789.4811870541604,
+      "maxGatesPerSecond": 3575.794361526708,
+      "medianRemoved": 21334,
+      "medianRssMiB": 917.1796875,
+      "medianWallMs": 10071.934573999999,
+      "pairedReferenceRatios": [
+        0.9710928544532133,
+        0.7526320814809639,
+        0.9696476882634504
+      ],
+      "medianPairedReferenceRatio": 0.9696476882634504
+    },
+    {
+      "workers": 2,
+      "variant": "lru",
+      "repetitions": 3,
+      "medianGatesPerSecond": 2218.2848645077165,
+      "minGatesPerSecond": 1166.3282092550508,
+      "maxGatesPerSecond": 3454.72296448185,
+      "medianRemoved": 22352,
+      "medianRssMiB": 888.77734375,
+      "medianWallMs": 10076.253216,
+      "pairedReferenceRatios": [
+        0.9382130082814296,
+        1.1118897349499144,
+        1.0154812001671079
+      ],
+      "medianPairedReferenceRatio": 1.0154812001671079
+    },
+    {
+      "workers": 2,
+      "variant": "reference",
+      "repetitions": 3,
+      "medianGatesPerSecond": 2184.4666982930603,
+      "minGatesPerSecond": 1048.960317371388,
+      "maxGatesPerSecond": 3682.237332021258,
+      "medianRemoved": 21998,
+      "medianRssMiB": 902.4609375,
+      "medianWallMs": 10070.192426,
+      "pairedReferenceRatios": [
+        1,
+        1,
+        1
+      ],
+      "medianPairedReferenceRatio": 1
+    },
+    {
+      "workers": 2,
+      "variant": "shared-tables",
+      "repetitions": 3,
+      "medianGatesPerSecond": 2195.3320327963343,
+      "minGatesPerSecond": 1264.3306653356644,
+      "maxGatesPerSecond": 3995.488727472576,
+      "medianRemoved": 22180,
+      "medianRssMiB": 1078.9453125,
+      "medianWallMs": 10085.969082,
+      "pairedReferenceRatios": [
+        1.0850709411713468,
+        1.205317917558576,
+        1.004973907137959
+      ],
+      "medianPairedReferenceRatio": 1.0850709411713468
+    },
+    {
+      "workers": 2,
+      "variant": "stable-arms",
+      "repetitions": 3,
+      "medianGatesPerSecond": 2385.077183429136,
+      "minGatesPerSecond": 761.9578685771239,
+      "maxGatesPerSecond": 2444.3825975933746,
+      "medianRemoved": 24030,
+      "medianRssMiB": 888.94140625,
+      "medianWallMs": 10075.145645999999,
+      "pairedReferenceRatios": [
+        0.6638308118644817,
+        0.7263934163749209,
+        1.091834993544572
+      ],
+      "medianPairedReferenceRatio": 0.7263934163749209
+    },
+    {
+      "workers": 2,
+      "variant": "tuned",
+      "repetitions": 3,
+      "medianGatesPerSecond": 817.462064511768,
+      "minGatesPerSecond": 781.2861133126066,
+      "maxGatesPerSecond": 1139.8022515126988,
+      "medianRemoved": 8267,
+      "medianRssMiB": 1080.0390625,
+      "medianWallMs": 10111.532594,
+      "pairedReferenceRatios": [
+        0.22200146020002617,
+        1.0866018786763578,
+        0.357655309610855
+      ],
+      "medianPairedReferenceRatio": 0.357655309610855
+    },
+    {
+      "workers": 4,
+      "variant": "components",
+      "repetitions": 3,
+      "medianGatesPerSecond": 3384.6168067591516,
+      "minGatesPerSecond": 2054.8107327120447,
+      "maxGatesPerSecond": 4319.586753997696,
+      "medianRemoved": 34039,
+      "medianRssMiB": 1316.9453125,
+      "medianWallMs": 10056.973047000001,
+      "pairedReferenceRatios": [
+        1.2768881586298537,
+        0.674425349379388,
+        0.8938217435809459
+      ],
+      "medianPairedReferenceRatio": 0.8938217435809459
+    },
+    {
+      "workers": 4,
+      "variant": "decay",
+      "repetitions": 3,
+      "medianGatesPerSecond": 3688.602154360927,
+      "minGatesPerSecond": 2837.136109149853,
+      "maxGatesPerSecond": 4593.559787898558,
+      "medianRemoved": 37180,
+      "medianRssMiB": 1343.546875,
+      "medianWallMs": 10079.699149999999,
+      "pairedReferenceRatios": [
+        1.3578757490395479,
+        0.9311984219222056,
+        0.9740992842685272
+      ],
+      "medianPairedReferenceRatio": 0.9740992842685272
+    },
+    {
+      "workers": 4,
+      "variant": "lru",
+      "repetitions": 3,
+      "medianGatesPerSecond": 3617.513306711787,
+      "minGatesPerSecond": 3521.875009299835,
+      "maxGatesPerSecond": 3795.5379173607294,
+      "medianRemoved": 36360,
+      "medianRssMiB": 1398.00390625,
+      "medianWallMs": 10053.120488,
+      "pairedReferenceRatios": [
+        1.0693522709669534,
+        1.1559418810717474,
+        1.0023392640336704
+      ],
+      "medianPairedReferenceRatio": 1.0693522709669534
+    },
+    {
+      "workers": 4,
+      "variant": "reference",
+      "repetitions": 3,
+      "medianGatesPerSecond": 3382.901411375579,
+      "minGatesPerSecond": 3046.7578577864833,
+      "maxGatesPerSecond": 3786.6798733260343,
+      "medianRemoved": 33992,
+      "medianRssMiB": 1310.92578125,
+      "medianWallMs": 10091.426072,
+      "pairedReferenceRatios": [
+        1,
+        1,
+        1
+      ],
+      "medianPairedReferenceRatio": 1
+    },
+    {
+      "workers": 4,
+      "variant": "shared-tables",
+      "repetitions": 3,
+      "medianGatesPerSecond": 3695.9055324217784,
+      "minGatesPerSecond": 2852.559509159559,
+      "maxGatesPerSecond": 4563.145680697456,
+      "medianRemoved": 37338,
+      "medianRssMiB": 1577.42578125,
+      "medianWallMs": 10076.163072,
+      "pairedReferenceRatios": [
+        1.3488852100014224,
+        0.9362606555258014,
+        0.9760279865367852
+      ],
+      "medianPairedReferenceRatio": 0.9760279865367852
+    },
+    {
+      "workers": 4,
+      "variant": "stable-arms",
+      "repetitions": 3,
+      "medianGatesPerSecond": 3426.3499286720753,
+      "minGatesPerSecond": 3174.465794889308,
+      "maxGatesPerSecond": 3565.014967479686,
+      "medianRemoved": 34452,
+      "medianRssMiB": 1378.796875,
+      "medianWallMs": 10050.729191,
+      "pairedReferenceRatios": [
+        1.0538335393079206,
+        1.0419160114009214,
+        0.9048427760708848
+      ],
+      "medianPairedReferenceRatio": 1.0419160114009214
+    },
+    {
+      "workers": 4,
+      "variant": "tuned",
+      "repetitions": 3,
+      "medianGatesPerSecond": 3298.193005034585,
+      "minGatesPerSecond": 2670.959329882932,
+      "maxGatesPerSecond": 3303.1848797615808,
+      "medianRemoved": 33214,
+      "medianRssMiB": 1615.40625,
+      "medianWallMs": 10092.078165,
+      "pairedReferenceRatios": [
+        0.9749598359396028,
+        0.8766562538131681,
+        0.8723169082841494
+      ],
+      "medianPairedReferenceRatio": 0.8766562538131681
+    }
+  ],
+  "limitations": [
+    "Smaller tables than the production 4-variable/5-gate library.",
+    "Three seeds and short budgets; ratios are descriptive, not significance tests.",
+    "One-feature comparisons are relative to the reference, not all feature interactions."
+  ]
+}

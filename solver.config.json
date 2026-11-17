@@ -70,9 +70,9 @@
     "localSearchRadius": 16,
     "localSearchBroadEvery": 5,
     "circuitChunkGates": 128,
-    "stableSearchArms": true,
+    "stableSearchArms": false,
     "schedulerHistoryEntries": 128,
-    "independentComponents": true
+    "independentComponents": false
   },
   "cache": {
     "lookupEntries": 1000000,
@@ -139,6 +139,11 @@
     ],
     "maximumChecks": 0,
     "outputName": "benchmark.json",
-    "maximumOverrunSeconds": 30
+    "maximumOverrunSeconds": 30,
+    "mode": "comparison",
+    "caseManifest": "benchmarks/cases.json",
+    "caseOutputDirectory": "benchmark-cases",
+    "variants": [],
+    "decayFactor": 0.98
   }
 }

@@ -401,8 +401,8 @@ and have not been benchmarked on the full circuit.
 
 ## Resource-aware search and benchmarks
 
-Scheduler choices are retained in each persistent worker. With
-`search.stableSearchArms: true`, a deterministic spread of subset/slice sizes and
+Scheduler history is retained in each persistent worker. With
+`search.stableSearchArms: true` (now opt-in), a deterministic spread of subset/slice sizes and
 methods is reused across jobs, rather than replacing all choices with new random
 ones. `search.schedulerHistoryEntries: 128` bounds history even when stable arms
 are disabled. Decay is applied lazily to the updated score, avoiding a scan of
@@ -430,7 +430,7 @@ to workers; shared memory is not an operating-system-enforced read-only mapping.
 Do not modify table files during a job. Shared hits are decoded on demand and do
 not populate the per-worker lookup cache with duplicate table rows/misses.
 
-`search.independentComponents: true` groups gates connected by used wires at each
+Enabling `search.independentComponents` (now opt-in) groups gates connected by used wires at each
 search pass. Disjoint groups commute, so each group can be optimized separately
 while preserving its internal gate order. Controls aliased with targets and
 unused control fields are handled through the same used-wire definition as the
@@ -502,3 +502,90 @@ time can exceed the budget; the overrun watchdog terminates stuck trial processe
 Validation is exhaustive through eight wires and probabilistic above that limit.
 Seeds repeat random streams, not operating-system scheduling; multithreaded
 results and timings can vary. Full-circuit production gains remain unmeasured.
+
+## Feature ablations and benchmark cases
+
+```sh
+npm run benchmark:ablate -- data/latest.json data/obfuscated.json
+npm run benchmark:cases
+npm run test:benchmark
+```
+
+`benchmark:ablate` (or `benchmark.mode: "ablation"`) runs seven configurations:
+`reference`, `shared-tables`, `components`, `stable-arms`, `decay`, `lru`, and
+`tuned`. Each single-feature configuration differs from the common reference in
+exactly one control. Shared tables, components, stable choices and LRU are forced
+on in their own variants; the decay variant uses `benchmark.decayFactor` (default `0.98`), independently
+of the production scheduler setting.
+The combined `tuned` configuration uses production settings. Fixed worker counts
+are still used in every trial, so this does not test the adaptive concurrency
+controller or individually ablate previous correctness fixes.
+
+Variant order is reversed/rotated across repetitions and worker counts. Summary
+rows report medians, ranges, and per-seed rate ratios paired with the reference
+at the same worker count. Missing or zero-progress references have no meaningful
+ratio and are excluded from the ratio summary. One-feature results describe
+changes around that reference; interactions can make their combined effect
+different. Short time budgets and parallel scheduling introduce variance.
+
+`benchmarks/cases.json` registers four versioned circuits: adjacent cancellations,
+interleaved independent components, connected mixed reversible gates, and
+non-bijective target/control aliasing. Each has a frozen complete truth table and
+a deterministic rewrite-coverage bound. The fixture suite builds only its small
+2-wire/2-gate and 3-wire/2-gate databases under
+`files.dataDirectory` / `benchmark.caseOutputDirectory`, then writes individual
+reports and `suite.json` there. It never generates the production table portfolio
+or changes working/latest checkpoints. Manifest settings control the case budgets;
+these default to two seconds, three repetitions, and 1/2/4 workers.
+
+`benchmark.caseManifest` selects the registry. Fixture paths are relative to that
+manifest. `benchmark:cases` verifies frozen truth tables and requires all trial
+results to pass exhaustive validation without increasing gate counts.
+`test:benchmark` runs the same seven variants on every case using a short smoke
+profile (one worker, one seed, 0.2 seconds, at most 32 checks per job). Smoke timings
+are diagnostic, not performance thresholds.
+
+`npm test` also runs deterministic fixed-work regression checks against all
+registered cases and configurations. These require the frozen function and known
+simple reductions to remain intact. They assert no machine-dependent speed ratio.
+Use the full timed case suite and a representative real-circuit ablation report
+when reviewing a performance feature, and retain the JSON reports with their git
+revision, settings and seeds for comparisons. Full workload reports need existing
+completed tables and are not bundled with the small fixture suite.
+
+Set `benchmark.variants` to an explicit list to run a focused comparison instead
+of the default comparison/ablation matrix. For example:
+
+```json
+"variants": ["reference", "tuned-no-stable", "tuned-conservative"]
+```
+
+`tuned-no-stable` uses configured tuning with stable arms disabled;
+`tuned-conservative` also disables component partitioning. Leave the list empty
+to use the selected mode's standard variants. Case suites explicitly reset this
+list so every registered feature is exercised. Adding a feature variant also
+requires a test that proves it changes only its intended reference control.
+
+### Recorded investigation and defaults
+
+The versioned summaries in `benchmarks/results/2026-11-17-ablation.json` and
+`2026-11-17-confirmation.json` record 63 one-feature trials and 27 focused
+confirmation trials on the 237,224-gate / 64-wire original circuit. They used
+3-wire/3-gate, 4-wire/2-gate and 5-wire/2-gate tables because the production 4/5
+library was unavailable. Every trial requested ten seconds, with three seeds at
+1/2/4 workers. These are descriptive, short-budget results, not significance tests
+or a guarantee for later solver phases.
+
+Stable arms and component partitioning showed short-budget regressions. Disabling
+stable arms alone did not resolve the combined slowdown; the confirmation with
+both disabled was more robust at two workers. Both features now default to
+`false`, while remaining available in the ablation variants and fixture suite.
+Shared tables, LRU and decaying scores remain configurable and enabled; the new
+combined default corresponds to the tested `tuned-conservative` settings. Benefits
+were not uniform across seeds or worker counts, and absolute and paired medians
+can disagree because search progress is bursty. Inspect the per-seed ratios and
+absolute rates rather than interpreting one aggregate as a universal speedup.
+
+These runs mostly exercise initial jobs and do not establish the long-running
+benefit of persistent scheduler learning. The small deterministic cases prove
+function preservation and simple rewrite coverage, not production throughput.

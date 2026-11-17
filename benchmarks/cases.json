@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "tables": [
+    {
+      "wires": 2,
+      "gates": 2
+    },
+    {
+      "wires": 3,
+      "gates": 2
+    }
+  ],
+  "settings": {
+    "workers": {
+      "jobsPerWorker": 1
+    },
+    "search": {
+      "subsetMinimum": 2,
+      "subsetMaximum": 12,
+      "sliceMinimum": 2,
+      "sliceMaximum": 12,
+      "maximumInnerChunks": 1,
+      "workerShufflePasses": 1,
+      "searchArms": 9
+    },
+    "benchmark": {
+      "seconds": 2,
+      "repeats": 3,
+      "workerCounts": [
+        1,
+        2,
+        4
+      ]
+    },
+    "synthesis": {
+      "smt": false,
+      "meetInMiddle": false,
+      "equalitySaturation": false
+    }
+  },
+  "cases": [
+    {
+      "id": "adjacent-cancellations",
+      "input": "cases/adjacent-cancellations.json",
+      "description": "Small windows with a known identity result; catches lost rewrite coverage.",
+      "expectedTruthKey": "1032547698badcfe",
+      "maximumDeterministicGates": 0
+    },
+    {
+      "id": "independent-components",
+      "input": "cases/independent-components.json",
+      "description": "Interleaved disjoint wire pairs; partitioning is useful without changing outputs.",
+      "expectedTruthKey": "40200c44611c48a22c4ce33c50244d54655d58a66d5ce77d60288e64699e68aaae6cebbe702ccf746ddf78aeef7cefff",
+      "maximumDeterministicGates": 0
+    },
+    {
+      "id": "connected-mixed",
+      "input": "cases/connected-mixed.json",
+      "description": "Connected reversible controls with short cancellations and changing targets.",
+      "expectedTruthKey": "40200c44611c48a22c4ce33c50244d54655d58a66d5ce77d60288e64699e68aaae6cebbe702ccf746ddf78aeef7cefff",
+      "maximumDeterministicGates": 0
+    },
+    {
+      "id": "aliased-targets",
+      "input": "cases/aliased-targets.json",
+      "description": "Non-bijective target/control aliasing; frozen truth table guards unsafe reductions.",
+      "expectedTruthKey": "8888888888888888",
+      "maximumDeterministicGates": 40
+    }
+  ]
+}
