@@ -145,7 +145,7 @@
     "attemptEvery": 100,
     "timeoutMs": 100,
     "states": 2000,
-    "native": true,
+    "forwardSemanticSearch": true,
     "smt": true,
     "meetInMiddle": true,
     "equalitySaturation": true

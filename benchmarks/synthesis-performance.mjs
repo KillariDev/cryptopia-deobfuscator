@@ -28,11 +28,11 @@ const referencePath = join(temporary, 'reference.mjs')
 writeFileSync(referencePath, ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.ES2022 } }).outputText)
 const workerPath = join(temporary, 'worker.mjs')
 writeFileSync(workerPath, `
-import { synthesizeNative, functionKey } from ${JSON.stringify(pathToFileURL(join(root, 'dist/semantic.js')).href)};
+import { forwardSemanticSearch, functionKey } from ${JSON.stringify(pathToFileURL(join(root, 'dist/semantic.js')).href)};
 import { synthesizeSMT } from ${JSON.stringify(pathToFileURL(referencePath).href)};
 const job = JSON.parse(process.argv[2]);
 const timing = {}; const cpu = process.cpuUsage(); const started = performance.now();
-const replacement = job.strategy === 'z3' ? await synthesizeSMT(job.gates, job.wires, 3, job.timeoutMs, timing) : synthesizeNative(job.gates, job.wires, 3, job.states, job.timeoutMs);
+const replacement = job.strategy === 'z3' ? await synthesizeSMT(job.gates, job.wires, 3, job.timeoutMs, timing) : forwardSemanticSearch(job.gates, job.wires, 3, job.states, job.timeoutMs);
 const elapsedMs = performance.now() - started; const used = process.cpuUsage(cpu);
 if (replacement && functionKey(replacement, job.wires) !== functionKey(job.gates, job.wires)) throw Error('Invalid replacement');
 console.log(JSON.stringify({elapsedMs, ...timing, cpuMs: (used.user + used.system) / 1000, peakRssMiB: process.resourceUsage().maxRSS / 1024, replacementGates: replacement?.length ?? null}));
@@ -61,18 +61,18 @@ for (let i=0;i<gates.length-3 && keys.size<8;i++) {
 }
 // Prefer genuinely multi-gate functions among synthetic targets; retain all inputs
 // so results can be rechecked even when the original input file changes.
-const report={metadata:{node:process.version,cpu:cpus()[0].model,platform:platform(),arch:arch(),reference,z3Version:'5.4.1',nativeRevision:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),inputSha256:createHash('sha256').update(inputBytes).digest('hex'),repeats:3,maximumReplacementGates:3},cases:cases.map(c=>({...c,truthKey:functionKey(c.gates,c.wires)})),results:[],notes:[
+const report={metadata:{node:process.version,cpu:cpus()[0].model,platform:platform(),arch:arch(),reference,z3Version:'5.4.1',forwardSemanticSearchRevision:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),inputSha256:createHash('sha256').update(inputBytes).digest('hex'),repeats:3,maximumReplacementGates:3},cases:cases.map(c=>({...c,truthKey:functionKey(c.gates,c.wires)})),results:[],notes:[
  'Sequential fresh child process per trial, alternating strategy order. Import time before the function call is excluded for both; Z3 dynamic import, WASM startup and cleanup are included.',
- 'Z3 startup/search/cleanup phases instrument the historical implementation without changing its search. Its timeout begins after initialization; native timeout covers the whole function.',
- 'Native uses 2000 retained states by default. native-wide uses 200000 states at the 1000 ms budget to distinguish state-cap effects.',
+ 'Z3 startup/search/cleanup phases instrument the historical implementation without changing its search. Its timeout begins after initialization; forward semantic search timeout covers the whole function.',
+ 'Forward semantic search uses 2000 retained states by default. forward-semantic-search-wide uses 200000 states at the 1000 ms budget to distinguish state-cap effects.',
  'Real windows are not filtered to ordinary-optimizer failures. Synthetic padding supplies known shorter equivalents but some targets simplify further.',
  'Undefined results are not proofs of impossibility. Peak RSS is whole-child high-water memory; CPU time includes helper threads. This is a local fallback microbenchmark, not whole-tool throughput.'
 ]}
 for (const timeoutMs of [100,1000]) for(let repeat=0;repeat<3;repeat++) for(const fixture of cases) {
- const strategies=timeoutMs===100?['native','z3']:['native','z3','native-wide']
+ const strategies=timeoutMs===100?['forward-semantic-search','z3']:['forward-semantic-search','z3','forward-semantic-search-wide']
  if(repeat%2)strategies.reverse()
  for(const strategy of strategies){
-  const states=strategy==='native-wide'?200000:2000
+  const states=strategy==='forward-semantic-search-wide'?200000:2000
   const child=spawnSync(process.execPath,[workerPath,JSON.stringify({...fixture,strategy,states,timeoutMs})],{encoding:'utf8',timeout:20000,maxBuffer:1024*1024})
   if(child.status!==0)throw Error(`${strategy}/${fixture.id}: ${child.error??child.stderr}`)
   const result=JSON.parse(child.stdout.trim().split('\n').at(-1))

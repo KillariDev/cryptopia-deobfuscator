@@ -105,8 +105,8 @@ export function meetInMiddle(gates: Gate[], wires: number, catalog: Gate[], maxD
  * Full truth states merge equivalent prefixes. A collision of two inputs that the
  * target distinguishes can never be undone by any suffix, so prune it immediately.
  */
-export function synthesizeNative(original: Gate[], wires: number, maxGates: number, limit: number, timeoutMs: number): Gate[] | undefined {
-	if (!Number.isInteger(wires) || wires < 1 || wires > 4) throw new Error('Native synthesis supports 1-4 wires')
+export function forwardSemanticSearch(original: Gate[], wires: number, maxGates: number, limit: number, timeoutMs: number): Gate[] | undefined {
+	if (!Number.isInteger(wires) || wires < 1 || wires > 4) throw new Error('Forward semantic search supports 1-4 wires')
 	const end = performance.now() + timeoutMs
 	const target = circuitState(original, wires), identity = circuitState([], wires)
 	const goal = stateKey(target)
