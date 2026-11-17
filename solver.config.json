@@ -98,11 +98,9 @@
       }
     ],
     "queryBatchSize": 900,
-    "insertBatchSize": 1000000,
     "memoryMapBytes": 268435456,
     "generationStates": 0,
     "generationBatchRows": 3000,
-    "keepGenerationState": false,
     "etaWindowSamples": 5,
     "etaWarmupSamples": 3,
     "etaSmoothing": 0.2,
@@ -113,7 +111,12 @@
     "statementCacheEntries": 16,
     "sharedTables": true,
     "sharedTableBytes": 33554432,
-    "sharedTableMaximumRows": 100000
+    "sharedTableMaximumRows": 100000,
+    "generationReadRows": 4096,
+    "generationCacheMegabytes": 256,
+    "generationTempStore": "file",
+    "generationJournalMode": "wal",
+    "generationSynchronous": "full"
   },
   "synthesis": {
     "templates": true,
@@ -144,6 +147,18 @@
     "caseManifest": "benchmarks/cases.json",
     "caseOutputDirectory": "benchmark-cases",
     "variants": [],
-    "decayFactor": 0.98
+    "decayFactor": 0.98,
+    "generationTables": [
+      {
+        "wires": 3,
+        "gates": 3
+      },
+      {
+        "wires": 4,
+        "gates": 2
+      }
+    ],
+    "generationOutputName": "generation-benchmark.json",
+    "generationTimeoutSeconds": 600
   }
 }

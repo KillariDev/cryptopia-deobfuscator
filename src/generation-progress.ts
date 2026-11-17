@@ -1,5 +1,5 @@
-export type GenerationProfile = { elapsedMs: number, expansionMs: number, writeMs: number, readMs: number, waitMs: number, candidates: number, emitted: number, batches: number, workersUsed: number, peakPending: number }
-export type SemanticProgress = { depth: number, processed: number, total: number, states: number, processedThisRun?: number, disk?: boolean }
+export type GenerationProfile = { phase: 'reading' | 'staging' | 'deduplicating' | 'writing lookup' | 'committing' | 'expanding' | 'cleaning up' | 'compacting' | 'complete', phaseStarted: number, stagingMs: number, dedupMs: number, outputMs: number, commitMs: number, elapsedMs: number, expansionMs: number, writeMs: number, readMs: number, waitMs: number, candidates: number, emitted: number, batches: number, workersUsed: number, peakPending: number }
+export type SemanticProgress = { depth: number, processed: number, total: number, states: number, processedThisRun?: number, disk?: boolean, overallDone?: number, overallTotal?: number, overallEstimated?: boolean, complete?: boolean }
 export function progressPercent(done: bigint, total: bigint) {
 	if (total <= 0n) return '0.00%'
 	if (done >= total) return '100.00%'
@@ -21,6 +21,13 @@ export class GenerationEstimator {
 	private at = 0
 	private rates: number[] = []
 	private smoothed?: number
+	overallEta(progress: SemanticProgress) {
+		if (progress.overallDone === undefined || progress.overallTotal === undefined) return 'learning work size'
+		if (progress.overallDone >= progress.overallTotal) return progress.complete ? '0s' : 'finishing'
+		if (this.rates.length < this.warmup) return 'learning processing speed'
+		if (!this.smoothed || this.rates.every(rate => rate === 0)) return 'unavailable (waiting for progress)'
+		return `~${generationDuration((progress.overallTotal - progress.overallDone) / this.smoothed)}`
+	}
 	constructor(private windowSize: number, private warmup: number, private smoothing: number) {}
 	update(progress: SemanticProgress, now: number) {
 		if (this.depth !== progress.depth) {
@@ -41,7 +48,30 @@ export class GenerationEstimator {
 		return `~${generationDuration((progress.total - progress.processed) / this.smoothed)}`
 	}
 }
-export function formatGenerationProgress(progress: SemanticProgress | undefined, elapsedMs: number, eta: string) {
-	if (!progress) return 'Rainbow generation: preparing disk-backed search'
-	return `Rainbow generation: depth ${progress.depth}, layer ${progressPercent(BigInt(progress.processed), BigInt(progress.total))} | layer ETA ${eta} | overall ETA unavailable (future layers are not known) | ${progress.states.toLocaleString('en-US')} functions indexed on disk; elapsed ${generationDuration(elapsedMs)}`
+export function formatGenerationProgress(progress: SemanticProgress | undefined, _elapsedMs: number, eta: string) {
+	if (!progress || progress.overallDone === undefined || progress.overallTotal === undefined) return 'Rainbow generation: ~0.00% complete | ETA learning processing speed'
+	const percent = !progress.complete && progress.overallDone >= progress.overallTotal ? '99.99%' : progressPercent(BigInt(Math.floor(progress.overallDone)), BigInt(Math.ceil(progress.overallTotal)))
+	return `Rainbow generation: ${progress.overallEstimated ? '~' : ''}${percent} complete | ETA ${eta}`
+}
+
+export function formatGenerationProfile(profile: GenerationProfile, now = performance.now()) {
+	const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+	return `Generation work: ${profile.phase}${profile.phase === 'complete' ? '' : ` (${generationDuration(now - profile.phaseStarted)})`} | expansion ${seconds(profile.expansionMs)} CPU | read ${seconds(profile.readMs)} | stage ${seconds(profile.stagingMs)} | deduplicate ${seconds(profile.dedupMs)} | lookup ${seconds(profile.outputMs)} | commit ${seconds(profile.commitMs)} | expansion wait ${seconds(profile.waitMs)}. Cumulative timings overlap.`
+}
+
+/** Input-row work estimate; future layer growth is projected, never claimed exact. */
+export function overallGenerationWork(layers: { depth: number, total: number, processed: number }[], maximumDepth: number, complete = false, initialGrowth = 1) {
+	const done = layers.reduce((sum, layer) => sum + layer.processed, 0)
+	let total = layers.reduce((sum, layer) => sum + layer.total, 0)
+	const last = layers[layers.length - 1], previous = layers[layers.length - 2]
+	if (complete) return { overallDone: done, overallTotal: done, overallEstimated: false }
+	if (!last) return {}
+	const estimated = last.depth < maximumDepth - 1
+	const growth = previous ? Math.max(1, last.total / Math.max(1, previous.total)) : Math.max(1, initialGrowth)
+	let projected = last.total
+	for (let depth = last.depth + 1; depth < maximumDepth; depth++) {
+		projected = Math.min(Number.MAX_SAFE_INTEGER / Math.max(1, maximumDepth), projected * growth)
+		total = Math.min(Number.MAX_SAFE_INTEGER, total + projected)
+	}
+	return { overallDone: done, overallTotal: Math.max(done, total), overallEstimated: estimated }
 }

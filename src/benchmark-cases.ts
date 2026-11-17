@@ -40,7 +40,7 @@ async function run() {
 	const manifest = readCaseManifest(manifestPath), settings = caseSettings(manifest, smoke)
 	const output = resolve(config.files.dataDirectory, config.benchmark.caseOutputDirectory)
 	mkdirSync(output, { recursive: true })
-	settings.files.databaseDirectory = join(output, 'tables')
+	settings.files.databaseDirectory = join(output, 'tables-v2')
 	settings.files.dataDirectory = output
 	mkdirSync(settings.files.databaseDirectory, { recursive: true })
 	// This explicit suite owns only its small fixture-table portfolio.
