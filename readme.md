@@ -1030,3 +1030,31 @@ publish their cumulative time and become inactive; time between operations is
 not charged to the last commit. In-flight phase time still contributes during
 long operations. Normal output retains one completion percentage and one ETA;
 these extra diagnostics require verbose logging.
+
+## Balanced scratch-writer routing
+
+Scratch writer ownership mixes the full function-key hash before selecting a
+writer. The previous raw FNV low bits were biased on packed truth tables: on the
+seed-1729, 200,000-row 4-wire/5-gate candidate fixture, two writers received
+7,246 and 192,754 rows. With final hash mixing they receive 100,329 and 99,671.
+Four-writer routing is also covered by structured-candidate regressions across
+multiple seeds. Exact function ownership, masks and equal-cost tie rules remain
+unchanged; only the disposable scratch assignment changes. Existing checkpoints
+can resume without regenerating tables.
+
+Verbose interval reports include `candidate split`, showing each staging
+writer's share of routed candidate input rows since the previous report. It is
+an interval distribution rather than a cumulative total or count of committed
+work. It includes attempted rows in batches that can later fail; use committed
+parents/s for saved progress. Empty intervals omit the split. Balanced routing
+makes concurrency possible but does not establish a throughput gain: main
+imports, lookup writes and checkpoint commits still run serially.
+
+`benchmarks/results/2026-11-17-balanced-shards.json` records the routing fixture
+and 12 fresh 4-wire/3-gate builds comparing main revision `ffc9ed2` with corrected
+routing, using matching settings at 2 and 4 staging writers, two expansion workers
+and three repetitions per configuration. All output coverage/cost digests matched;
+every replacement was exhaustively validated. Total elapsed times were mixed,
+with no consistent paired improvement after imports and compaction. The default
+remains one staging writer. These shared-host results do not establish throughput
+for the production 4-wire/5-gate build; better balance is not itself a speedup claim.
