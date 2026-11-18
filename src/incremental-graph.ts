@@ -41,9 +41,33 @@ export class IncrementalGraph {
 			record.future = future.sort((a, b) => this.order.indexOf(a)! - this.order.indexOf(b)!)[0]
 		}
 	}
+	/** Access-list edits change adjacent target users. Write edits additionally
+	 * change control dependencies throughout the neighboring write interval. */
+	private collectAffected(id: number, affected: Set<number>) {
+		const record = this.records.get(id)!
+		const position = this.order.indexOf(id)!
+		for (const wire of record.wires) {
+			for (const future of [false, true]) {
+				const next = this.neighbor(this.accesses.get(wire), position, future)
+				if (next !== undefined) affected.add(next)
+			}
+			if (wire !== record.gate.target) continue
+			const before = this.neighbor(this.writes.get(wire), position, false)
+			const after = this.neighbor(this.writes.get(wire), position, true)
+			const low = before === undefined ? -1 : this.order.indexOf(before)!
+			const high = after === undefined ? this.order.length : this.order.indexOf(after)!
+			const list = this.accesses.get(wire) ?? []
+			let start = 0, end = list.length
+			while (start < end) { const mid = (start + end) >>> 1; if (this.order.indexOf(list[mid])! < low) start = mid + 1; else end = mid }
+			for (let i = start; i < list.length && this.order.indexOf(list[i])! <= high; i++) affected.add(list[i])
+		}
+	}
+
 	replace(selected: number[], replacement: Gate[]) {
 		const oldIds = selected.map(index => this.order.at(index))
 		const touched = new Set([...oldIds.flatMap(id => this.records.get(id)!.wires), ...replacement.flatMap(getVars)])
+		const affected = new Set<number>()
+		for (const id of oldIds) this.collectAffected(id, affected)
 		const newIds = replacement.map(gate => this.add(gate))
 		this.order.replace(selected, newIds)
 		for (const id of oldIds) this.records.delete(id)
@@ -61,7 +85,7 @@ export class IncrementalGraph {
 			}
 			merge(this.accesses, false); merge(this.writes, true)
 		}
-		const affected = new Set([...touched].flatMap(wire => this.accesses.get(wire) ?? []))
+		for (const id of newIds) { affected.add(id); this.collectAffected(id, affected) }
 		this.recompute(affected)
 	}
 	context(): DependencyContext {

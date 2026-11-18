@@ -2,7 +2,11 @@ import { Gate } from './types.js'
 import { analyzeFactored, FactoredGraph, FactoredLimit, FactoredOptions, Form } from './factored.js'
 import { reportSmtDiagnostic } from './smt-solver.js'
 
-export type SweepStats = { queries: number, merges: number, counterexamples: number, passes?: number, rebuilds?: number, coneNodes?: number, refinementSkips?: number }
+type SweepEngine = Awaited<ReturnType<typeof import('z3-solver').init>>
+const newContext = (api: SweepEngine) => new api.Context('sweeping')
+const contexts = new WeakMap<SweepEngine, ReturnType<typeof newContext>>()
+
+export type SweepStats = { queries: number, merges: number, counterexamples: number, passes?: number, rebuilds?: number, coneNodes?: number, refinementSkips?: number, contextInitializations?: number }
 
 /** Evaluate concrete counterexamples in topological order. These refine the
  * candidate filter only; they never authorize a rewrite. */
@@ -51,7 +55,9 @@ export async function sweepFactored(gates: Gate[], options: FactoredOptions, dea
 		const { init, killThreads } = await import('z3-solver')
 		const api = engine ?? await init({ printErr: reportSmtDiagnostic })
 		try {
-			const { Solver, Bool, Xor, And, isTrue } = new api.Context('sweeping')
+			let context = contexts.get(api)
+			if (!context) { context = newContext(api); contexts.set(api, context); stats.contextInitializations = (stats.contextInitializations ?? 0) + 1 }
+			const { Solver, Bool, Xor, And, isTrue } = context
 			while (!stopped()) {
 				const { graph, rows } = working
 				stats.passes = (stats.passes ?? 0) + 1

@@ -1,0 +1,60 @@
+import assert from 'node:assert/strict'
+import {mkdtemp,readFile,rm} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
+import {SolverService} from './solver-worker.js'
+import {CheckpointWriter} from './checkpoint-writer.js'
+import {AsyncReductionCheckpoint} from './storage.js'
+import {IncrementalGraph} from './incremental-graph.js'
+import {createDependencyGraph} from './lineswapper.js'
+import {sweepFactored,SweepStats} from './sat-sweeping-core.js'
+import {init,killThreads} from 'z3-solver'
+const service=new SolverService()
+const fixture=new URL('data:text/javascript,'+encodeURIComponent(`import {parentPort} from 'node:worker_threads';parentPort.on('message',async()=>{await new Promise(r=>setTimeout(r,30));parentPort.postMessage({result:[]})})`))
+const first=service.run(fixture,{},1000,()=>false)
+assert.ok(service.busy)
+assert.equal(await service.run(fixture,{},1000,()=>false),undefined,'busy SAT work is skipped instead of queued')
+assert.deepEqual(await first,[]);assert.equal(service.busy,false)
+const cn={a:0,b:0,target:1,gate_i:3}
+const gates=Array.from({length:1000},()=>({...cn}))
+const graph=new IncrementalGraph(gates)
+let recomputed=0
+const internals=graph as unknown as {recompute:(ids:Set<number>)=>void}
+const recompute=internals.recompute.bind(graph)
+internals.recompute=ids=>{recomputed+=ids.size;recompute(ids)}
+graph.replace([500],[])
+assert.ok(recomputed<20,'a read-list deletion does not recompute all thousand users')
+assert.deepEqual(graph.context().nodes,createDependencyGraph(gates.filter((_,i)=>i!==500)))
+const directory=await mkdtemp(join(tmpdir(),'packed-checkpoint-'))
+const original=Array.from({length:100000},()=>({...cn}))
+const writer=new CheckpointWriter(original,3,65),file=join(directory,'latest.json')
+let ticks=0;const heartbeat=setInterval(()=>ticks++,1)
+try{
+ await writer.write([file],[])
+ assert.ok(ticks>0,'main-thread timers run while a large checkpoint is verified')
+ const before=await readFile(file,'utf8')
+ await assert.rejects(writer.write([file],[{a:0,b:0,target:0,gate_i:15}]),/CORRUPTION/)
+ assert.equal(await readFile(file,'utf8'),before,'failed verification never overwrites the saved circuit')
+ await assert.rejects(writer.write([directory],[]),/EISDIR|EPERM|EACCES/)
+ await writer.write([file],[])
+ let persisted=0
+ const checkpoint=new AsyncReductionCheckpoint(10,async()=>{persisted++;await new Promise(r=>setTimeout(r,5))})
+ assert.deepEqual(await Promise.all([checkpoint.saveIfReduced([cn,cn]),checkpoint.saveIfReduced([cn,cn,cn])]),[true,false])
+ assert.equal(persisted,1,'stale requests cannot regress the saved count')
+ let fail=true
+ const retry=new AsyncReductionCheckpoint(10,async()=>{if(fail)throw new Error('disk failure')})
+ await assert.rejects(retry.saveIfReduced([]),/disk failure/);assert.equal(retry.hasSaved,false)
+ fail=false;assert.equal(await retry.saveIfReduced([]),true,'failed writes do not advance the saved count')
+}finally{clearInterval(heartbeat);await writer.close();await rm(directory,{recursive:true,force:true})}
+const t={a:0,b:1,target:2,gate_i:1},cx={a:3,b:0,target:4,gate_i:3}
+const distributed=[t,cx,{a:2,b:4,target:5,gate_i:1},cx,{a:2,b:3,target:5,gate_i:1},{a:2,b:4,target:5,gate_i:1},t]
+const options={maximumWires:64,maximumNodes:200000,maximumEdges:16000000,stopped:()=>false}
+const api=await init()
+try{
+ const a:SweepStats={queries:0,merges:0,counterexamples:0},b:SweepStats={queries:0,merges:0,counterexamples:0}
+ assert.deepEqual(await sweepFactored(distributed,options,performance.now()+30000,a,api),[])
+ assert.deepEqual(await sweepFactored(distributed,options,performance.now()+30000,b,api),[])
+ assert.equal(a.contextInitializations,1);assert.equal(b.contextInitializations,undefined)
+ assert.equal(await sweepFactored([t],{...options,simulationBits:1},performance.now()+30000,undefined,api),undefined,'fresh solvers do not inherit previous miters or lemmas')
+}finally{await killThreads(api.em)}
+console.log('Profile optimizations: nonqueued SAT, context reuse, sparse graph edits, background packed checkpoints, corruption rejection and ordered persistence passed')

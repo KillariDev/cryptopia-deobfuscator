@@ -1,3 +1,4 @@
+import { CheckpointWriter } from './checkpoint-writer.js'
 import { opaqueRainbow } from './opaque-rainbow.js'
 import { AdaptiveStrategyPicker } from './strategy-picker.js'
 import { searchDependencyCuts } from './dependency-cuts.js'
@@ -27,7 +28,7 @@ import { RainbowPortfolio, RainbowMatch } from './rainbow-portfolio.js'
 import { LimitedMap } from './limitedMap.js'
 import { WorkerPool, configuredWorkerCount } from './threads.js'
 import { createDependencyGraph } from './lineswapper.js'
-import { outputPaths, prepareOutputDirectories, writeCircuit, writeCircuitCopies, ReductionCheckpoint } from './storage.js'
+import { outputPaths, prepareOutputDirectories, writeCircuit, writeCircuitCopies, AsyncReductionCheckpoint } from './storage.js'
 import { JobCircuits, loadJob, WORKER_ROUND_MS } from './job.js'
 
 const removeVariableFromGate = (gate: Gate, isA: boolean) => {
@@ -717,6 +718,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	const activity: WorkerActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
 	const progressActivity = (): WorkerActivity => ({ ...activity, strategyWeights: config.search.strategyAdaptive ? caches.strategyPicker.weights() : undefined, strategies: strategySnapshot(), rainbowTables: tables.statistics(), resources: { databaseMs: lookupDatabaseTime() - databaseStarted, elapsedMs: performance.now() - jobStarted, heapUsedBytes: process.memoryUsage().heapUsed } })
 	let lastProgress = performance.now()
+	let publishedReduction = false
 	let candidateParts = new LazyCircuit([optimizedVersion])
 	onProgress?.(optimizedVersion.length, progressActivity(), optimizedVersion)
 	const finishWorker = () => {
@@ -727,13 +729,19 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	}
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
-		if (onProgress && ((reportOnImprovement && wantsSnapshot?.(candidateParts.length)) || endTime - lastProgress >= config.timing.workerReportSeconds * 1000)) {
+		if (onProgress && ((reportOnImprovement && !publishedReduction && wantsSnapshot?.(candidateParts.length)) || endTime - lastProgress >= config.timing.workerReportSeconds * 1000)) {
 			onProgress(candidateParts.length, progressActivity(), wantsSnapshot && !wantsSnapshot(candidateParts.length) ? undefined : candidateParts.materialize())
 			lastProgress = endTime
+			if (wantsSnapshot?.(candidateParts.length)) publishedReduction = true
 		}
 		return shouldFinish?.(activity) === true || endTime >= jobDeadline
 	}
-	const heartbeat = onProgress ? setInterval(() => onProgress(candidateParts.length, progressActivity()), config.timing.workerReportSeconds * 1000) : undefined
+	const heartbeat = onProgress ? setInterval(() => {
+		const improved = wantsSnapshot?.(candidateParts.length)
+		onProgress(candidateParts.length, progressActivity(), improved ? candidateParts.materialize() : undefined)
+		lastProgress = performance.now()
+		if (improved) publishedReduction = true
+	}, config.timing.workerReportSeconds * 1000) : undefined
 	try {
 	while (true) {
 		if (workerMode && optimizedVersion.length === 0) return finishWorker()
@@ -842,9 +850,9 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	if (originalCircuit.wire_count !== inputCircuit.wire_count) throw new Error('Latest circuit wire count differs from original')
 	if (originalGates.length < gates.length) throw new Error('Latest circuit has more gates than original')
 	onPhase('verifying input checkpoint')
-	verifyCircuit(originalGates, gates, originalCircuit.wire_count, config.validation.checkpointInputs)
-	writeCircuit(outputPaths(pathToFileWithoutExt).latest, inputCircuit.wire_count, gates)
-	if (!gates.length) return
+	const writer = new CheckpointWriter(originalGates, inputCircuit.wire_count, config.validation.checkpointInputs)
+	try { await writer.write([outputPaths(pathToFileWithoutExt).latest], gates) } catch (error) { await writer.close(); throw error }
+	if (!gates.length) { await writer.close(); return }
 	const nMaxWorkers = configuredWorkerCount()
 	onPhase('loading shared rainbow table snapshots')
 	const sharedTables = await loadSharedTables()
@@ -932,12 +940,11 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const snapshots = approxGates.slice()
 			const stopSignal = new Int32Array(new SharedArrayBuffer(4))
 			let broadStop: Int32Array | undefined
-			const checkpoint = new ReductionCheckpoint(nPrevGates, snapshot => {
-				save([paths.progress(snapshot.length), paths.latest], snapshot, inputCircuit.wire_count, originalGates)
+			const checkpoint = new AsyncReductionCheckpoint(nPrevGates, async snapshot => {
+				await writer.write([paths.progress(snapshot.length), paths.latest], snapshot)
 				savedGateCount = snapshot.length
 			})
 			const restart = wholeCircuit || runBroad ? new WholeCircuitRestart(currentGates, stopSignal, candidate => {
-				checkpoint.saveIfReduced(candidate)
 				logVerbose(`New best checkpoint: ${candidate.length} gates.`)
 			}) : undefined
 			let rejectCheckpoint!: (error: unknown) => void
@@ -946,15 +953,31 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const statuses: WorkerStatus[] = Array.from({ length: jobCount + Number(runBroad) }, () => ({ updatedAtMs: 0, done: false, started: false }))
 			const localCandidate = () => roundSearchResult(snapshots, wholeCircuit)
 			let pendingLocal = false
-			const flushLocal = () => {
+			let localFlush: Promise<void> | undefined
+			const flushLocal = async (): Promise<void> => {
+				if (localFlush) return localFlush
 				if (!pendingLocal) return
 				const assembled = localCandidate()
-				if (restart) restart.accept(assembled, false)
-				else checkpoint.saveIfReduced(assembled)
 				pendingLocal = false
+				localFlush = (async () => {
+					await checkpoint.saveIfReduced(assembled)
+					restart?.accept(assembled, false)
+				})()
+				try { await localFlush } finally { localFlush = undefined }
+			}
+			let globalActions: Promise<unknown> = Promise.resolve()
+			const acceptGlobal = async (candidate: Gate[]) => {
+				await flushLocal()
+				// Local work can improve while verification is running. Save and
+				// compare the newest assembly before authorizing a global restart.
+				const localBest = localCandidate()
+				if (candidate.length >= localBest.length || candidate.length >= restart!.best.length) return
+				await checkpoint.saveIfReduced(candidate)
+				if (candidate.length >= localCandidate().length) return
+				if (restart!.accept(candidate)) lastImprovementTime = performance.now()
 			}
 			const checkpointTimer = setInterval(() => {
-				try { flushLocal() } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
+				void flushLocal().catch(error => { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) })
 			}, config.timing.checkpointSeconds * 1000)
 			const report = (force = false) => {
 				const elapsed = performance.now() - lastIterationTime
@@ -999,7 +1022,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 							while (canContinue() && (performance.now() - lastImprovementTime < config.workers.broadSearchIdleSeconds * 1000 || !broadSchedule.take(performance.now()))) await waitForWork(Math.min(250, config.workers.broadSearchSeconds * 1000))
 							if (!canContinue()) break
 						}
-						flushLocal()
+						if (pendingLocal || localFlush) await flushLocal()
 						broadStop = new Int32Array(new SharedArrayBuffer(4))
 						const jobStop = broadStop
 						const broadJob = nextStrategyJob++
@@ -1009,11 +1032,15 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 							strategySummary.observe(broadJob, activity?.strategies)
 							strategyWeights.observe(activity)
 							statuses[jobCount] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
-							if (snapshot) try { flushLocal(); if (restart!.accept(snapshot)) lastImprovementTime = performance.now() } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
+							if (snapshot) {
+								globalActions = globalActions.then(() => acceptGlobal(snapshot))
+								void globalActions.catch(error => { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) })
+							}
 						}, jobStop.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, true, 'broad')
 						strategySummary.finish(broadJob); statuses[jobCount].done = true
-						flushLocal()
-						if (restart!.accept(result)) lastImprovementTime = performance.now()
+						await flushLocal()
+						await globalActions
+						await acceptGlobal(result)
 						best = roundSearchResult([best, result], true)
 						if (!canContinue()) break
 					} while (canContinue())
@@ -1071,14 +1098,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				currentGates = roundSearchResult(snapshots, wholeCircuit)
 				if (runBroad) currentGates = roundSearchResult([currentGates, results[1]], true)
 				if (restart) currentGates = roundSearchResult([restart.best, currentGates], true)
-			} finally { clearInterval(checkpointTimer); Atomics.store(stopSignal, 0, 1); if (broadStop) Atomics.store(broadStop, 0, 1); beginPhase('finishing round') }
+			} finally { clearInterval(checkpointTimer); await localFlush; await globalActions; Atomics.store(stopSignal, 0, 1); if (broadStop) Atomics.store(broadStop, 0, 1); beginPhase('finishing round') }
 			if (broadStarted && currentGates.length < nPrevGates) broadSchedule.retry()
 			report()
 			const filename = paths.progress(currentGates.length)
 			if (!checkpoint.hasSaved) {
-				save([filename, paths.latest], currentGates, inputCircuit.wire_count, originalGates)
+				await writer.write([filename, paths.latest], currentGates)
 				savedGateCount = currentGates.length
-			} else checkpoint.saveIfReduced(currentGates)
+			} else await checkpoint.saveIfReduced(currentGates)
 			const gatesRemoved = nPrevGates - currentGates.length
 			const endTime = performance.now()
 			const timeDiffMins = (endTime - lastIterationTime) / 60000
@@ -1100,5 +1127,6 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		clearInterval(memoryTimer)
 		clearInterval(summaryTimer)
 		await pool.close()
+		await writer.close()
 	}
 }

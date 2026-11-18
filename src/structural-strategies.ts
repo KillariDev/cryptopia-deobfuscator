@@ -9,7 +9,7 @@ import { recordStrategy } from './strategy-stats.js'
 export const structuralNames = ['factored', 'block-cancellation', 'sat-sweeping'] as const
 export type StructuralStrategy = typeof structuralNames[number]
 export function structuralChoices() {
-	return structuralNames.filter(name => name === 'factored' ? config.synthesis.factored : name === 'block-cancellation' ? config.synthesis.blockCancellation : config.synthesis.satSweeping)
+	return structuralNames.filter(name => name === 'factored' ? config.synthesis.factored : name === 'block-cancellation' ? config.synthesis.blockCancellation : config.synthesis.satSweeping && !satService.busy)
 }
 
 const satService = new SolverService()

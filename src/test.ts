@@ -1024,3 +1024,5 @@ await import('./worker-heartbeat-test.js')
 await import('./local-publication-test.js')
 
 await import('./checkpoint-coalescing-test.js')
+
+await import('./profile-optimizations-test.js')

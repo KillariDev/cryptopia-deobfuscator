@@ -26,11 +26,12 @@ export function runSolverWorker(url: URL, data: object, budgetMs: number, should
 export class SolverService {
  private worker?: Worker
  private calls = 0
- private pending: Promise<unknown> = Promise.resolve()
+ private active = false
+ get busy() { return this.active }
  run(url: URL, data: object, budgetMs: number, shouldStop: () => boolean) {
-  const work = this.pending.then(() => this.execute(url, data, budgetMs, shouldStop))
-  this.pending = work.catch(() => {})
-  return work
+  if (this.active) return Promise.resolve(undefined)
+  this.active = true
+  return this.execute(url, data, budgetMs, shouldStop).finally(() => { this.active = false })
  }
  private async execute(url: URL, data: object, budgetMs: number, shouldStop: () => boolean): Promise<Gate[] | undefined> {
   if(shouldStop() || budgetMs<=0)return undefined
