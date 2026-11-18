@@ -24,6 +24,6 @@ export async function opaqueRainbow(gates: Gate[], tables: RainbowPortfolio, cac
   }
   const hit=(await tables.findReplacements([{mappedGates:gates,wires:live.length,fn:LookupFunction.fromOutputs(outputs,live.length)}],cache)).get(0)
   if(stopped() || !hit || hit.gates.length>=gates.length)return undefined
-  return hit.gates.map(g=>({...g,a:live[g.a].wire,b:live[g.b].wire,target:live[g.target].wire}))
+  return hit.gates.map(g=>({...g,a:live[g.a]?.wire ?? live[0].wire,b:live[g.b]?.wire ?? live[0].wire,target:live[g.target].wire}))
  }catch(error){if(error instanceof FactoredLimit)return undefined;throw error}
 }
