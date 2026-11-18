@@ -2,10 +2,10 @@ import { CheckpointWriter } from './checkpoint-writer.js'
 import { opaqueRainbow } from './opaque-rainbow.js'
 import { RoundStrategyPicker, StrategyPicker } from './strategy-picker.js'
 import { searchDependencyCuts } from './dependency-cuts.js'
-import { setImmediate as yieldToCoordinator, setTimeout as waitForWork } from 'node:timers/promises'
+import { setImmediate as yieldToCoordinator } from 'node:timers/promises'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
-import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
+import { roundSearchPlan, roundSearchResult } from './round-search.js'
 import { StrategySummary, formatRoundStrategies } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
@@ -1001,8 +1001,6 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	let lastReportedGates = currentGates.length
 	let nextStrategyJob = 0
 	let optimizerRound = 0
-	let lastImprovementTime = performance.now()
-	const broadSchedule = new PeriodicStrategy(config.workers.broadSearchSeconds * 1000)
 	const summaryThrottle = new SummaryThrottle(config.timing.summarySeconds * 1000)
 	let reportStatus: (force?: boolean) => void = () => {}
 	const beginPhase = (phase: string) => {
@@ -1034,14 +1032,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			let lastIterationTime = performance.now()
 			const nPrevGates = currentGates.length
 			const workersSize = getRandomNumberInRange(Math.min(config.workers.minimumChunkGates, currentGates.length), Math.max(1, currentGates.length * config.workers.maximumChunkFraction))
-			const runBroad = currentGates.length >= minimumBroadGates() && (config.workers.keepBusy ? config.workers.broadSearchSeconds > 0 : broadSchedule.take(performance.now()))
-			let broadStarted = false
+			const runBroad = nMaxWorkers > 1 && currentGates.length >= minimumBroadGates() && config.workers.broadSearchSeconds > 0
 			const plan = roundSearchPlan(currentGates.length, nMaxWorkers, workersSize, config.workers.wholeCircuitMaximumGates)
 			const wholeCircuit = plan.wholeCircuit || (config.workers.keepBusy && currentGates.length < nMaxWorkers)
-			requestedConcurrency = config.workers.keepBusy ? nMaxWorkers : config.workers.adaptiveConcurrency ? concurrency.limit(Math.min(nMaxWorkers, plan.capacity + Number(runBroad))) : Math.min(nMaxWorkers, plan.capacity + Number(runBroad))
+			requestedConcurrency = config.workers.keepBusy ? nMaxWorkers : config.workers.adaptiveConcurrency ? Math.max(runBroad ? 2 : 1, concurrency.limit(Math.min(nMaxWorkers, plan.capacity + Number(runBroad)))) : Math.min(nMaxWorkers, plan.capacity + Number(runBroad))
 			const nWorkers = memoryLimit.limit(requestedConcurrency)
 			activeConcurrency = nWorkers
 			pool.setConcurrency(nWorkers)
+			pool.setBroadReservation(runBroad)
 			// Queue enough independent lanes for the requested capacity so staged
 			// startup can fill newly available slots within this same round.
 			const queueCapacity = config.workers.keepBusy ? requestedConcurrency : nWorkers
@@ -1052,18 +1050,17 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
 			const stopSignal = new Int32Array(new SharedArrayBuffer(4))
-			let broadStop: Int32Array | undefined
 			const checkpoint = new AsyncReductionCheckpoint(nPrevGates, async snapshot => {
 				await writer.write([paths.progress(snapshot.length), paths.latest], snapshot)
 			})
-			const restart = wholeCircuit || runBroad ? new WholeCircuitRestart(currentGates, stopSignal, candidate => {
-				logVerbose(`New best checkpoint: ${candidate.length} gates.`)
-			}) : undefined
+
 			let rejectCheckpoint!: (error: unknown) => void
 			const checkpointFailed = new Promise<never>((_, reject) => { rejectCheckpoint = reject })
 			let completed = 0
 			const statuses: WorkerStatus[] = Array.from({ length: jobCount + Number(runBroad) }, () => ({ updatedAtMs: 0, done: false, started: false }))
 			const localCandidate = () => roundSearchResult(snapshots, wholeCircuit)
+			const localCount = () => wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)
+			let broadBest = currentGates
 			let pendingLocal = false
 			let localFlush: Promise<void> | undefined
 			const flushLocal = async (): Promise<void> => {
@@ -1071,24 +1068,11 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				if (!pendingLocal) return
 				const assembled = localCandidate()
 				pendingLocal = false
-				localFlush = (async () => {
-					await checkpoint.saveIfReduced(assembled)
-					restart?.accept(assembled, false)
-				})()
+				localFlush = checkpoint.saveIfReduced(assembled).then(() => {})
 				try { await localFlush } finally { localFlush = undefined }
 			}
-			let globalActions: Promise<unknown> = Promise.resolve()
-			const acceptGlobal = async (candidate: Gate[]) => {
-				await flushLocal()
-				// Local work can improve while verification is running. Save and
-				// compare the newest assembly before authorizing a global restart.
-				const localBest = localCandidate()
-				if (candidate.length >= localBest.length || candidate.length >= restart!.best.length) return
-				await checkpoint.saveIfReduced(candidate)
-				if (candidate.length >= localCandidate().length) return
-				if (restart!.accept(candidate)) lastImprovementTime = performance.now()
-			}
-			const checkpointTimer = setInterval(() => {
+			// Only a single search path can publish a provisional checkpoint.
+			const checkpointTimer = runBroad ? undefined : setInterval(() => {
 				void flushLocal().catch(error => { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) })
 			}, config.timing.checkpointSeconds * 1000)
 			const report = (force = false, roundResult?: number) => {
@@ -1096,13 +1080,13 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				if (config.workers.keepBusy) logVerbose(`Jobs finished this round: ${completed}; continuing searches across ${jobCount} ${wholeCircuit ? 'whole-circuit alternatives' : 'chunks'}.`)
 				else logVerbose(formatProgress(nPrevGates, (wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)), completed, jobCount, elapsed))
 				logVerbose(formatWorkerActivity(statuses, elapsed, WORKER_ROUND_MS))
-				const snapshot = restart ? roundSearchResult([restart.best, localCandidate()], true) : localCandidate()
-				const candidate = roundResult ?? snapshot.length
+				const localGates = localCount()
+				const candidate = roundResult ?? Math.min(broadBest.length, localGates)
 				if (summaryThrottle.allow(performance.now(), force || verboseLogging() || candidate === 0)) {
-					logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate, previous: lastReportedGates, statuses, elapsedMs: elapsed }))
+					logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate, roundImproved: localGates < nPrevGates, previous: lastReportedGates, statuses, elapsedMs: elapsed }))
 					lastReportedGates = candidate
 				}
-				if ((elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, snapshot.length)) && Atomics.load(stopSignal, 0) === 0) {
+				if ((elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, localGates)) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
 					logVerbose(`Round time target reached; finishing active jobs and returning queued jobs unchanged.`)
 				}
@@ -1114,45 +1098,37 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			}
 			try {
 				const canContinue = () => {
-					if (!config.workers.keepBusy || Atomics.load(stopSignal, 0) !== 0) { if (broadStop) Atomics.store(broadStop, 0, 1); return false }
-					const count = wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, value) => sum + value, 0)
+					if (!config.workers.keepBusy || Atomics.load(stopSignal, 0) !== 0) return false
+					const count = localCount()
 					const elapsed = performance.now() - lastIterationTime
-					if (!count || elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, count)) { Atomics.store(stopSignal, 0, 1); if (broadStop) Atomics.store(broadStop, 0, 1); return false }
+					if (!count || elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, count)) {
+						Atomics.store(stopSignal, 0, 1)
+						return false
+					}
 					return true
 				}
-				// Broad work has priority in the pool, and can recur during long
-				// rounds. Local jobs fill its slot while it waits for its cadence.
+				// Each lane starts from the round input and advances only its own
+				// candidates. Neither uses the other's results before selection.
 				const broad = runBroad ? (async () => {
-					let best = currentGates
-					if (!config.workers.keepBusy && performance.now() - lastImprovementTime < config.workers.broadSearchIdleSeconds * 1000) return best
 					do {
-						if (config.workers.keepBusy) {
-							while (canContinue() && (performance.now() - lastImprovementTime < config.workers.broadSearchIdleSeconds * 1000 || !broadSchedule.take(performance.now()))) await waitForWork(Math.min(250, config.workers.broadSearchSeconds * 1000))
-							if (!canContinue()) break
-						}
-						if (pendingLocal || localFlush) await flushLocal()
-						broadStop = new Int32Array(new SharedArrayBuffer(4))
-						const jobStop = broadStop
 						const broadJob = nextStrategyJob++
 						statuses[jobCount] = { updatedAtMs: performance.now() - lastIterationTime, done: false, started: false }
-						broadStarted = true
-						const result = await pool.run(roundSearchResult([restart!.best, localCandidate()], true), inputCircuit.wire_count, (_, activity, snapshot) => {
+						const accept = (candidate: Gate[]) => {
+							if (isReplacementSimpler(candidate, broadBest)) broadBest = candidate
+						}
+						const result = await pool.run(broadBest, inputCircuit.wire_count, (_, activity, snapshot) => {
 							observeStrategy(broadJob, activity)
 							statuses[jobCount] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
-							if (snapshot) {
-								globalActions = globalActions.then(() => acceptGlobal(snapshot))
-								void globalActions.catch(error => { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) })
-							}
-						}, jobStop.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, true, 'broad', optimizerRound)
-						strategySummary.finish(broadJob); statuses[jobCount].done = true
-						await flushLocal()
-						await globalActions
-						await acceptGlobal(result)
-						best = roundSearchResult([best, result], true)
-						if (!canContinue()) break
-					} while (canContinue())
-					return best
-				})() : Promise.resolve(currentGates)
+							if (snapshot) accept(snapshot)
+						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, false, 'broad', optimizerRound)
+						strategySummary.finish(broadJob)
+						statuses[jobCount].done = true
+						accept(result)
+						await yieldToCoordinator()
+					} while (broadBest.length > 0 && (config.workers.keepBusy
+						? canContinue()
+						: completed < jobCount && Atomics.load(stopSignal, 0) === 0))
+				})().finally(() => pool.setBroadReservation(false)) : Promise.resolve()
 				const local = Promise.all(approxGates.map(async (_initial, index) => {
 					const workerFile = paths.worker(index)
 					let chunk = index
@@ -1171,10 +1147,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 							// results are alternatives, never additional chunks to concatenate.
 							if (!isReplacementSimpler(candidate, snapshots[target])) return
 							snapshots[target] = candidate; candidateCounts[target] = candidate.length
-							pendingLocal = true
-							lastImprovementTime = performance.now()
-							if (broadStop) Atomics.store(broadStop, 0, 1)
-							broadSchedule.retry()
+							pendingLocal = !runBroad
 						}
 						const result = await pool.run(dataChunk, inputCircuit.wire_count, (_count, activity, snapshot) => {
 								executionStarted ??= performance.now()
@@ -1200,12 +1173,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 					statuses[index].done = true
 					return snapshots[index]
 				}))
-				const results = await Promise.race([memoryFailure, checkpointFailed, Promise.all([local, broad])])
-				currentGates = roundSearchResult(snapshots, wholeCircuit)
-				if (runBroad) currentGates = roundSearchResult([currentGates, results[1]], true)
-				if (restart) currentGates = roundSearchResult([restart.best, currentGates], true)
-			} finally { clearInterval(checkpointTimer); await localFlush; await globalActions; Atomics.store(stopSignal, 0, 1); if (broadStop) Atomics.store(broadStop, 0, 1); beginPhase('finishing round') }
-			if (broadStarted && currentGates.length < nPrevGates) broadSchedule.retry()
+				await Promise.race([memoryFailure, checkpointFailed, Promise.all([local, broad])])
+				currentGates = roundSearchResult([localCandidate(), broadBest], true)
+			} finally {
+				clearInterval(checkpointTimer)
+				Atomics.store(stopSignal, 0, 1)
+				await localFlush
+				beginPhase('finishing round')
+			}
 			report(false, currentGates.length)
 			const filename = paths.progress(currentGates.length)
 			if (!checkpoint.hasSaved) {
@@ -1221,7 +1196,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				if (reason) logVerbose(`Next round worker target: ${concurrency.limit(nMaxWorkers)} (${reason})`)
 			}
 			logVerbose(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
-			if (!config.workers.keepBusy && !wholeCircuit && !(restart && currentGates.length < nPrevGates)) {
+			if (!config.workers.keepBusy && !wholeCircuit && !(runBroad && currentGates.length < nPrevGates)) {
 				beginPhase('shuffling next round')
 				const job = nextStrategyJob++
 				try { currentGates = await pool.run(currentGates, inputCircuit.wire_count, (_, activity) => strategySummary.observe(job, activity?.strategies), undefined, config.workers.jobSeconds * 1000, false, 'shuffle') }

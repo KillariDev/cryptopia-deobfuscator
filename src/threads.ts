@@ -19,6 +19,7 @@ export class WorkerPool {
 	private queue: Job[] = []
 	private failure?: Error
 	private concurrency: number
+	private reserveBroad = false
 	private shared = new TemplateLibrary(config.workers.sharedTemplateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates)
 	constructor(private size: number, private workerUrl = new URL('./worker.js', import.meta.url), private sharedTables: SharedTable[] = [], private seed?: number, private maximumChecks = 0) {
 		if (!Number.isSafeInteger(size) || size < 1) throw new Error('Invalid worker pool size')
@@ -27,6 +28,10 @@ export class WorkerPool {
 	setConcurrency(limit: number) {
 		if (!Number.isSafeInteger(limit) || limit < 1 || limit > this.size) throw new Error('Invalid worker concurrency')
 		this.concurrency = limit
+		this.dispatch()
+	}
+	setBroadReservation(reserved: boolean) {
+		this.reserveBroad = reserved
 		this.dispatch()
 	}
 	/** Release excess isolates promptly under memory pressure. Their last
@@ -70,7 +75,10 @@ export class WorkerPool {
 				this.queue.shift()!.resolve(next.gates)
 				continue
 			}
-			if (this.slots.filter(slot => slot.job).length >= this.concurrency) return
+			const active = this.slots.filter(slot => slot.job)
+			if (active.length >= this.concurrency) return
+			if (next.solver !== 'broad' && this.reserveBroad && this.concurrency > 1 &&
+				active.filter(slot => slot.job!.solver !== 'broad').length >= this.concurrency - 1) return
 			let slot = this.slots.find(slot => !slot.job)
 			if (!slot) {
 				if (this.slots.length >= this.size) return

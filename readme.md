@@ -128,23 +128,22 @@ templates, variable elimination, rainbow lookup and eligible synthesis solvers.
 It starts with the full circuit and scans overlapping coarse-to-fine regions.
 Variable and rainbow scans also use full-region and progressively smaller window
 sizes, rather than inheriting the local slice cap; their wire limits still apply.
-At most one broad job runs in a round, scheduled no more often than
-`workers.broadSearchSeconds` (default 60 seconds; 0 disables broad work). The broad
-job is queued first and shares the existing worker cap; with only one available
-slot, jobs run serially. It cannot be starved behind the local job queue. After an improvement, broad
-work is eligible immediately on the new baseline, rather than waiting for the
-old baseline's cadence timer.
+Eligible rounds start one broad worker alongside the chunk workers when the
+configured worker cap is at least two. Broad jobs share that cap and are
+queued with priority. A positive `workers.broadSearchSeconds` enables broad
+work, and zero disables it. The value no longer sets an interval.
+`workers.broadSearchIdleSeconds` is accepted for existing configs.
 
-A broad improvement is a complete alternative circuit. It is never concatenated
-with old chunk results. Verified improvements stop peer work, cancel queued jobs
-and restart from the best complete candidate returned while stopping. Quiet
-summaries distinguish broad strategy timings and show a running broad worker.
+The broad lane and chunk lane keep separate candidates throughout the round.
+Jobs in either lane can pick up their own lane's improvements. At round end,
+the coordinator compares the complete broad result with the assembled chunk
+result and verifies and saves the winner. Periodic checkpoints continue in
+rounds that only run local searches.
 
-`workers.jobSeconds` is the only time limit (default 120 seconds, or two minutes).
-All strategies use the job's remaining time and stop cooperatively when a better
-result is found. State, memory and circuit-size bounds remain active. Legacy
-`synthesis.affineWholeCircuitSeconds` is accepted as an alias for the broad cadence;
-old per-strategy timer and attempt-cadence settings are accepted but ignored.
+`workers.jobSeconds` sets the budget for an individual job. Workers stop
+cooperatively at the round boundary, with state, memory and circuit-size limits
+also in effect. Legacy `synthesis.affineWholeCircuitSeconds` remains an alias
+for enabling broad work.
 
 Replacements are ordered by gate count, then used-wire count and read cost.
 Multiple workers search circuit chunks, retaining caches between jobs. For circuits

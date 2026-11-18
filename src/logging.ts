@@ -63,6 +63,7 @@ const duration = (ms: number) => `${Math.floor(Math.max(0, ms) / 60_000)}m ${Mat
 export type SolverStatus = {
 	original: number
 	roundStart: number
+	roundImproved?: boolean
 	candidate: number
 	previous: number
 	statuses: WorkerStatus[]
@@ -71,7 +72,7 @@ export type SolverStatus = {
 export function formatStatus(status: SolverStatus) {
 	const { original, roundStart, candidate, previous, statuses, elapsedMs } = status
 	const finished = statuses.filter(worker => worker.done).length
-	const targetMs = (candidate < roundStart ? config.timing.improvedRoundMinutes : config.timing.roundMinutes) * 60_000
+	const targetMs = ((status.roundImproved ?? candidate < roundStart) ? config.timing.improvedRoundMinutes : config.timing.roundMinutes) * 60_000
 	const round = finished === statuses.length
 		? `Round finished in ${duration(elapsedMs)}`
 		: `Round time: ${duration(elapsedMs)} / ${duration(targetMs)}`
