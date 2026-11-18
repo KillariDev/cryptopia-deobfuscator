@@ -287,16 +287,16 @@ export class IncrementalGraph {
 			if (region) yield region
 		}
 		if (preferredWires?.size) {
-			// Try a bounded sample of gates touching changed wires, preferring
-			// repeated operations that may now be close in dependency order.
+			// Follow changed wires to the nearest accesses on either side of
+			// the patch, preferring repeated operations among those neighbors.
 			const nearby: { line: number, key: string }[] = []
 			const frequencies = new Map<string, number>()
 			const sampled = new Set<number>()
 			for (const wire of preferredWires) {
 				if (stopped()) return
 				const list = this.accesses.get(wire) ?? []
-				const start = Math.floor(Math.random() * list.length)
-				for (let i = 0; i < Math.min(4, list.length) && nearby.length < 32; i++) {
+				const start = seeds.length ? Math.max(0, this.lowerBound(list, seeds[0]) - 2) : Math.floor(Math.random() * list.length)
+				for (let i = 0; i < Math.min(4, seeds.length ? list.length - start : list.length) && nearby.length < 32; i++) {
 					const id = list[(start + i) % list.length]
 					if (sampled.has(id)) continue
 					sampled.add(id)

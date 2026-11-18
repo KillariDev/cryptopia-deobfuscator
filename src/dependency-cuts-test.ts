@@ -25,6 +25,11 @@ const sparse = [cn, ...Array.from({ length: 10000 }, () => gate(3, 4, 5, 1)), cn
 const sparseIndex = new DependencyCutIndex(sparse), sparseCut = sparseIndex.select(10001, 2)!
 assert.deepEqual(sparseCut.indices, [0, 10001])
 equivalent(sparse, sparseIndex.patch(sparseCut, []), 6)
+const rankedSparse = await searchDependencyCuts(sparse, () => false, async cut => cut.indices.length === 2 &&
+	cut.indices[0] === 0 && cut.indices[1] === 10001 ? [] : undefined, 0, undefined, undefined, 2, 8, true)
+assert.deepEqual(rankedSparse, sparse.slice(1, -1))
+assert.ok(sparseIndex.nearby(10001, [1]).includes(10001))
+
 assert.throws(() => sparseIndex.patch({ ...sparseCut, gates: [] }, []), /Stale/)
 assert.throws(() => sparseIndex.patch(sparseCut, [gate(0, 0, 42, 15)]), /boundary wire/)
 const war = new DependencyCutIndex([cn, gate(0, 0, 0, 15), cn])

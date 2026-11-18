@@ -1,3 +1,6 @@
+import { LimitedMap } from './limitedMap.js'
+import { normalizeWindow } from './search.js'
+import { reverseMapCircuit } from './utils.js'
 import { config } from './config.js'
 import { Gate } from './types.js'
 import { analyzeFactored, FactoredLimit, synthesizeFactored } from './factored.js'
@@ -14,19 +17,28 @@ export function structuralChoices() {
 }
 
 const satService = new SolverService()
+const satPreflightMisses = new LimitedMap<string, true>(512, 'lru')
 
 async function satRewrite(gates: Gate[], options: FactoredOptions, deadline: number) {
 	// Most small windows have no equivalent expressions to sweep. Avoid an
 	// isolate (and WASM initialization) for those cheap negative results.
 	if (gates.length <= config.synthesis.affineMaximumWindowGates) {
 		try {
-			const { graph, rows } = analyzeFactored(gates, options)
+			const { normalized, wires, key } = normalizeWindow(gates)
+			const missKey = `${options.maximumWires}:${options.maximumNodes}:${options.maximumEdges}:${key}`
+			if (satPreflightMisses.get(missKey)) return undefined
+			const { graph, rows } = analyzeFactored(normalized, options)
 			const result = graph.emit(rows, gates.length)
-			if (result) return result
+			if (result) return reverseMapCircuit(result, wires)
 			const seen = new Set<bigint>()
 			let candidate = false
 			for (const form of graph.forms) { graph.check(); if (seen.has(form.signature)) { candidate = true; break }; seen.add(form.signature) }
-			if (!candidate) return undefined
+			if (!candidate) {
+				// This preflight completed without candidates for any input.
+				// A canceled or resource-limited attempt never reaches here.
+				satPreflightMisses.set(missKey, true)
+				return undefined
+			}
 		} catch (error) { if (error instanceof FactoredLimit) return undefined; throw error }
 	}
 	return satService.run(new URL('./sat-sweeping-worker.js', import.meta.url), { gates, maximumWires: options.maximumWires, maximumNodes: options.maximumNodes, maximumEdges: options.maximumEdges, budgetMs: Math.max(0, deadline - performance.now()) }, Math.max(0, deadline - performance.now()), options.stopped)

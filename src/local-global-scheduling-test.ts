@@ -17,11 +17,13 @@ try {
 	config.logging.verbose = false
 	const reports: string[] = []
 	console.log = (...args: unknown[]) => { reports.push(args.map(String).join(' ')) }
-	Object.assign(config.workers, { maximum: 4, keepBusy: true, jobsPerWorker: 1, broadSearchIdleSeconds: 600, broadSearchSeconds: 600 })
+	Object.assign(config.workers, { maximum: 4, keepBusy: true, jobsPerWorker: 1, wholeCircuitMaximumGates: 6000, broadSearchIdleSeconds: 600, broadSearchSeconds: 600 })
 	config.timing.checkpointSeconds = 0.005
 	config.timing.summarySeconds = 0.01
-	for (const broadRemoved of [2, 4, 8]) {
-		const path = join(directory, 'puzzle-' + broadRemoved)
+	for (const [broadRemoved, wholeCircuit] of [[2, true], [4, true], [8, true], [2, false]] as const) {
+		config.workers.wholeCircuitMaximumGates = wholeCircuit ? 6000 : 0
+		const winner = !wholeCircuit ? 'combined' : broadRemoved > 4 ? 'global' : 'local'
+		const path = join(directory, `puzzle-${broadRemoved}-${wholeCircuit}`)
 		reports.length = 0
 		const expectCheckpointAndStatus = async (removed: number, delta: number) => {
 			const count = circuit.gates.length - removed
@@ -42,7 +44,7 @@ try {
 			assert.equal(restart, false)
 			if (jobRound === 2) {
 				if (solver === 'broad') {
-					assert.equal(broadStrategy, broadRemoved > 4 ? 'sat-sweeping' : 'mixed-basis')
+					assert.equal(broadStrategy, winner === 'local' ? 'mixed-basis' : 'sat-sweeping')
 					throw done
 				}
 				return gates
@@ -83,9 +85,9 @@ try {
 		}
 		await assert.rejects(splitTaskAndRun(path, 'unused', { originalCircuit: circuit, inputCircuit: circuit }), error => error === done)
 		const latest = JSON.parse(await readFile(path + '-latest.json', 'utf8'))
-		assert.equal(latest.gates.length, circuit.gates.length - Math.max(broadRemoved, 4))
-		const winner = reports.find(line => line.includes(`Round winner: ${broadRemoved > 4 ? 'global' : 'local'} | Local: 4 gates removed | Global: ${broadRemoved} gates removed`))
-		assert.match(winner ?? '', / \| [1-9]\d* gates\/hour$/)
+		assert.equal(latest.gates.length, circuit.gates.length - (wholeCircuit ? Math.max(broadRemoved, 4) : broadRemoved + 4))
+		const resultLine = reports.find(line => line.includes(`Round winner: ${winner} | Local: 4 gates removed | Global: ${broadRemoved} gates removed`))
+		assert.match(resultLine ?? '', / \| [1-9]\d* gates\/hour$/)
 		assert.ok(reports.some(line => line.endsWith('Local strategies: rainbow:1')))
 		assert.ok(reports.some(line => line.endsWith('Global strategies: SAT sweep:1')))
 		assert.ok(reports.every(line => !line.includes(' tried (worker time):')))

@@ -1,3 +1,4 @@
+import { packedControl } from './packed.js'
 import { Gate } from './types.js'
 import { appendWireAccess, getVars, wireAccessLowerBound } from './utils.js'
 
@@ -31,6 +32,7 @@ export class DependencyCutIndex {
 		this.outputSeeds = [...this.writes.values()].map(lines => lines[lines.length - 1]).sort((a, b) => b - a)
 	}
 	setStop(stopped: () => boolean) { this.stopped = stopped }
+	isStopped() { return this.stopped() }
 	private check() { if (this.stopped()) throw new CutCancelled('Dependency cut canceled') }
 	/** A right-closed region can move to its final selected gate without
 	 * crossing any conflicting unselected operation. */
@@ -97,16 +99,36 @@ export class DependencyCutIndex {
 		}
 		return result
 	}
+	/** Seed the next search from the producers and consumers nearest a patch. */
+	nearby(index: number, wires: number[]) {
+		const seeds = new Set<number>()
+		for (const wire of wires) {
+			const writes = this.writes.get(wire)
+			if (!writes) continue
+			const at = wireAccessLowerBound(writes, index)
+			for (const line of [writes[at - 1], writes[at]]) {
+				if (line === undefined) continue
+				seeds.add(line)
+				for (const next of this.successors[line].slice(0, 2)) seeds.add(next)
+				if (seeds.size >= 24) return [...seeds]
+			}
+		}
+		return [...seeds]
+	}
+
 	/** Interleave region sizes across global output cones and distributed seeds.
 	 * Batches keep the working set bounded; search continues until cancellation. */
-	*regions(offset = 0, minimum = 2, maximum = this.gates.length): Generator<DependencyCut> {
+	*regions(offset = 0, minimum = 2, maximum = this.gates.length, priority: number[] = []): Generator<DependencyCut> {
 		const limit = Math.min(maximum, this.gates.length)
 		if (limit < minimum || !this.predecessors.some(edges => edges.length)) return
 		let cursor = offset % this.gates.length
 		const widths = [minimum]
 		while (widths[widths.length - 1] < limit) widths.push(Math.min(limit, widths[widths.length - 1] * 2))
 		while (!this.stopped()) {
-			const seeds = new Set(this.outputSeeds.slice(cursor % this.outputSeeds.length).concat(this.outputSeeds.slice(0, cursor % this.outputSeeds.length)))
+			const seeds = new Set(priority)
+			priority = []
+			const offset = cursor % this.outputSeeds.length
+			for (const seed of [...this.outputSeeds.slice(offset), ...this.outputSeeds.slice(0, offset)]) seeds.add(seed)
 			for (let i = 0; i < 32; i++) seeds.add((cursor + Math.floor(i * this.gates.length / 32)) % this.gates.length)
 			const seen = new Set<string>()
 			let keyBytes = 0, yielded = false
@@ -125,16 +147,56 @@ export class DependencyCutIndex {
 	}
 }
 
-const indexes = new WeakMap<object, { key: string, index: DependencyCutIndex, regions: Generator<DependencyCut> }>()
+/** Samples rank candidates only. The regional solver must prove the rewrite. */
+function cutScore(cut: DependencyCut, stopped: () => boolean) {
+	const values = new Map<number, number>(), seen = new Map<number, Set<number>>()
+	for (const wire of cut.wires) {
+		let sample = Math.imul(wire + 1, 0x9e3779b9)
+		sample = Math.imul(sample ^ (sample >>> 16), 0x85ebca6b)
+		sample ^= sample >>> 13
+		values.set(wire, sample)
+		seen.set(wire, new Set([sample]))
+	}
+	let repeats = 0
+	for (const gate of cut.gates) {
+		if (stopped()) throw new CutCancelled('Dependency cut ranking canceled')
+		const value = values.get(gate.target)! ^ packedControl(gate.gate_i, values.get(gate.a) ?? 0, values.get(gate.b) ?? 0)
+		values.set(gate.target, value)
+		const history = seen.get(gate.target)!
+		if (history.has(value)) repeats++
+		history.add(value)
+	}
+	return repeats / cut.gates.length
+}
+
+function* rankCuts(regions: Generator<DependencyCut>, stopped: () => boolean) {
+	while (!stopped()) {
+		const batch: { cut: DependencyCut, score: number }[] = []
+		for (let i = 0; i < 8; i++) {
+			const next = regions.next()
+			if (next.done) break
+			batch.push({ cut: next.value, score: cutScore(next.value, stopped) })
+		}
+		if (!batch.length) return
+		batch.sort((a, b) => b.score - a.score)
+		for (const { cut } of batch) yield cut
+	}
+}
+
+const indexes = new WeakMap<object, { key: string, index: DependencyCutIndex, regions: Generator<DependencyCut>, recent?: { anchor: number, wires: number[] } }>()
 
 export type CutSearchStats = { regions: number, solverMs: number }
-export async function searchDependencyCuts(input: Gate[], stopped: () => boolean, solve: (cut: DependencyCut) => Promise<Gate[] | undefined>, offset = 0, stats: CutSearchStats = { regions: 0, solverMs: 0 }, cache?: object, minimum = 2, maximum = input.length): Promise<Gate[] | undefined> {
+export async function searchDependencyCuts(input: Gate[], stopped: () => boolean, solve: (cut: DependencyCut) => Promise<Gate[] | undefined>, offset = 0, stats: CutSearchStats = { regions: 0, solverMs: 0 }, cache?: object, minimum = 2, maximum = input.length, ranked = false): Promise<Gate[] | undefined> {
 	try {
-		const key = cache ? `${minimum}:${maximum}:${JSON.stringify(input)}` : ''
+		const key = cache ? `${minimum}:${maximum}:${ranked}:${JSON.stringify(input)}` : ''
 		let entry = cache ? indexes.get(cache) : undefined
 		if (!entry || entry.key !== key) {
 			const index = new DependencyCutIndex(input, stopped)
-			entry = { key, index, regions: index.regions(offset, minimum, maximum) }; if (cache) indexes.set(cache, entry)
+			const recent = entry?.recent
+			const priority = recent ? index.nearby(recent.anchor, recent.wires) : []
+			const regions = index.regions(offset, minimum, maximum, priority)
+			entry = { key, index, regions: ranked ? rankCuts(regions, () => index.isStopped()) : regions }
+			if (cache) indexes.set(cache, entry)
 		}
 		const { index, regions } = entry; index.setStop(stopped)
 		while (!stopped()) {
@@ -143,8 +205,12 @@ export async function searchDependencyCuts(input: Gate[], stopped: () => boolean
 			const started = performance.now(), result = await solve(cut)
 			stats.solverMs += performance.now() - started
 			if (stopped()) return undefined
-			if (result && result.length < cut.gates.length) return index.patch(cut, result)
+			if (result && result.length < cut.gates.length) {
+				const patched = index.patch(cut, result)
+				entry.recent = { anchor: cut.indices[cut.indices.length - 1] + 1 - cut.indices.length, wires: cut.wires }
+				return patched
+			}
 		}
 		return undefined
-	} catch (error) { if (error instanceof CutCancelled) return undefined; throw error }
+	} catch (error) { if (error instanceof CutCancelled) { if (cache) indexes.delete(cache); return undefined } throw error }
 }

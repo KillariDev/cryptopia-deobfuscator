@@ -5,7 +5,7 @@ import { searchDependencyCuts } from './dependency-cuts.js'
 import { setImmediate as yieldToCoordinator } from 'node:timers/promises'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
-import { roundSearchPlan, roundSearchResult } from './round-search.js'
+import { mergeDisjointRoundResults, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { formatRoundStrategies } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
@@ -492,7 +492,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 					synthesisBudget.onProgress?.()
 				}
 				return structuralRewrite('sat-sweeping', cut.gates, deadline, stopped)
-			}, 0, undefined, strategyPicker, broadMinimum, 1024)
+			}, 0, undefined, strategyPicker, broadMinimum, 1024, true)
 		}
 		return finish({ gates: result ?? originalGates, changed: result !== undefined })
 	}
@@ -1041,7 +1041,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			currentGates = gateSimplifier(currentGates)
 			let lastIterationTime = performance.now()
 			const nPrevGates = currentGates.length
-			let winner: 'local' | 'global' = 'local'
+			let winner: 'local' | 'global' | 'combined' = 'local'
 			const workersSize = getRandomNumberInRange(Math.min(config.workers.minimumChunkGates, currentGates.length), Math.max(1, currentGates.length * config.workers.maximumChunkFraction))
 			const runBroad = nMaxWorkers > 1 && currentGates.length >= minimumBroadGates() && config.workers.broadSearchSeconds > 0 && globalStrategyPicker.activeStrategy !== undefined
 			if (runBroad) globalStrategyPicker.beginRound(optimizerRound)
@@ -1185,9 +1185,18 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				}))
 				await Promise.race([memoryFailure, checkpointFailed, Promise.all([local, broad])])
 				const localBest = localCandidate()
-				currentGates = roundSearchResult([localBest, broadBest], true)
-				winner = currentGates === localBest ? 'local' : 'global'
-				if (winner === 'global' && globalStrategy) globalStrategyPicker.observe(globalStrategy, nPrevGates - broadBest.length)
+				const merged = runBroad && !wholeCircuit && localBest.length < nPrevGates
+					? mergeDisjointRoundResults(currentGates, approxGates, snapshots, broadBest, (before, after) => {
+						if (before.length > config.synthesis.affineMaximumWindowGates) return false
+						const wires = mapVariablesToIndexes(before)
+						const allowed = new Set(wires)
+						if (after.some(gate => getVars(gate).some(wire => !allowed.has(wire)))) return false
+						const prove = createPolynomialEquivalenceChecker(mapCircuit(before, wires), wires.length, config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations)
+						return prove(mapCircuit(after, wires)) === true
+					}) : undefined
+				currentGates = merged ?? roundSearchResult([localBest, broadBest], true)
+				winner = merged ? 'combined' : currentGates === localBest ? 'local' : 'global'
+				if (winner !== 'local' && globalStrategy) globalStrategyPicker.observe(globalStrategy, nPrevGates - broadBest.length)
 			} finally {
 				clearInterval(checkpointTimer)
 				Atomics.store(stopSignal, 0, 1)
@@ -1215,7 +1224,8 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const localRemoved = nPrevGates - localCount()
 			const globalReduction = runBroad ? ` | Global: ${nPrevGates - broadBest.length} gates removed` : ''
 			const gatesPerHour = roundElapsedMs > 0 ? Math.floor(gatesRemoved * 3_600_000 / roundElapsedMs) : 0
-			logTimed(`Round winner: ${winner} | Local: ${localRemoved} gates removed${globalReduction} | ${gatesPerHour} gates/hour`)
+			const combinedReduction = winner === 'combined' ? ` | Combined: ${gatesRemoved} gates removed` : ''
+			logTimed(`Round winner: ${winner} | Local: ${localRemoved} gates removed${globalReduction}${combinedReduction} | ${gatesPerHour} gates/hour`)
 			for (const side of ['Local', 'Global'] as const) {
 				const counts = formatRoundStrategies(roundStrategies[side].values(), side)
 				if (counts) logTimed(counts)

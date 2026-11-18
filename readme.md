@@ -137,7 +137,9 @@ work, and zero disables it. The value no longer sets an interval.
 The broad lane and chunk lane keep separate candidates throughout the round.
 Jobs in either lane can pick up their own lane's improvements. At round end,
 the coordinator compares the complete broad result with the assembled chunk
-result and verifies and saves the winner. Periodic status updates and checkpoints
+result and verifies and saves the winner. A global splice can also be combined
+with split results when its original span is unchanged by the split workers
+and the splice passes an exact standalone equivalence check. Periodic status updates and checkpoints
 also use the best complete candidate currently available. The round summary
 reports both gate reductions, which result was kept, and each lane’s strategies.
 

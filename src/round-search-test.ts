@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
+import { mergeDisjointRoundResults, PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { parseConfig } from './config.js'
 import { evalCircuit, generateCombinations } from './utils.js'
 import { Gate } from './types.js'
@@ -70,3 +70,13 @@ const localBest = new WholeCircuitRestart(original, localStop, () => {})
 assert.equal(localBest.accept(original.slice(0, 1), false), true)
 assert.equal(Atomics.load(localStop, 0), 0, 'a local checkpoint must not cancel peers')
 assert.equal(localBest.accept(original, true), false, 'an obsolete global result cannot restart newer local progress')
+
+// A global deletion can survive a local win when it touches an unchanged chunk.
+const separate = { ...not, target: 1 }
+const localChunk = [not, not, not], globalChunk = [separate, separate, separate]
+const mixed = [...localChunk, ...globalChunk]
+const proveSplice = (before: Gate[], after: Gate[]) => generateCombinations(2).every(input =>
+	JSON.stringify(evalCircuit(before, input)) === JSON.stringify(evalCircuit(after, input)))
+assert.deepEqual(mergeDisjointRoundResults(mixed, [localChunk, globalChunk], [[not], globalChunk], [...localChunk, separate], proveSplice), [not, separate])
+assert.equal(mergeDisjointRoundResults(mixed, [localChunk, globalChunk], [localChunk, [separate]], [...localChunk, separate], proveSplice), undefined)
+assert.equal(mergeDisjointRoundResults(mixed, [localChunk, globalChunk], [[not], globalChunk], [...localChunk, separate], () => false), undefined)

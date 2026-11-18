@@ -1,6 +1,10 @@
 import { Gate } from './types.js'
 
 const sameGate = (a: Gate, b: Gate) => a.a === b.a && a.b === b.b && a.target === b.target && a.gate_i === b.gate_i
+export function packedControl(f: number, a: number, b: number) {
+	return ((f & 8) ? ~a & ~b : 0) | ((f & 4) ? ~a & b : 0) | ((f & 2) ? a & ~b : 0) | ((f & 1) ? a & b : 0)
+}
+
 
 /** Immutable input batches can be reused across reference circuits. */
 export class PackedInputs {
@@ -53,7 +57,7 @@ export class IncrementalEvaluator {
 		const f = gate.gate_i
 		if (!Number.isInteger(f) || f < 0 || f > 15) throw new Error(`invalid control function: ${f}`)
 		const a = state[offset + gate.a], b = state[offset + gate.b]
-		const control = ((f & 8) ? ~a & ~b : 0) | ((f & 4) ? ~a & b : 0) | ((f & 2) ? a & ~b : 0) | ((f & 1) ? a & b : 0)
+		const control = packedControl(f, a, b)
 		state[offset + gate.target] = (state[offset + gate.target] ^ control) & mask
 	}
 	private apply(state: Uint32Array, gate: Gate) {
