@@ -680,7 +680,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 	return circuit.toArray()
 }
 
-const pickerOptions = () => ({ enabled: config.search.strategyAdaptive, exploration: config.search.strategyExplorationProbability, halfLifeSeconds: config.search.strategyDecayHalfLifeSeconds })
+const pickerOptions = () => ({ enabled: config.search.strategyAdaptive, exploration: config.search.strategyExplorationProbability, specialize: config.search.strategySpecialization, halfLifeSeconds: config.search.strategyDecayHalfLifeSeconds })
 export const createOptimizerCaches = () => ({
 	strategyPicker: new AdaptiveStrategyPicker(['templates', 'variables', 'rainbow', 'gf2-affine', 'quadratic', ...structuralNames, 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions),
 	broadStrategyPicker: new AdaptiveStrategyPicker([...structuralNames, 'dependency-cuts', 'symbolic', 'templates', 'variables', 'rainbow', 'gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions),

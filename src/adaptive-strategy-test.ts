@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { AdaptiveStrategyPicker } from './strategy-picker.js'
 import { parseConfig } from './config.js'
 let now = 0, draw = 0
-const options = () => ({ enabled: true, exploration: 0.2, halfLifeSeconds: 60 })
+const options = () => ({ enabled: true, specialize: false, exploration: 0.2, halfLifeSeconds: 60 })
 const names = ['variables', 'rainbow', 'synthesis']
 const choices = names.map(name => ({ name }))
 const picker = new AdaptiveStrategyPicker(names, options, () => draw, () => now)
@@ -67,3 +67,20 @@ try {
 	assert.equal(hit.gates.length,2,'rainbow can still try a region after variables failed')
 } finally { Object.assign(config,saved); await tables.close() }
 console.log('Adaptive strategy cache isolation and exact replacement integration passed')
+
+// A successful strategy gets a temporary lease while uniform exploration stays live.
+let focusClock=0, focusDraw=0
+const focused=new AdaptiveStrategyPicker(['a','b'],()=>({enabled:true,exploration:0.2,halfLifeSeconds:60}),()=>focusDraw,()=>focusClock)
+const both=[{name:'a'},{name:'b'}]
+focused.observe('b',1,10)
+assert.equal(focused.pick(both)?.name,'b')
+focusDraw=0.85;assert.equal(focused.pick(both)?.name,'a','uniform exploration can leave the specialist')
+assert.equal(focused.pick([{name:'a'}])?.name,'a','ineligible specialists never block work')
+focused.observe('b',0,1);focused.observe('b',0,1);focused.observe('b',0,1)
+focusDraw=0;assert.equal(focused.pick(both)?.name,'a','three misses release the lease')
+focused.observe('b',1,10);focusClock=30001
+assert.equal(focused.pick(both)?.name,'a','idle leases expire')
+focused.observe('b',1,10)
+for(let i=0;i<16;i++)assert.equal(focused.pick(both)?.name,'b')
+assert.equal(focused.pick(both)?.name,'a','leases also bound attempts without observations')
+console.log('Temporary strategy specialization: success, exploration, eligibility, misses, age and attempt bounds passed')
