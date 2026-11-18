@@ -2,6 +2,8 @@ import { Gate, DependencyNode } from './types.js'
 import { getVars, dependencyGraphToMap, DependencyContext } from './utils.js'
 import { ChunkedSequence } from './chunked-sequence.js'
 
+type WireEdit = { firstRemoval: number, incoming: number[] }
+
 type Record = { gate: Gate, wires: number[], past: Set<number>, future?: number }
 /** Edges use stable gate IDs. Only users of edited wires need edge recomputation. */
 export class IncrementalGraph {
@@ -129,12 +131,12 @@ export class IncrementalGraph {
 	}
 
 	private updateWireLists(
-		index: Map<number, number[]>, edits: Map<number, number[]>, removed: Set<number>,
+		index: Map<number, number[]>, edits: Map<number, WireEdit>, removed: Set<number>,
 	) {
-		for (const [wire, incoming] of edits) {
+		for (const [wire, { firstRemoval, incoming }] of edits) {
 			const list = index.get(wire) ?? []
-			let kept = 0
-			for (let i = 0; i < list.length; i++) {
+			let kept = Math.min(firstRemoval, list.length)
+			for (let i = kept; i < list.length; i++) {
 				const id = list[i]
 				if (!removed.has(id)) list[kept++] = id
 			}
@@ -154,21 +156,34 @@ export class IncrementalGraph {
 		const affected = new Set<number>()
 		this.collectAffected(oldIds, affected)
 		const newIds = replacement.map(gate => this.add(gate))
-		const accessEdits = new Map<number, number[]>(), writeEdits = new Map<number, number[]>()
-		const track = (index: Map<number, number[]>, wire: number, incoming?: number) => {
-			let ids = index.get(wire)
-			if (!ids) { ids = []; index.set(wire, ids) }
-			if (incoming !== undefined && ids[ids.length - 1] !== incoming) ids.push(incoming)
+		const accessEdits = new Map<number, WireEdit>(), writeEdits = new Map<number, WireEdit>()
+		const editFor = (edits: Map<number, WireEdit>, wire: number) => {
+			let edit = edits.get(wire)
+			if (!edit) {
+				edit = { firstRemoval: Infinity, incoming: [] }
+				edits.set(wire, edit)
+			}
+			return edit
 		}
-		for (const id of oldIds) {
-			const { gate, wires } = this.records.get(id)!
-			for (const wire of wires) track(accessEdits, wire)
-			track(writeEdits, gate.target)
+		const markRemoval = (edits: Map<number, WireEdit>, wire: number, position: number) => {
+			const edit = editFor(edits, wire)
+			edit.firstRemoval = Math.min(edit.firstRemoval, position)
 		}
+		for (let i = 0; i < oldIds.length; i++) {
+			const { gate, wires } = this.records.get(oldIds[i])!
+			for (const wire of wires) markRemoval(accessEdits, wire, selected[i])
+			markRemoval(writeEdits, gate.target, selected[i])
+		}
+		// The lists still use the old circuit order here.
+		for (const [wire, edit] of accessEdits) edit.firstRemoval = this.lowerBound(this.accesses.get(wire)!, edit.firstRemoval)
+		for (const [wire, edit] of writeEdits) edit.firstRemoval = this.lowerBound(this.writes.get(wire)!, edit.firstRemoval)
 		for (const id of newIds) {
 			const { gate, wires } = this.records.get(id)!
-			for (const wire of wires) track(accessEdits, wire, id)
-			track(writeEdits, gate.target, id)
+			for (const wire of wires) {
+				const { incoming } = editFor(accessEdits, wire)
+				if (incoming[incoming.length - 1] !== id) incoming.push(id)
+			}
+			editFor(writeEdits, gate.target).incoming.push(id)
 			affected.add(id)
 		}
 		this.order.replace(selected, newIds)
