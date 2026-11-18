@@ -1,5 +1,6 @@
 import { AdaptiveStrategyPicker } from './strategy-picker.js'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
+import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
 import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { StrategySummary, StrategyWeightSummary, formatStrategyActivity } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
@@ -342,13 +343,14 @@ const adaptiveFailureCaches = new WeakMap<AdaptiveStrategyPicker, Map<string, Li
 
 export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, lookup = true, preparation = new SubsetPreparation(originalGates), synthesisBudget?: SynthesisBudget, strategyPicker?: AdaptiveStrategyPicker): Promise<{ gates: Gate[], changed: boolean }> => {
 	const attemptStarted = performance.now()
-	const symbolic = config.synthesis.affine || config.synthesis.quadratic
+	const symbolic = config.synthesis.affine || config.synthesis.quadratic || structuralChoices().length > 0
 	const maxSynthesis = Math.max(config.synthesis.maximumWindowGates, symbolic ? config.synthesis.affineMaximumWindowGates : 0)
 	const wireCount = originalGates.length <= maxSynthesis ? new Set(originalGates.flatMap(getVars)).size : Infinity
 
 	const smallEligible = originalGates.length <= config.synthesis.maximumWindowGates && wireCount <= config.synthesis.maximumWires
 	const symbolicEligible = originalGates.length <= config.synthesis.affineMaximumWindowGates && wireCount <= config.validation.maximumWires
 	const synthesisNames = [
+		...((synthesisBudget?.broad || symbolicEligible) ? structuralChoices() : []),
 		...(symbolicEligible && config.synthesis.affine ? ['gf2-affine'] : []),
 		...(symbolicEligible && config.synthesis.quadratic ? ['quadratic'] : []),
 		...(smallEligible && config.synthesis.forwardSemanticSearch ? ['forward-semantic-search'] : []),
@@ -384,6 +386,10 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	if (selected === 'symbolic') {
 		const result = wholeCircuitAffineSearch(originalGates, Math.max(0, (synthesisBudget?.deadline ?? performance.now()) - performance.now()), () => synthesisBudget?.shouldStop?.() === true)
 		return finish({ gates: result, changed: result !== originalGates })
+	}
+	if (selected && (structuralNames as readonly string[]).includes(selected)) {
+		const result = await structuralRewrite(selected as StructuralStrategy, originalGates, synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000, () => synthesisBudget?.shouldStop?.() === true)
+		return finish({ gates: result ?? originalGates, changed: result !== undefined })
 	}
 	const prepared = new Map<number, PreparedWindow>()
 	if (preparation.gates !== originalGates) throw new Error('Subset preparation belongs to a different circuit')
@@ -645,8 +651,8 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 
 const pickerOptions = () => ({ enabled: config.search.strategyAdaptive, exploration: config.search.strategyExplorationProbability, halfLifeSeconds: config.search.strategyDecayHalfLifeSeconds })
 export const createOptimizerCaches = () => ({
-	strategyPicker: new AdaptiveStrategyPicker(['templates', 'variables', 'rainbow', 'gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions),
-	broadStrategyPicker: new AdaptiveStrategyPicker(['symbolic', 'templates', 'variables', 'rainbow', 'gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions),
+	strategyPicker: new AdaptiveStrategyPicker(['templates', 'variables', 'rainbow', 'gf2-affine', 'quadratic', ...structuralNames, 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions),
+	broadStrategyPicker: new AdaptiveStrategyPicker([...structuralNames, 'symbolic', 'templates', 'variables', 'rainbow', 'gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions),
 	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(config.cache.lookupEntries, config.cache.lookupPolicy),
 	processedGatesCache: new LimitedMap<string, boolean>(config.cache.processedEntries),
 	arms: createSearchArms(config.search.searchArms, config.search.subsetMinimum, config.search.subsetMaximum, config.search.sliceMinimum, config.search.sliceMaximum),

@@ -146,6 +146,11 @@
     "generationStagingQueueBatches": 2
   },
   "synthesis": {
+    "factored": true,
+    "blockCancellation": true,
+    "satSweeping": true,
+    "factoredMaximumNodes": 200000,
+    "factoredMaximumEdges": 16000000,
     "quadratic": true,
     "affine": true,
     "affineMaximumWindowGates": 256,

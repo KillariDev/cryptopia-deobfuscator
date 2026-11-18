@@ -5,6 +5,7 @@ import { RainbowPortfolio } from './rainbow-portfolio.js'
 import { createOptimizerCaches, massOptimizeStep, SubsetPreparation } from './processing.js'
 import { wholeCircuitAffineSearch } from './strategies.js'
 import { strategySnapshot } from './strategy-stats.js'
+import { structuralChoices, structuralRewrite } from './structural-strategies.js'
 
 /** Coarse-to-fine windows with 50% overlap, interleaved so all scales get a turn. */
 export function* broadRegions(length: number): Generator<{ start: number, end: number }> {
@@ -33,6 +34,14 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 		if (stopped()) break
 		activity.subsets++
 		const region = input.slice(start, end)
+		if (!config.search.strategyAdaptive) {
+			const selected = caches.broadStrategyPicker.pick(structuralChoices().map(name => ({ name })))
+			if (selected) {
+				const next = await structuralRewrite(selected.name, region, deadline, shouldStop)
+				report()
+				if (next) { activity.improvements++; const result = [...input.slice(0, start), ...next, ...input.slice(end)]; report(result); return result }
+			}
+		}
 		if (!config.search.strategyAdaptive && (config.synthesis.affine || config.synthesis.quadratic)) {
 			const affine = wholeCircuitAffineSearch(region, Math.max(0, deadline - performance.now()), stopped)
 			report()

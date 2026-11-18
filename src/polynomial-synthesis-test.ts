@@ -49,7 +49,7 @@ for (let wires = 3; wires <= 6; wires++) for (let trial = 0; trial < 20; trial++
 }
 const saved = { ...config.synthesis }
 try {
-	Object.assign(config.synthesis, { quadratic: true, affine: false, templates: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, quadratic: true, affine: false, templates: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
 	assert.deepEqual(await advancedRewrite([toffoli, ...padding]), [toffoli])
 	config.synthesis.quadratic = false
 	assert.equal(await advancedRewrite([toffoli, ...padding]), undefined)
