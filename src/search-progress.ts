@@ -16,7 +16,7 @@ export class SearchProgress {
   this.iterator = (function*(){ yield* priorities; yield* regions() })()
   this.key = key; this.input = input.slice(); this.pending = undefined
  }
- next(minimum: number) {
+ next(minimum: number, subdivide = true) {
   if (!this.pending) {
    const region = this.iterator?.next()
    if (!region || region.done) { this.iterator = undefined; return undefined }
@@ -24,7 +24,7 @@ export class SearchProgress {
   }
   const result = {...this.pending}
   this.pending.slice = Math.floor(this.pending.slice/2)
-  if (this.pending.slice < minimum) this.pending = undefined
+  if (!subdivide || this.pending.slice < minimum) this.pending = undefined
   return result
  }
 }

@@ -124,11 +124,11 @@ operations per candidate), the wire limit, and the worker job deadline. Exhausti
 any limit declines that candidate without dropping terms or accepting an
 approximate equivalence.
 
-A broad worker searches alongside the chunk workers, using the same toolkit:
-templates, variable elimination, rainbow lookup and eligible synthesis solvers.
-It starts with the full circuit and scans overlapping coarse-to-fine regions.
-Variable and rainbow scans also use full-region and progressively smaller window
-sizes, rather than inheriting the local slice cap; their wire limits still apply.
+A broad worker starts with the full circuit and scans overlapping coarse-to-fine
+regions. Its strategy order is SAT sweeping with bounded dependency cuts,
+mixed-basis simplification, block cancellation, whole-region symbolic synthesis,
+factored synthesis, and dependency cuts. Rainbow lookup and variable elimination
+remain available inside dependency cuts and in local search.
 Eligible rounds start one broad worker alongside the chunk workers when the
 configured worker cap is at least two. Broad jobs share that cap and are
 queued with priority. A positive `workers.broadSearchSeconds` enables broad

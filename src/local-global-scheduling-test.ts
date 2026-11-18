@@ -42,13 +42,13 @@ try {
 			assert.equal(restart, false)
 			if (jobRound === 2) {
 				if (solver === 'broad') {
-					assert.equal(broadStrategy, broadRemoved > 4 ? 'rainbow' : 'variables')
+					assert.equal(broadStrategy, broadRemoved > 4 ? 'sat-sweeping' : 'mixed-basis')
 					throw done
 				}
 				return gates
 			}
 			if (solver === 'broad') {
-				assert.equal(broadStrategy, 'rainbow', 'broad refills keep the round strategy')
+				assert.equal(broadStrategy, 'sat-sweeping', 'broad refills keep the round strategy')
 				if (++broadJobs === 1) {
 					const candidate = gates.slice(broadRemoved)
 					progress?.(candidate.length, {

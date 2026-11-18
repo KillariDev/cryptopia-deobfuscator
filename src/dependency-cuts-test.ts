@@ -86,7 +86,7 @@ try {
  config.search.variableElimination = false
  Object.assign(config.synthesis, { templates: false, affine: false, quadratic: false, factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
  resetStrategyStats()
- const rewritten = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, sparse, sparse.length, false, false, true, new SubsetPreparation(sparse), { deadline: performance.now() + 10000, broad: true }, picker)
+ const rewritten = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, sparse, sparse.length, false, false, true, new SubsetPreparation(sparse), { deadline: performance.now() + 10000, broad: true, minimumBroadGates: sparse.length }, picker)
  assert.equal(rewritten.gates.length, sparse.length - 2)
  equivalent(sparse, rewritten.gates, 6)
  assert.ok(strategySnapshot().some(stat => stat.strategy === 'rainbow' && stat.gatesRemoved === 2), 'reuse rainbow lookup on distant live values')

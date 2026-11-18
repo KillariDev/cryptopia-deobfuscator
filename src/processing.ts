@@ -462,9 +462,11 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		}
 		const stats = { regions: 0, solverMs: 0 }
 		const result = await searchDependencyCuts(originalGates, stopped, async cut => {
-			const next = await massOptimizeStep(tables, ioIdentifierCache, state!.processed, cut.gates, cut.gates.length, useProbabilistically, config.search.variableElimination, true, new SubsetPreparation(cut.gates), { deadline, shouldStop: stopped, broad: true, minimumBroadGates: broadMinimum, dependencyRegion: true }, state!.picker)
+			const span = cut.indices[cut.indices.length - 1] - cut.indices[0] + 1
+			if (span < (broadMinimum ?? 0)) return undefined
+			const next = await massOptimizeStep(tables, ioIdentifierCache, state!.processed, cut.gates, cut.gates.length, useProbabilistically, config.search.variableElimination, true, new SubsetPreparation(cut.gates), { deadline, shouldStop: stopped, broad: true, dependencyRegion: true }, state!.picker)
 			return next.changed ? next.gates : undefined
-		}, state.offset++, stats, state, broadMinimum)
+		}, state.offset++, stats, state)
 		// Toolkit calls have their own timings; count only cut-index overhead here.
 		recordStrategy('dependency-cuts', { global: true }, attemptStarted + stats.solverMs, originalGates.length, result?.length ?? originalGates.length, result !== undefined)
 		return finish({ gates: result ?? originalGates, changed: result !== undefined })
@@ -781,15 +783,18 @@ const localStrategyOrder = () => [
 	...(config.synthesis.smt ? ['z3'] : []),
 	...(config.synthesis.meetInMiddle ? ['meet-in-the-middle'] : []),
 ].filter(strategy => !smallSynthesisStrategies.has(strategy) || config.search.subsetMinimum <= config.synthesis.maximumWindowGates)
-const broadStrategyOrder = () => [
-	'rainbow', ...variableStrategy(), ...standaloneStructural(),
-	...(config.search.dependencyCuts ? ['dependency-cuts'] : []),
+export const broadStrategyOrder = () => [
+	...(config.synthesis.satSweeping ? ['sat-sweeping'] : []),
+	...(config.synthesis.mixedBasis ? ['mixed-basis'] : []),
+	...(config.synthesis.blockCancellation ? ['block-cancellation'] : []),
 	...(config.synthesis.affine || config.synthesis.quadratic ? ['symbolic'] : []),
+	...(config.synthesis.factored ? ['factored'] : []),
+	...(config.search.dependencyCuts ? ['dependency-cuts'] : []),
 ]
 export const createOptimizerCaches = (workerIndex = 0) => ({
 	strategyPicker: new RoundStrategyPicker(localStrategyOrder(), workerIndex),
 	broadStrategyPicker: new RoundStrategyPicker(broadStrategyOrder(), workerIndex),
-	broadFallbackPicker: new StrategyPicker([...structuralNames, 'dependency-cuts']),
+	broadFallbackPicker: new StrategyPicker(broadStrategyOrder()),
 	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(config.cache.lookupEntries, config.cache.lookupPolicy),
 	processedGatesCache: new LimitedMap<string, boolean>(config.cache.processedEntries),
 	arms: createSearchArms(config.search.searchArms, config.search.subsetMinimum, config.search.subsetMaximum, config.search.sliceMinimum, config.search.sliceMaximum),
@@ -1037,7 +1042,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const nPrevGates = currentGates.length
 			let winner: 'local' | 'global' = 'local'
 			const workersSize = getRandomNumberInRange(Math.min(config.workers.minimumChunkGates, currentGates.length), Math.max(1, currentGates.length * config.workers.maximumChunkFraction))
-			const runBroad = nMaxWorkers > 1 && currentGates.length >= minimumBroadGates() && config.workers.broadSearchSeconds > 0
+			const runBroad = nMaxWorkers > 1 && currentGates.length >= minimumBroadGates() && config.workers.broadSearchSeconds > 0 && globalStrategyPicker.activeStrategy !== undefined
 			if (runBroad) globalStrategyPicker.beginRound(optimizerRound)
 			const globalStrategy = config.search.strategyAdaptive ? globalStrategyPicker.activeStrategy : undefined
 			const plan = roundSearchPlan(currentGates.length, nMaxWorkers, workersSize, config.workers.wholeCircuitMaximumGates)

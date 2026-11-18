@@ -3,10 +3,9 @@ import { config, minimumBroadGates } from './config.js'
 import { Gate } from './types.js'
 import { WorkerActivity } from './logging.js'
 import { RainbowPortfolio } from './rainbow-portfolio.js'
-import { createOptimizerCaches, massOptimizeStep, SubsetPreparation } from './processing.js'
-import { wholeCircuitAffineSearch } from './strategies.js'
+import { broadStrategyOrder, createOptimizerCaches, massOptimizeStep, SubsetPreparation } from './processing.js'
 import { strategySnapshot } from './strategy-stats.js'
-import { structuralChoices, structuralRewrite } from './structural-strategies.js'
+import { structuralChoices, structuralNames } from './structural-strategies.js'
 
 /** Coarse-to-fine windows with 50% overlap, interleaved so all scales get a turn. */
 export function* broadRegions(length: number, minimum = 2): Generator<{ start: number, end: number }> {
@@ -33,7 +32,10 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 	const activity: WorkerActivity = { scope: 'broad', passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
 	const report = (snapshot?: Gate[]) => onProgress(snapshot?.length ?? input.length, { ...activity, activeStrategy: config.search.strategyAdaptive ? caches.broadStrategyPicker.activeStrategy : undefined, strategies: strategySnapshot().map(stat => ({ ...stat, strategy: ['gf2-affine-whole', 'symbolic-whole'].includes(stat.strategy) ? stat.strategy : `${stat.strategy} broad` })) }, snapshot)
 	const minimum = minimumBroadGates()
-	if (input.length < minimum || stopped()) return input
+	const structural = structuralChoices()
+	const choices = broadStrategyOrder().filter(name => !(structuralNames as readonly string[]).includes(name) ||
+		(structural as readonly string[]).includes(name)).map(name => ({ name }))
+	if (input.length < minimum || !choices.length || stopped()) return input
 	report()
 	const strategy = config.search.strategyAdaptive ? caches.broadStrategyPicker.activeStrategy ?? '' : ''
 	let state = cursors.get(caches)
@@ -44,45 +46,27 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 	const { cursor } = state
 	cursor.reset(input, () => broadRegions(input.length, minimum))
 	while (!stopped()) {
-		const task = cursor.next(minimum)
+		const task = cursor.next(minimum, false)
 		if (!task) break
 		const { start, end, slice } = task
 		if (slice < minimum) continue
-		if (stopped()) break
-		activity.subsets++
+		const picker = config.search.strategyAdaptive ? caches.broadStrategyPicker : caches.broadFallbackPicker
+		const selected = picker.pick(choices)
+		if (!selected) break
 		const region = input.slice(start, end)
-		if (!config.search.strategyAdaptive) {
-			const selected = caches.broadFallbackPicker.pick([...structuralChoices(), ...(config.search.dependencyCuts ? ['dependency-cuts'] : [])].map(name => ({ name })))
-			if (selected) {
-				const next = selected.name === 'dependency-cuts'
-					? (await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, region.length, config.search.probabilistic, config.search.variableElimination, true, new SubsetPreparation(region), { deadline, shouldStop, broad: true, minimumBroadGates: minimum, selectedStrategy: selected.name, onProgress: () => report() }, caches.broadStrategyPicker)).gates
-					: await structuralRewrite(selected.name as ReturnType<typeof structuralChoices>[number], region, deadline, shouldStop)
-				report()
-				if (next && next.length < region.length) { activity.improvements++; const result = [...input.slice(0, start), ...next, ...input.slice(end)]; report(result); return result }
-			}
-		}
-		if (!config.search.strategyAdaptive && (config.synthesis.affine || config.synthesis.quadratic)) {
-			const affine = wholeCircuitAffineSearch(region, Math.max(0, deadline - performance.now()), stopped)
-			report()
-			if (affine.length < region.length) {
-				activity.improvements++
-				const result = [...input.slice(0, start), ...affine, ...input.slice(end)]
-				report(result); return result
-			}
-		}
-		const preparation = new SubsetPreparation(region)
-		// Large windows first: variables and rainbow lookup get the full region,
-		// then progressively smaller scans, rather than the local slice cap.
-		{
-			if (stopped()) break
-			activity.passes++; activity.checks++
-			const next = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, slice, config.search.probabilistic, config.search.variableElimination, true, preparation, { deadline, shouldStop, broad: true, minimumBroadGates: minimum, onProgress: () => report() }, caches.broadStrategyPicker)
-			report()
-			if (next.changed && next.gates.length < region.length) {
-				activity.improvements++
-				const result = [...input.slice(0, start), ...next.gates, ...input.slice(end)]
-				report(result); return result
-			}
+		activity.subsets++
+		activity.passes++
+		activity.checks++
+		const next = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, slice,
+			config.search.probabilistic, false, false, new SubsetPreparation(region),
+			{ deadline, shouldStop, broad: true, minimumBroadGates: minimum, selectedStrategy: selected.name, onProgress: () => report() },
+			caches.broadStrategyPicker)
+		report()
+		if (next.changed && next.gates.length < region.length) {
+			activity.improvements++
+			const result = [...input.slice(0, start), ...next.gates, ...input.slice(end)]
+			report(result)
+			return result
 		}
 	}
 	report()
