@@ -208,3 +208,23 @@ measurements.
 
 For background on the original challenge, read
 [Breaking the $10,000 iO Bounty](https://mirror.xyz/killaridev.eth/x2x6yFhovUQJxICCM8jJ7ezcjIvqyRN1iQfsWCG_Doc).
+
+## Recursive affine challenge
+
+`data/recursive-affine-maze.json` contains 46,220 gates on 32 wires: exactly 20
+times the gate count of `tangled-not`. Four levels of affine conjugations mix
+nonlinear shears recursively. The GF(2) region pass removes affine overhead but
+cannot by itself recover cancellations across the nonlinear boundaries.
+
+Run `python3 data/generate-recursive-affine-maze.py` to reproduce the puzzle,
+`recursive-affine-maze-solved.json`, and its proof metadata. The generator checks
+exact algebraic normal forms for all outputs, proving equivalence for every
+input. The four-gate solution is optimal because four distinct output wires
+change and each gate affects just one target.
+
+```bash
+npm run optimize -- data/recursive-affine-maze.json
+```
+
+This is a stress case with a known solution; no full-solver runtime bound has
+been established.
