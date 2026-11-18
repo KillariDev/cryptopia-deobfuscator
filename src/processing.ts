@@ -1,3 +1,4 @@
+import { opaqueRainbow } from './opaque-rainbow.js'
 import { AdaptiveStrategyPicker } from './strategy-picker.js'
 import { searchDependencyCuts } from './dependency-cuts.js'
 import { setImmediate as yieldToCoordinator, setTimeout as waitForWork } from 'node:timers/promises'
@@ -404,10 +405,14 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		const result = await searchDependencyCuts(originalGates, stopped, async cut => {
 			const next = await massOptimizeStep(tables, ioIdentifierCache, state!.processed, cut.gates, cut.gates.length, useProbabilistically, config.search.variableElimination, true, new SubsetPreparation(cut.gates), { deadline, shouldStop: stopped, broad: true, dependencyRegion: true }, state!.picker)
 			return next.changed ? next.gates : undefined
-		}, state.offset++, stats)
+		}, state.offset++, stats, state)
 		// Toolkit calls have their own timings; count only cut-index overhead here.
 		recordStrategy('dependency-cuts', { global: true }, attemptStarted + stats.solverMs, originalGates.length, result?.length ?? originalGates.length, result !== undefined)
 		return finish({ gates: result ?? originalGates, changed: result !== undefined })
+	}
+	if (selected === 'rainbow' && synthesisBudget?.dependencyRegion) {
+		const result = await opaqueRainbow(originalGates, tables, ioIdentifierCache, () => performance.now() >= synthesisBudget.deadline || synthesisBudget.shouldStop?.() === true)
+		if (result) { recordStrategy('rainbow', { opaque: true }, attemptStarted, originalGates.length, result.length, true); return finish({gates: result, changed:true}) }
 	}
 	if (selected === 'symbolic') {
 		const result = wholeCircuitAffineSearch(originalGates, Math.max(0, (synthesisBudget?.deadline ?? performance.now()) - performance.now()), () => synthesisBudget?.shouldStop?.() === true)

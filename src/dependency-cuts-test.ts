@@ -1,3 +1,4 @@
+import { opaqueRainbow } from './opaque-rainbow.js'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -72,6 +73,10 @@ try {
  config.files.databaseDirectory = directory; config.files.dataDirectory = directory
  config.logging.verbose = false; config.logging.generationDiagnostics = false
  tables = new RainbowPortfolio([{ wires: 3, gates: 1, db: await createRainbowTable(3, 1) }])
+ const scratch = [gate(0,0,3,3), t, gate(0,0,3,3)]
+ const opaque = await opaqueRainbow(scratch, tables, new (await import('./limitedMap.js')).LimitedMap(100), () => false)
+ assert.equal(opaque?.length, 1, 'lookup uses three live values despite a fourth restored workspace wire')
+ equivalent(scratch, opaque!, 4)
  const caches = createOptimizerCaches()
  const picker = new AdaptiveStrategyPicker(['dependency-cuts'], () => ({ enabled: true, exploration: 0.2, halfLifeSeconds: 300 }))
  config.search.strategyAdaptive = true
