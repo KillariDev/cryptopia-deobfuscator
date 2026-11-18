@@ -197,11 +197,25 @@ export class IncrementalGraph {
 	}
 	context(): DependencyContext {
 		if (this.cached) return this.cached
-		const nodes: DependencyNode[] = [...this.order].map((id, lineNumber) => {
+		const nodes: DependencyNode[] = []
+		for (const id of this.order) {
 			const record = this.records.get(id)!
-			return { lineNumber, dependOnPastLines: [...record.past].map(id => this.order.indexOf(id)!).sort((a, b) => a - b), dependOnFutureLine: record.future === undefined ? -1 : this.order.indexOf(record.future)! }
-		})
-		const map = (source: Map<number, number[]>) => new Map([...source].filter(([, ids]) => ids.length > 0).map(([wire, ids]) => [wire, ids.map(id => this.order.indexOf(id)!)]))
+			const past: number[] = []
+			for (const dependency of record.past) past.push(this.order.indexOf(dependency)!)
+			past.sort((a, b) => a - b)
+			nodes.push({
+				lineNumber: nodes.length,
+				dependOnPastLines: past,
+				dependOnFutureLine: record.future === undefined ? -1 : this.order.indexOf(record.future)!,
+			})
+		}
+		const map = (source: Map<number, number[]>) => {
+			const positions = new Map<number, number[]>()
+			for (const [wire, ids] of source) {
+				if (ids.length) positions.set(wire, ids.map(id => this.order.indexOf(id)!))
+			}
+			return positions
+		}
 		return this.cached = { nodes, dependantMap: dependencyGraphToMap(nodes), access: { accesses: map(this.accesses), writes: map(this.writes) } }
 	}
 }

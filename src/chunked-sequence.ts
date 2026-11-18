@@ -6,14 +6,19 @@ export class ChunkedSequence<T> {
 	private snapshot?: T[]
 	length = 0
 	constructor(values: T[], private chunkSize = 128, private indexed = false) {
-		if (indexed && new Set(values).size !== values.length) throw new Error('Duplicate stable circuit ID')
 		if (!Number.isSafeInteger(chunkSize) || chunkSize < 1) throw new Error('Invalid circuit chunk size')
-		for (let i = 0; i < values.length; i += chunkSize) this.chunks.push(this.make(values.slice(i, i + chunkSize)))
+		for (let i = 0; i < values.length; i += chunkSize) this.chunks.push(this.make(values.slice(i, i + chunkSize), true))
 		this.reindexChunks()
 	}
-	private make(values: T[]): Chunk<T> {
+	private make(values: T[], checkDuplicates = false): Chunk<T> {
 		const chunk = { values, start: 0 }
-		if (this.indexed) for (const [offset, value] of values.entries()) this.handles.set(value, { chunk, offset })
+		if (this.indexed) {
+			for (let offset = 0; offset < values.length; offset++) {
+				const value = values[offset]
+				if (checkDuplicates && this.handles.has(value)) throw new Error('Duplicate stable circuit ID')
+				this.handles.set(value, { chunk, offset })
+			}
+		}
 		return chunk
 	}
 	private reindexChunks() {
