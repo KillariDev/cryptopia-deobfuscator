@@ -50,8 +50,7 @@ try {
 	const timings = reports.filter(line => line.includes('Global tried (worker time):'))
 	assert.equal(counts.length, 1)
 	assert.match(counts[0], /SAT sweep:1/)
-	assert.equal(timings.length, 1)
-	assert.match(timings[0], /SAT sweep broad 1x\/0.50s/)
+	assert.equal(timings.length, 0)
 	const periodic = reports.findIndex(line => line.includes('Gates: 5001 - 0'))
 	assert.ok(periodic >= 0 && periodic < reports.indexOf(counts[0]), 'periodic status precedes the round-end strategy totals')
 

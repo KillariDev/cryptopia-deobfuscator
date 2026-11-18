@@ -91,8 +91,7 @@ The solver combines several approaches:
   the next strategy. Local and broad searches have separate strategy orders.
   The broad lane also advances when the local result wins the round.
 
-The summary reports active worker counts by strategy and worker time spent per
-pass. Set `search.strategyAdaptive` to false to use the fixed pipeline and
+The summary reports worker counts by strategy. Set `search.strategyAdaptive` to false to use the fixed pipeline and
 synthesis rotation. Failed-region caches are separate by strategy so each method
 can try the same region.
 
@@ -140,8 +139,7 @@ Jobs in either lane can pick up their own lane's improvements. At round end,
 the coordinator compares the complete broad result with the assembled chunk
 result and verifies and saves the winner. Periodic status updates and checkpoints
 also use the best complete candidate currently available. The round summary
-reports both gate reductions, which result was kept, and each lane’s strategies
-and worker time.
+reports both gate reductions, which result was kept, and each lane’s strategies.
 
 `workers.jobSeconds` sets the budget for an individual job. Workers stop
 cooperatively at the round boundary, with state, memory and circuit-size limits

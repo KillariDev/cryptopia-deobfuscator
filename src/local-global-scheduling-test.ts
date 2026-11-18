@@ -87,8 +87,7 @@ try {
 		assert.ok(reports.some(line => line.includes(`Round winner: ${broadRemoved > 4 ? 'global' : 'local'} | Local: 4 gates removed | Global: ${broadRemoved} gates removed`)))
 		assert.ok(reports.some(line => line.endsWith('Local strategies: rainbow:1')))
 		assert.ok(reports.some(line => line.endsWith('Global strategies: SAT sweep:1')))
-		assert.ok(reports.some(line => line.endsWith('Local tried (worker time): rainbow 1x/0.05s')))
-		assert.ok(reports.some(line => line.endsWith('Global tried (worker time): SAT sweep broad 1x/0.10s')))
+		assert.ok(reports.every(line => !line.includes(' tried (worker time):')))
 	}
 } finally {
 	Object.assign(config, saved)

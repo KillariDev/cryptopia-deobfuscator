@@ -6,7 +6,7 @@ import { setImmediate as yieldToCoordinator } from 'node:timers/promises'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
 import { roundSearchPlan, roundSearchResult } from './round-search.js'
-import { StrategySummary, formatRoundStrategies } from './logging.js'
+import { formatRoundStrategies } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
 import { AdaptiveConcurrency, MemoryConcurrency, memoryPressure, memorySnapshot } from './concurrency.js'
@@ -1004,7 +1004,6 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	let currentGates = gates.slice()
 	const wireCosts = new Map<number, number>()
 	let lastReportedGates = currentGates.length
-	let nextStrategyJob = 0
 	let optimizerRound = 0
 	const globalStrategyPicker = new RoundStrategyPicker(broadStrategyOrder())
 	const summaryThrottle = new SummaryThrottle(config.timing.summarySeconds * 1000)
@@ -1026,12 +1025,11 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			onPhase('running optimizer searches')
 			optimizerRound++
 			const roundStrategies = {
-				Local: { timings: new StrategySummary(), assignments: new Map<string, WorkerActivity>() },
-				Global: { timings: new StrategySummary(), assignments: new Map<string, WorkerActivity>() },
+				Local: new Map<string, WorkerActivity>(),
+				Global: new Map<string, WorkerActivity>(),
 			}
-			const observeStrategy = (side: keyof typeof roundStrategies, job: number, activity?: WorkerActivity) => {
-				const { timings, assignments } = roundStrategies[side]
-				timings.observe(job, activity?.strategies)
+			const observeStrategy = (side: keyof typeof roundStrategies, activity?: WorkerActivity) => {
+				const assignments = roundStrategies[side]
 				if (activity?.workerId !== undefined && activity.activeStrategy) {
 					assignments.set(`${activity.workerId}:${activity.activeStrategy}`, activity)
 				}
@@ -1123,7 +1121,6 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				// candidates. Neither uses the other's results before selection.
 				const broad = runBroad ? (async () => {
 					do {
-						const broadJob = nextStrategyJob++
 						statuses[jobCount] = { updatedAtMs: performance.now() - lastIterationTime, done: false, started: false }
 						const accept = (candidate: Gate[]) => {
 							if (!isReplacementSimpler(candidate, broadBest)) return
@@ -1131,11 +1128,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 							pendingCheckpoint = true
 						}
 						const result = await pool.run(broadBest, inputCircuit.wire_count, (_, activity, snapshot) => {
-							observeStrategy('Global', broadJob, activity)
+							observeStrategy('Global', activity)
 							statuses[jobCount] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
 							if (snapshot) accept(snapshot)
 						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, false, 'broad', optimizerRound, globalStrategy)
-						roundStrategies.Global.timings.finish(broadJob)
 						statuses[jobCount].done = true
 						accept(result)
 						await yieldToCoordinator()
@@ -1155,7 +1151,6 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 						const target = chunk, dataChunk = snapshots[target]
 						writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
 						let executionStarted: number | undefined
-						const strategyJob = nextStrategyJob++
 						const accept = (candidate: Gate[]) => {
 							// Several idle lanes may retry the same remaining chunk. Their
 							// results are alternatives, never additional chunks to concatenate.
@@ -1165,13 +1160,12 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 						}
 						const result = await pool.run(dataChunk, inputCircuit.wire_count, (_count, activity, snapshot) => {
 								executionStarted ??= performance.now()
-								observeStrategy('Local', strategyJob, activity)
+								observeStrategy('Local', activity)
 								if (snapshot) {
 									try { accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
 								}
 								statuses[index] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
 							}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, false, 'local', optimizerRound)
-						roundStrategies.Local.timings.finish(strategyJob)
 						if (executionStarted !== undefined) {
 							const cost = (performance.now() - executionStarted) / Math.max(1, dataChunk.length)
 							for (const wire of new Set(dataChunk.flatMap(getVars))) wireCosts.set(wire, ((wireCosts.get(wire) ?? cost) + cost) / 2)
@@ -1215,19 +1209,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			logVerbose(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
 			if (!config.workers.keepBusy && !wholeCircuit && !(runBroad && currentGates.length < nPrevGates)) {
 				beginPhase('shuffling next round')
-				const job = nextStrategyJob++
-				try { currentGates = await pool.run(currentGates, inputCircuit.wire_count, (_, activity) => roundStrategies.Local.timings.observe(job, activity?.strategies), undefined, config.workers.jobSeconds * 1000, false, 'shuffle') }
-				finally { roundStrategies.Local.timings.finish(job) }
+				currentGates = await pool.run(currentGates, inputCircuit.wire_count, undefined, undefined, config.workers.jobSeconds * 1000, false, 'shuffle')
 			}
 			const localRemoved = nPrevGates - localCount()
 			const globalReduction = runBroad ? ` | Global: ${nPrevGates - broadBest.length} gates removed` : ''
 			logTimed(`Round winner: ${winner} | Local: ${localRemoved} gates removed${globalReduction}`)
 			for (const side of ['Local', 'Global'] as const) {
-				const { assignments, timings } = roundStrategies[side]
-				const counts = formatRoundStrategies(assignments.values(), side)
+				const counts = formatRoundStrategies(roundStrategies[side].values(), side)
 				if (counts) logTimed(counts)
-				const summary = timings.flush(side)
-				if (summary) logTimed(summary)
 			}
 		}
 	} finally {
