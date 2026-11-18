@@ -98,8 +98,10 @@ assert.equal(fair.pick([{name:'a'},{name:'b'},{name:'c'}])?.name,'a','equally pr
 console.log('First-success bias: balanced warmup, smoothed early evidence, comparable easy-case weights and bounded growth passed')
 
 const defaults = new AdaptiveStrategyPicker(['variables','templates','forward-semantic-search','equality-saturation','rainbow'],()=>({enabled:true,exploration:0.2,halfLifeSeconds:60}))
-assert.deepEqual(defaults.weights().map(x=>x.weight),[5,5,5,5,1])
-assert.ok(defaults.probabilities(['variables','rainbow'])[0]>defaults.probabilities(['variables','rainbow'])[1])
+assert.deepEqual(defaults.weights().map(x=>x.weight),[5,5,5,5,10])
+assert.ok(defaults.probabilities(['variables','rainbow'])[1]>defaults.probabilities(['variables','rainbow'])[0])
+defaults.observe('rainbow',0,10)
+assert.ok(defaults.weights()[4].weight<10,'rainbow prior also fades with evidence')
 defaults.observe('variables',0,10)
 assert.ok(defaults.weights()[0].weight<5,'starting priors fade as actual evidence arrives')
 console.log('Preferred starting weights: variables, templates, forward and equality start at 5x and yield to evidence')

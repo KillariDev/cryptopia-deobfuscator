@@ -1,5 +1,5 @@
 import { workerLearning } from './shared-learning.js'
-const initialWeights: Record<string, number> = { variables: 5, templates: 5, 'forward-semantic-search': 5, 'equality-saturation': 5 }
+const initialWeights: Record<string, number> = { rainbow: 10, variables: 5, templates: 5, 'forward-semantic-search': 5, 'equality-saturation': 5 }
 /** Predictable rotation for each eligible solver group, independent of region sizes. */
 export class StrategyPicker {
 	private next = new Map<string, number>()
