@@ -53,10 +53,14 @@ export class IncrementalGraph {
 			nextWrite.set(target, id)
 		}
 	}
-	private neighbor(list: number[] = [], position: number, future: boolean) {
+	private lowerBound(list: readonly number[], position: number) {
 		let low = 0, high = list.length
-		while (low < high) { const mid = (low + high) >>> 1; if (this.order.indexOf(list[mid])! < position + Number(future)) low = mid + 1; else high = mid }
-		return future ? list[low] : list[low - 1]
+		while (low < high) {
+			const mid = (low + high) >>> 1
+			if (this.order.indexOf(list[mid])! < position) low = mid + 1
+			else high = mid
+		}
+		return low
 	}
 	private recompute(ids: Set<number>) {
 		for (const id of ids) {
@@ -68,9 +72,11 @@ export class IncrementalGraph {
 			record.future = undefined
 			for (let i = 0; i < record.wires.length; i++) {
 				const list = (i === 0 ? this.accesses : this.writes).get(record.wires[i])
-				const previous = this.neighbor(list, position, false)
+				if (!list) continue
+				const at = this.lowerBound(list, position)
+				const previous = list[at - 1]
 				if (previous !== undefined) record.past.add(previous)
-				const next = this.neighbor(list, position, true)
+				const next = list[list[at] === id ? at + 1 : at]
 				if (next === undefined) continue
 				const nextPosition = this.order.indexOf(next)!
 				if (nextPosition < nearest) {
@@ -90,15 +96,18 @@ export class IncrementalGraph {
 			for (let i = 0; i < wires.length; i++) {
 				const wire = wires[i]
 				if (wires.indexOf(wire) !== i) continue
-				const accesses = this.accesses.get(wire)
-				const before = this.neighbor(accesses, position, false)
-				const after = this.neighbor(accesses, position, true)
+				const accesses = this.accesses.get(wire)!
+				const at = this.lowerBound(accesses, position)
+				const before = accesses[at - 1]
+				const after = accesses[at + 1]
 				if (before !== undefined) affected.add(before)
 				if (after !== undefined) affected.add(after)
 			}
 			const wire = gate.target
-			const before = this.neighbor(this.writes.get(wire), position, false)
-			const after = this.neighbor(this.writes.get(wire), position, true)
+			const writes = this.writes.get(wire)!
+			const at = this.lowerBound(writes, position)
+			const before = writes[at - 1]
+			const after = writes[at + 1]
 			const low = before === undefined ? 0 : this.order.indexOf(before)!
 			const high = after === undefined ? this.order.length : this.order.indexOf(after)! + 1
 			const intervals = ranges.get(wire)
@@ -107,21 +116,13 @@ export class IncrementalGraph {
 		}
 		for (const [wire, intervals] of ranges) {
 			const list = this.accesses.get(wire) ?? []
-			const lowerBound = (position: number) => {
-				let low = 0, high = list.length
-				while (low < high) {
-					const mid = (low + high) >>> 1
-					if (this.order.indexOf(list[mid])! < position) low = mid + 1
-					else high = mid
-				}
-				return low
-			}
+
 			intervals.sort((a, b) => a[0] - b[0])
 			let coveredThrough = 0
 			for (const [low, high] of intervals) {
 				if (high <= coveredThrough) continue
-				const end = lowerBound(high)
-				for (let i = lowerBound(Math.max(low, coveredThrough)); i < end; i++) affected.add(list[i])
+				const end = this.lowerBound(list, high)
+				for (let i = this.lowerBound(list, Math.max(low, coveredThrough)); i < end; i++) affected.add(list[i])
 				coveredThrough = high
 			}
 		}
