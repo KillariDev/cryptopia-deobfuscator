@@ -35,7 +35,7 @@ export type WorkerActivity = {
 	subsets: number
 	checks: number
 	improvements: number
-	stage: 'searching' | 'shuffling' | 'verifying'
+	stage: 'preparing' | 'searching' | 'shuffling' | 'verifying'
 	strategies?: StrategyStat[]
 	rainbowTables?: RainbowTableStats[]
 	resources?: { databaseMs: number, elapsedMs: number, heapUsedBytes: number }
@@ -44,7 +44,7 @@ export type WorkerStatus = { activity?: WorkerActivity, updatedAtMs: number, don
 
 export function formatWorkerActivity(statuses: WorkerStatus[], elapsedMs: number, budgetMs: number) {
 	const totals = { passes: 0, subsets: 0, checks: 0, improvements: 0 }
-	const stages = { searching: 0, shuffling: 0, verifying: 0, waiting: 0, completed: 0 }
+	const stages = { preparing: 0, searching: 0, shuffling: 0, verifying: 0, waiting: 0, completed: 0 }
 	let oldest = 0
 	for (const status of statuses) {
 		if (status.activity) for (const key of ['passes', 'subsets', 'checks', 'improvements'] as const) totals[key] += status.activity[key]
@@ -55,7 +55,7 @@ export function formatWorkerActivity(statuses: WorkerStatus[], elapsedMs: number
 		}
 	}
 	const budget = Math.min(100, Math.floor(Math.max(0, elapsedMs) / budgetMs * 100))
-	return `Work: ${totals.passes} passes, ${totals.subsets} subsets visited, ${totals.checks} optimization checks, ${totals.improvements} improving rewrites; workers: ${stages.searching} searching, ${stages.shuffling} shuffling, ${stages.verifying} verifying, ${stages.waiting} awaiting report, ${stages.completed} completed; round time budget ${budget}% elapsed (not search completion); oldest active report ${Math.max(0, Math.floor(oldest / 1000))}s ago.${formatRainbowActivity(statuses)}`
+	return `Work: ${totals.passes} passes, ${totals.subsets} subsets visited, ${totals.checks} optimization checks, ${totals.improvements} improving rewrites; workers: ${stages.preparing} preparing, ${stages.searching} searching, ${stages.shuffling} shuffling, ${stages.verifying} verifying, ${stages.waiting} awaiting report, ${stages.completed} completed; round time budget ${budget}% elapsed (not search completion); oldest active report ${Math.max(0, Math.floor(oldest / 1000))}s ago.${formatRainbowActivity(statuses)}`
 }
 
 export const shouldFinishReducedRound = (elapsedMs: number, initialCount: number, currentCount: number) => elapsedMs >= config.timing.improvedRoundMinutes * 60_000 && currentCount < initialCount
@@ -81,10 +81,11 @@ export function formatStatus(status: SolverStatus) {
 		: `Round time: ${duration(elapsedMs)} / ${duration(targetMs)} target (${progress}% elapsed)`
 	const save = saved === undefined ? 'No checkpoint saved this run yet' : saved === candidate ? 'Checkpoint up to date' : `Checkpoint: ${saved} gates; new reductions pending save`
 	const active = statuses.filter(worker => !worker.done && worker.started !== false).length
+	const preparing = statuses.filter(worker => !worker.done && worker.started !== false && worker.activity?.stage === 'preparing').length
 	const broad = statuses.filter(worker => !worker.done && worker.started !== false && worker.activity?.scope === 'broad').length
 	const queued = statuses.filter(worker => !worker.done && worker.started === false).length
 	const late = statuses.filter(worker => !worker.done && worker.started !== false && elapsedMs - worker.updatedAtMs > Math.max(config.timing.summarySeconds * 2000, config.timing.workerReportSeconds * 3000)).length
-	return `Gates: ${candidate} (${reduction.toFixed(2)}% fewer than original; ${Math.max(0, roundStart - candidate)} removed this round) | ${save} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
+	return `Gates: ${candidate} (${reduction.toFixed(2)}% fewer than original; ${Math.max(0, roundStart - candidate)} removed this round) | ${save} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${preparing ? `; ${preparing} preparing regions` : ''}${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
 }
 
 /** Per-job snapshots are summed once, including completed jobs in this round. */

@@ -637,11 +637,15 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 	let changedWires = new Set<number>()
 	const neighborhoods = new NeighborhoodQueue(config.search.localSearchSeeds, config.search.localSearchRadius, config.search.localSearchBroadEvery)
 	const circuit = new ChunkedSequence(slicedVersion, config.search.circuitChunkGates)
+	activity.stage = 'preparing'
+	if (timeToEndWorker()) return circuit.toArray()
 	const graph = config.search.incrementalDependencies ? new IncrementalGraph(slicedVersion, config.search.circuitChunkGates) : undefined
 	do {
-		let graphIterator = findConvexSubsets(subsetSize, circuit, config.search.prioritizeChangedWires ? changedWires : undefined, graph?.context(), config.search.localSearch ? neighborhoods.take() : [])
+		activity.stage = 'preparing'
+		let graphIterator = findConvexSubsets(subsetSize, circuit, config.search.prioritizeChangedWires ? changedWires : undefined, graph?.context(), config.search.localSearch ? neighborhoods.take() : [], () => { activity.stage = 'preparing'; return timeToEndWorker() })
 		regenerateGraph = false
 		for (let lines of graphIterator) {
+			activity.stage = 'searching'
 			const subsetKey = `${config.synthesis.templates ? templates.version : 0}:${maxSlice}:${method}:${hashGates(lines.map(line => circuit.at(line)))}`
 			if (!(config.search.strategyAdaptive && strategyPicker) && testedSubsets.has(subsetKey)) continue
 			let subsetChanged = false
@@ -729,6 +733,8 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		}
 		return shouldFinish?.(activity) === true || endTime >= jobDeadline
 	}
+	const heartbeat = onProgress ? setInterval(() => onProgress(candidateParts.length, progressActivity()), config.timing.workerReportSeconds * 1000) : undefined
+	try {
 	while (true) {
 		if (workerMode && optimizedVersion.length === 0) return finishWorker()
 		//shuffleRows(optimizedVersion, 20)
@@ -801,6 +807,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 			}
 		}
 	}
+	} finally { clearInterval(heartbeat) }
 }
 
 export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: string, circuits: JobCircuits = loadJob(pathToFileWithoutExt, original), onPhase: (phase: string) => void = () => {}) => {
