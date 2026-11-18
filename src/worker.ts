@@ -52,7 +52,7 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, solver = 
 			const sharedTemplates = config.workers.shareTemplates && now - lastShared >= config.workers.sharedTemplateSeconds * 1000 ? templates.drainShared(config.workers.sharedTemplateBatch) : []
 			if (sharedTemplates.length) lastShared = now
 			parentPort!.postMessage({ progress: count, activity, snapshot, sharedTemplates })
-		}, activity => (restartOnImprovement && lastSnapshotCount < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0) || (workerData?.maximumChecks > 0 && (activity?.checks ?? 0) >= workerData.maximumChecks), count => count < lastSnapshotCount, restartOnImprovement)
+		}, activity => (restartOnImprovement && lastSnapshotCount < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0) || (workerData?.maximumChecks > 0 && (activity?.checks ?? 0) >= workerData.maximumChecks), count => count < lastSnapshotCount, true)
 		parentPort!.postMessage({ gates: result, sharedTemplates: config.workers.shareTemplates ? templates.drainShared(config.workers.sharedTemplateBatch) : [] })
 	} catch (error) {
 		parentPort!.postMessage({ error: String(error) })
