@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { synthesizeAffine, simplifyAffineRegions } from './affine.js'
 import { config } from './config.js'
-import { affineRewrite } from './strategies.js'
+import { advancedRewrite } from './strategies.js'
 import { Gate } from './types.js'
 import { evalCircuit, generateCombinations } from './utils.js'
 import { seededRandom } from './random.js'
@@ -48,13 +48,32 @@ const reduced = simplifyAffineRegions(mixed)
 assert.deepEqual(reduced, [nonlinear, not])
 equivalent(mixed, reduced, 3)
 assert.equal(simplifyAffineRegions([nonlinear])[0], nonlinear)
-const saved = config.synthesis.affine
+
+const local: Gate[] = [{ a: 0, b: 1, target: 2, gate_i: 6 }, { a: 0, b: 1, target: 3, gate_i: 6 }, { a: 4, b: 0, target: 5, gate_i: 3 }, { a: 4, b: 0, target: 5, gate_i: 3 }]
+assert.equal(synthesizeAffine(local), undefined, 'whole-region Gaussian synthesis cannot improve this compact network')
+const localResult = simplifyAffineRegions(local)
+assert.equal(localResult.length, 2, 'still simplify a smaller affine subwindow')
+equivalent(local, localResult, 6)
+assert.equal(simplifyAffineRegions(local, 64, -Infinity), local, 'respect exhausted synthesis budgets')
+const saved = { ...config.synthesis }
 try {
-	config.synthesis.affine = false
-	assert.equal(affineRewrite(mixed), mixed)
+	Object.assign(config.synthesis, { affine: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false, attemptEvery: 1, maximumWindowGates: 1, maximumWires: 1 })
+	assert.equal(await advancedRewrite(local), undefined, 'disabled affine strategy is not selected')
 	config.synthesis.affine = true
-	assert.deepEqual(affineRewrite(mixed), reduced)
-} finally { config.synthesis.affine = saved }
+	const selected = await advancedRewrite(local, () => 0)
+	assert.ok(selected && selected.length === 2, 'affine selection is independent of SMT and template size limits')
+	equivalent(local, selected, 6)
+	const mixedSelected = await advancedRewrite(mixed, () => 0)
+	assert.ok(mixedSelected && mixedSelected.length === 2, 'select affine rewrites within mixed regions')
+	equivalent(mixed, mixedSelected, 3)
+	config.synthesis.attemptEvery = 2
+	let selections = 0
+	for (let attempt = 0; attempt < 6; attempt++) if (await advancedRewrite(local, () => 0)) selections++
+	assert.equal(selections, 3, 'affine synthesis follows the shared cadence rather than running each time')
+	config.synthesis.attemptEvery = 1
+	config.synthesis.affineMaximumWindowGates = 2
+	assert.equal(await advancedRewrite(mixed), undefined, 'respect the affine strategy gate bound')
+} finally { Object.assign(config.synthesis, saved) }
 
 const challenge = JSON.parse(readFileSync(new URL('../data/tangled-not.json', import.meta.url), 'utf8'))
 const gates: Gate[] = challenge.gates.map(([a, b, target, gate_i]: number[]) => ({ a, b, target, gate_i }))

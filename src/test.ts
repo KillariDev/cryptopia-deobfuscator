@@ -592,7 +592,7 @@ assert.equal(parseConfig({ synthesis: { forwardSemanticSearch: true } }).synthes
 const { advancedRewrite } = await import('./strategies.js')
 const synthesisOptions = { ...config.synthesis }
 try {
-	Object.assign(config.synthesis, { forwardSemanticSearch: true, smt: true, meetInMiddle: false, equalitySaturation: false, attemptEvery: 1, maximumWires: 3, timeoutMs: 5000, states: 2000, maximumReplacementGates: 0 })
+	Object.assign(config.synthesis, { affine: false, forwardSemanticSearch: true, smt: true, meetInMiddle: false, equalitySaturation: false, attemptEvery: 1, maximumWires: 3, timeoutMs: 5000, states: 2000, maximumReplacementGates: 0 })
 	const input = [singleGate[0], singleGate[0], singleGate[0]]
 	resetStrategyStats()
 	assert.equal(await advancedRewrite(input, () => 0), undefined)

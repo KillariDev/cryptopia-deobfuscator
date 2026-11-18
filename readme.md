@@ -90,13 +90,15 @@ The solver combines several approaches:
   regions. These methods are enabled by default, with limits on circuit size,
   search effort and time; each can be disabled in `synthesis`.
 
-The GF(2) affine pass (`synthesis.affine`, enabled by default) simplifies complete
-reversible affine circuits and contiguous affine regions inside mixed circuits.
-It handles CNOT, XOR, NOT and complemented controls using matrix elimination,
-then checks the replacement's exact symbolic transformation before accepting a
-strict gate-count reduction. It runs on the full input before work is split and
-at the start of worker searches, independently of rainbow-table and SMT window
-sizes. Nonlinear gates and singular affine regions are left unchanged.
+GF(2) affine synthesis (`synthesis.affine`, enabled by default) is selected among
+the bounded synthesis strategies after local rewrites stall, at the shared
+`synthesis.attemptEvery` cadence. It is not an unconditional startup or worker
+prepass. It searches affine runs and smaller subwindows inside the selected
+region, using its own `synthesis.affineMaximumWindowGates` bound (default 256) and
+`validation.maximumWires`, independently of the tiny SMT/template limits.
+Exact symbolic verification is required for every accepted reduction. Nonlinear
+boundaries and singular affine maps are preserved, and the search respects the
+synthesis time budget.
 
 Replacements are ordered by gate count, then used-wire count and read cost.
 Multiple workers search circuit chunks, retaining caches between jobs. For circuits
@@ -213,7 +215,7 @@ For background on the original challenge, read
 
 `data/recursive-affine-maze.json` contains 46,220 gates on 32 wires: exactly 20
 times the gate count of `tangled-not`. Four levels of affine conjugations mix
-nonlinear shears recursively. The GF(2) region pass removes affine overhead but
+nonlinear shears recursively. GF(2) region synthesis can remove affine overhead but
 cannot by itself recover cancellations across the nonlinear boundaries.
 
 Run `python3 data/generate-recursive-affine-maze.py` to reproduce the puzzle,

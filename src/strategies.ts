@@ -18,36 +18,36 @@ let checks = 0
 let pending: Promise<unknown> = Promise.resolve()
 export async function advancedRewrite(gates: Gate[], random = Math.random): Promise<Gate[] | undefined> {
 	const options = config.synthesis
-	if (!(options.forwardSemanticSearch || options.smt || options.meetInMiddle || options.equalitySaturation) || gates.length > options.maximumWindowGates || ++checks % options.attemptEvery !== 0) return undefined
+	if (!(options.affine || options.forwardSemanticSearch || options.smt || options.meetInMiddle || options.equalitySaturation) || gates.length > Math.max(options.maximumWindowGates, options.affine ? options.affineMaximumWindowGates : 0) || ++checks % options.attemptEvery !== 0) return undefined
 	const { normalized, wires, key } = normalizeWindow(gates)
-	if (wires.length > options.maximumWires) return undefined
+	const small = wires.length <= options.maximumWires && gates.length <= options.maximumWindowGates
+	const affine = options.affine && gates.length <= options.affineMaximumWindowGates && wires.length <= config.validation.maximumWires
+	if (!small && !affine) return undefined
 	const job = pending.then(async () => {
 		const choices: { name: string, run: () => Gate[] | undefined | Promise<Gate[] | undefined> }[] = []
-		if (options.forwardSemanticSearch) choices.push({ name: 'forward-semantic-search', run: () => forwardSemanticSearch(normalized, wires.length, options.maximumReplacementGates, options.states, options.timeoutMs) })
-		if (options.smt) choices.push({ name: 'z3', run: () => synthesizeSMT(normalized, wires.length, options.maximumReplacementGates, options.timeoutMs) })
-		if (options.meetInMiddle) choices.push({ name: 'meet-in-the-middle', run: () => meetInMiddle(normalized, wires.length, [...generateAllGates(wires.length)], Math.min(options.maximumReplacementGates, gates.length - 1), options.states, options.timeoutMs) })
-		if (options.equalitySaturation) choices.push({ name: 'equality-saturation', run: () => saturateCircuit(normalized, wires.length, templates, options.states, options.timeoutMs) })
+		if (small && options.forwardSemanticSearch) choices.push({ name: 'forward-semantic-search', run: () => forwardSemanticSearch(normalized, wires.length, options.maximumReplacementGates, options.states, options.timeoutMs) })
+		if (small && options.smt) choices.push({ name: 'z3', run: () => synthesizeSMT(normalized, wires.length, options.maximumReplacementGates, options.timeoutMs) })
+		if (small && options.meetInMiddle) choices.push({ name: 'meet-in-the-middle', run: () => meetInMiddle(normalized, wires.length, [...generateAllGates(wires.length)], Math.min(options.maximumReplacementGates, gates.length - 1), options.states, options.timeoutMs) })
+		if (small && options.equalitySaturation) choices.push({ name: 'equality-saturation', run: () => saturateCircuit(normalized, wires.length, templates, options.states, options.timeoutMs) })
+		if (affine) choices.push({ name: 'gf2-affine', run: () => {
+			const result = simplifyAffineRegions(normalized, config.validation.maximumWires, performance.now() + options.timeoutMs)
+			return result === normalized ? undefined : result
+		} })
 		// Cache failures per strategy: a capped forward semantic search must not exclude Z3.
 		const available = choices.filter(choice => !failed.has(`${choice.name}:${key}`))
 		if (!available.length) return undefined
 		const choice = available[Math.floor(random() * available.length)]
 		const started = performance.now()
 		const result = await choice.run()
-		const accepted = result !== undefined && isReplacementSimpler(result, normalized) && templates.learn(normalized, result)
-		recordStrategy(choice.name, { maximumWires: options.maximumWires, maximumWindowGates: options.maximumWindowGates, maximumReplacementGates: options.maximumReplacementGates, ...(choice.name !== 'z3' ? { states: options.states } : {}), timeoutMs: options.timeoutMs, attemptEvery: options.attemptEvery }, started, normalized.length, accepted ? result!.length : normalized.length, accepted)
+		const accepted = result !== undefined && isReplacementSimpler(result, normalized) && (choice.name === 'gf2-affine' || templates.learn(normalized, result))
+		const settings = choice.name === 'gf2-affine'
+			? { maximumWires: config.validation.maximumWires, maximumWindowGates: options.affineMaximumWindowGates, timeoutMs: options.timeoutMs, attemptEvery: options.attemptEvery }
+			: { maximumWires: options.maximumWires, maximumWindowGates: options.maximumWindowGates, maximumReplacementGates: options.maximumReplacementGates, ...(choice.name !== 'z3' ? { states: options.states } : {}), timeoutMs: options.timeoutMs, attemptEvery: options.attemptEvery }
+		recordStrategy(choice.name, settings, started, normalized.length, accepted ? result!.length : normalized.length, accepted)
 		if (accepted) return reverseMapCircuit(result!, wires)
 		failed.set(`${choice.name}:${key}`, true)
 		return undefined
 	})
 	pending = job.catch(() => {})
 	return job
-}
-
-/** Global/region affine synthesis has its own polynomial bound, not the tiny SMT window. */
-export function affineRewrite(gates: Gate[]) {
-	if (!config.synthesis.affine) return gates
-	const started = performance.now()
-	const result = simplifyAffineRegions(gates, config.validation.maximumWires)
-	recordStrategy('gf2-affine', { maximumWires: config.validation.maximumWires }, started, gates.length, result.length, result !== gates)
-	return result
 }

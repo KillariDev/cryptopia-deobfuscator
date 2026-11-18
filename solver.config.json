@@ -143,6 +143,7 @@
   },
   "synthesis": {
     "affine": true,
+    "affineMaximumWindowGates": 256,
     "templates": true,
     "templateEntries": 10000,
     "maximumWires": 3,

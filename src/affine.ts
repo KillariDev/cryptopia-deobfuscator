@@ -60,16 +60,38 @@ export function synthesizeAffine(input: Gate[], maximumWires = 64): Gate[] | und
 	return result
 }
 
-/** Rewrite maximal affine regions without crossing nonlinear gates. */
-export function simplifyAffineRegions(gates: Gate[], maximumWires = 64): Gate[] {
+/** A cheap whole-map decomposition can be worse than small local rewrites.
+ * Try bounded subwindows as well, including when a region exceeds the wire cap. */
+function simplifyAffineBlock(region: Gate[], maximumWires: number, deadline: number) {
+	const direct = synthesizeAffine(region, maximumWires)
+	if (direct) return direct
+	for (const size of [2, 4, 8, 16, 32, 64]) {
+		if (size >= region.length) break
+		const last = region.length - size, positions = Math.min(16, last + 1)
+		for (let slot = 0; slot < positions; slot++) {
+			if (performance.now() >= deadline) return undefined
+			const start = positions === 1 ? 0 : Math.floor(slot * last / (positions - 1))
+			const replacement = synthesizeAffine(region.slice(start, start + size), maximumWires)
+			if (replacement) return [...region.slice(0, start), ...replacement, ...region.slice(start + size)]
+		}
+	}
+	return undefined
+}
+
+/** Rewrite affine regions and their bounded subwindows without crossing nonlinear gates. */
+export function simplifyAffineRegions(gates: Gate[], maximumWires = 64, deadline = Infinity): Gate[] {
 	const result: Gate[] = []
 	let changed = false
 	for (let start = 0; start < gates.length;) {
+		if (performance.now() >= deadline) {
+			for (let index = start; index < gates.length; index++) result.push(gates[index])
+			break
+		}
 		if (!affineControls.has(simplifyGate(gates[start]).gate_i)) { result.push(gates[start++]); continue }
 		let end = start + 1
 		while (end < gates.length && affineControls.has(simplifyGate(gates[end]).gate_i)) end++
 		const region = gates.slice(start, end)
-		const replacement = region.length > 1 ? synthesizeAffine(region, maximumWires) : undefined
+		const replacement = region.length > 1 ? simplifyAffineBlock(region, maximumWires, deadline) : undefined
 		changed ||= replacement !== undefined
 		for (const gate of replacement ?? region) result.push(gate)
 		start = end
