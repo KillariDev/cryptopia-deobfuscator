@@ -90,7 +90,7 @@ The solver combines several approaches:
   regions. These methods are enabled by default, with limits on circuit size,
   search effort and time; each can be disabled in `synthesis`.
 
-GF(2) affine synthesis (`synthesis.affine`, enabled by default) is selected among
+Local GF(2) affine synthesis (`synthesis.affine`, enabled by default) is selected among
 the bounded synthesis strategies after local rewrites stall, at the shared
 `synthesis.attemptEvery` cadence. It is not an unconditional startup or worker
 prepass. It searches affine runs and smaller subwindows inside the selected
@@ -99,6 +99,17 @@ region, using its own `synthesis.affineMaximumWindowGates` bound (default 256) a
 Exact symbolic verification is required for every accepted reduction. Nonlinear
 boundaries and singular affine maps are preserved, and the search respects the
 synthesis time budget.
+
+A separate broad affine search receives the complete circuit as a scheduled
+worker job, before the first local round and at subsequent round boundaries at
+most once per `synthesis.affineWholeCircuitSeconds` (default 60 seconds; 0 disables
+broad searches). It is independent of the 256-gate local window and uses
+`synthesis.timeoutMs` as a computation budget (default 100 ms). Scanning, matrix
+composition and elimination check deadlines and cancellation cooperatively; only
+fully verified region improvements are retained. Gate copying and worker startup
+are outside this computation budget. This is linear scanning plus bounded matrix
+work, not enumeration of input states. It does not repeat on every worker job or
+rapid restart.
 
 Replacements are ordered by gate count, then used-wire count and read cost.
 Multiple workers search circuit chunks, retaining caches between jobs. For circuits

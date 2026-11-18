@@ -1,5 +1,5 @@
 import { config } from './config.js'
-import { templates } from './strategies.js'
+import { templates, wholeCircuitAffineSearch } from './strategies.js'
 import { TemplateRule } from './templates.js'
 import { parentPort, workerData } from 'worker_threads'
 import { createOptimizerCaches, optimize } from './processing.js'
@@ -10,10 +10,16 @@ import { WORKER_ROUND_MS } from './job.js'
 let portfolio: ReturnType<typeof openRainbowPortfolio> | undefined
 const caches = createOptimizerCaches()
 let lastShared = performance.now()
-parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, restartOnImprovement = false, sharedTemplates }: { sharedTemplates?: TemplateRule[], gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, restartOnImprovement?: boolean }) => {
+parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, solver = 'local', restartOnImprovement = false, sharedTemplates }: { sharedTemplates?: TemplateRule[], gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, restartOnImprovement?: boolean, solver?: 'local' | 'affine' }) => {
 	try {
 		if (sharedTemplates !== undefined) {
 			if (config.workers.shareTemplates) templates.importShared(sharedTemplates, config.workers.sharedTemplateBatch)
+			return
+		}
+		if (solver === 'affine') {
+			const stop = stopSignal ? new Int32Array(stopSignal) : undefined
+			const result = wholeCircuitAffineSearch(gates, budgetMs, () => stop !== undefined && Atomics.load(stop, 0) !== 0)
+			parentPort!.postMessage({ gates: result })
 			return
 		}
 		// Open once per persistent worker and wait for every connection to be ready.

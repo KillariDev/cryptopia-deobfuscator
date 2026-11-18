@@ -26,3 +26,14 @@ export class WholeCircuitRestart {
 		return true
 	}
 }
+
+/** Reserve occasional broad-strategy turns without repeating them on fast restarts. */
+export class PeriodicStrategy {
+	private next = -Infinity
+	constructor(private intervalMs: number) {}
+	take(now: number) {
+		if (this.intervalMs <= 0 || now < this.next) return false
+		this.next = now + this.intervalMs
+		return true
+	}
+}

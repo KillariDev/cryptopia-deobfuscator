@@ -51,3 +51,12 @@ export async function advancedRewrite(gates: Gate[], random = Math.random): Prom
 	pending = job.catch(() => {})
 	return job
 }
+
+/** A scheduled worker turn, separate from the bounded local synthesis window. */
+export function wholeCircuitAffineSearch(gates: Gate[], budgetMs: number, shouldStop: () => boolean) {
+	if (!config.synthesis.affine) return gates
+	const started = performance.now()
+	const result = simplifyAffineRegions(gates, config.validation.maximumWires, started + budgetMs, shouldStop)
+	recordStrategy('gf2-affine-whole', { maximumWires: config.validation.maximumWires, timeoutMs: budgetMs }, started, gates.length, result.length, result !== gates)
+	return result
+}

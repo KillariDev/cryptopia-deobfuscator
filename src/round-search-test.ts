@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
+import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { parseConfig } from './config.js'
 import { evalCircuit, generateCombinations } from './utils.js'
 import { Gate } from './types.js'
@@ -49,3 +49,11 @@ assert.throws(() => failed.accept([not]), /verification failed/)
 assert.equal(Atomics.load(failedStop, 0), 0)
 assert.deepEqual(failed.best, original)
 console.log('Verified improvement restart, late winner retention, stale result rejection and failed-save safety passed')
+
+const periodic = new PeriodicStrategy(60_000)
+assert.equal(periodic.take(0), true)
+for (let round = 1; round < 60; round++) assert.equal(periodic.take(round * 1000), false)
+assert.equal(periodic.take(60_000), true)
+assert.equal(periodic.take(60_001), false)
+assert.equal(new PeriodicStrategy(0).take(0), false)
+assert.equal(parseConfig({ synthesis: { affineWholeCircuitSeconds: 0 } }).synthesis.affineWholeCircuitSeconds, 0)

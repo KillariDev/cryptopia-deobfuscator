@@ -1,4 +1,4 @@
-import { WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
+import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { formatStrategyActivity } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
@@ -733,9 +733,20 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	let currentGates = gates.slice()
 	const wireCosts = new Map<number, number>()
 	let savedGateCount: number | undefined
+	const wholeAffine = new PeriodicStrategy(config.synthesis.affineWholeCircuitSeconds * 1000)
 	const summaryThrottle = new SummaryThrottle(config.timing.summarySeconds * 1000)
 	try {
 		while(currentGates.length > 0) {
+			if (config.synthesis.affine && wholeAffine.take(performance.now())) {
+				const result = await pool.run(currentGates, inputCircuit.wire_count, undefined, undefined, config.synthesis.timeoutMs, false, 'affine')
+				if (result.length < currentGates.length) {
+					save([paths.progress(result.length), paths.latest], result, inputCircuit.wire_count, originalGates)
+					currentGates = result
+					savedGateCount = result.length
+					logVerbose(`Whole-circuit GF(2) search saved ${result.length} gates`)
+				}
+				if (!currentGates.length) break
+			}
 			currentGates = gateSimplifier(currentGates)
 			let lastIterationTime = performance.now()
 			const nPrevGates = currentGates.length

@@ -1,3 +1,4 @@
+import { WorkerPool } from './threads.js'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { synthesizeAffine, simplifyAffineRegions } from './affine.js'
@@ -82,3 +83,22 @@ assert.deepEqual(synthesizeAffine(gates), [not], 'solve the complete 32-wire tan
 const high: Gate[] = [{ a: 63, b: 0, target: 31, gate_i: 3 }, { a: 63, b: 0, target: 31, gate_i: 3 }, { ...not, target: 63 }]
 assert.deepEqual(synthesizeAffine(high), [{ ...not, target: 63 }])
 console.log('GF(2) affine synthesis: exhaustive random maps, controls, swaps, aliases, nonlinear boundaries, sparse wires, disable switch and tangled NOT challenge passed')
+
+const large = Array.from({ length: 100_000 }, () => cn)
+let polls = 0
+assert.equal(synthesizeAffine(large, 64, Infinity, () => ++polls >= 4), undefined)
+assert.equal(polls, 4, 'cancel during the large input scan rather than after matrix construction')
+assert.equal(synthesizeAffine(large, 64, -Infinity), undefined)
+polls = 0
+assert.equal(simplifyAffineRegions(large, 64, Infinity, () => ++polls >= 3), large, 'an interrupted region scan preserves the input')
+const wholePool = new WorkerPool(1)
+try {
+	const solved = await wholePool.run(gates, 32, undefined, undefined, 100, false, 'affine')
+	assert.deepEqual(solved, [not], 'scheduled worker can see beyond the local 256-gate limit')
+	const stop = new Int32Array(new SharedArrayBuffer(4))
+	Atomics.store(stop, 0, 1)
+	assert.deepEqual(await wholePool.run(gates, 32, undefined, stop.buffer as SharedArrayBuffer, 100, false, 'affine'), gates)
+	assert.deepEqual(await wholePool.run(gates, 32, undefined, undefined, Number.EPSILON, false, 'affine'), gates, 'exhausted computation budgets leave candidates unchanged')
+	assert.deepEqual(await wholePool.run(gates, 32, undefined, undefined, 100, false, 'affine'), [not], 'worker remains usable after a budget expires')
+} finally { await wholePool.close() }
+console.log('Broad affine worker: full challenge, 100k-gate scan cancellation, deadline safety and worker reuse passed')
