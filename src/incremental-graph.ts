@@ -1,5 +1,5 @@
 import { Gate, DependencyNode } from './types.js'
-import { getVars, dependencyGraphToMap, DependencyContext } from './utils.js'
+import { getVars, DependencyContext } from './utils.js'
 import { ChunkedSequence } from './chunked-sequence.js'
 
 type WireEdit = { firstRemoval: number, incoming: number[] }
@@ -198,13 +198,20 @@ export class IncrementalGraph {
 	context(): DependencyContext {
 		if (this.cached) return this.cached
 		const nodes: DependencyNode[] = []
+		const dependantMap = new Map<number, number[]>()
 		for (const id of this.order) {
 			const record = this.records.get(id)!
 			const past: number[] = []
 			for (const dependency of record.past) past.push(this.order.indexOf(dependency)!)
 			past.sort((a, b) => a - b)
+			const lineNumber = nodes.length
+			for (const dependency of past) {
+				const dependants = dependantMap.get(dependency)
+				if (dependants) dependants.push(lineNumber)
+				else dependantMap.set(dependency, [lineNumber])
+			}
 			nodes.push({
-				lineNumber: nodes.length,
+				lineNumber,
 				dependOnPastLines: past,
 				dependOnFutureLine: record.future === undefined ? -1 : this.order.indexOf(record.future)!,
 			})
@@ -216,6 +223,6 @@ export class IncrementalGraph {
 			}
 			return positions
 		}
-		return this.cached = { nodes, dependantMap: dependencyGraphToMap(nodes), access: { accesses: map(this.accesses), writes: map(this.writes) } }
+		return this.cached = { nodes, dependantMap, access: { accesses: map(this.accesses), writes: map(this.writes) } }
 	}
 }
