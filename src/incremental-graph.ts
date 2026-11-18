@@ -13,16 +13,44 @@ export class IncrementalGraph {
 	private cached?: DependencyContext
 	constructor(gates: Gate[], chunkSize = 128) {
 		this.order = new ChunkedSequence(gates.map(gate => this.add(gate)), chunkSize, true)
-		this.updateWires(new Set(gates.flatMap(getVars)))
-		this.recompute(new Set(this.order))
+		this.initialize()
 	}
-	private add(gate: Gate) { const id = this.next++; this.records.set(id, { gate, wires: [...new Set(getVars(gate))], past: new Set() }); return id }
-	private updateWires(wires: Set<number>) {
-		for (const wire of wires) { this.accesses.set(wire, []); this.writes.set(wire, []) }
-		for (const id of this.order) {
+	private add(gate: Gate) {
+		const id = this.next++
+		this.records.set(id, { gate, wires: getVars(gate), past: new Set() })
+		return id
+	}
+	private initialize() {
+		const append = (index: Map<number, number[]>, wire: number, id: number) => {
+			const list = index.get(wire)
+			if (!list) index.set(wire, [id])
+			else if (list[list.length - 1] !== id) list.push(id)
+		}
+		const latest = (index: Map<number, number[]>, wire: number) => {
+			const list = index.get(wire)
+			return list?.[list.length - 1]
+		}
+		for (const [id, record] of this.records) {
+			const target = record.gate.target
+			const previous = latest(this.accesses, target)
+			if (previous !== undefined) record.past.add(previous)
+			for (let i = 1; i < record.wires.length; i++) {
+				const writer = latest(this.writes, record.wires[i])
+				if (writer !== undefined) record.past.add(writer)
+			}
+			for (const wire of record.wires) append(this.accesses, wire, id)
+			append(this.writes, target, id)
+		}
+		const nextAccess = new Map<number, number>(), nextWrite = new Map<number, number>()
+		// IDs are consecutive and in circuit order during construction.
+		for (let id = this.next - 1; id >= 0; id--) {
 			const record = this.records.get(id)!
-			for (const wire of record.wires) if (wires.has(wire)) this.accesses.get(wire)!.push(id)
-			if (wires.has(record.gate.target)) this.writes.get(record.gate.target)!.push(id)
+			const target = record.gate.target
+			let nearest = nextAccess.get(target) ?? Infinity
+			for (let i = 1; i < record.wires.length; i++) nearest = Math.min(nearest, nextWrite.get(record.wires[i]) ?? Infinity)
+			record.future = nearest === Infinity ? undefined : nearest
+			for (const wire of record.wires) nextAccess.set(wire, id)
+			nextWrite.set(target, id)
 		}
 	}
 	private neighbor(list: number[] = [], position: number, future: boolean) {
@@ -34,11 +62,22 @@ export class IncrementalGraph {
 		for (const id of ids) {
 			const record = this.records.get(id)
 			if (!record) continue
-			const [target, ...controls] = getVars(record.gate), position = this.order.indexOf(id)!
-			const past = [this.neighbor(this.accesses.get(target), position, false), ...controls.map(wire => this.neighbor(this.writes.get(wire), position, false))]
-			record.past = new Set(past.filter((value): value is number => value !== undefined))
-			const future = [this.neighbor(this.accesses.get(target), position, true), ...controls.map(wire => this.neighbor(this.writes.get(wire), position, true))].filter((value): value is number => value !== undefined)
-			record.future = future.sort((a, b) => this.order.indexOf(a)! - this.order.indexOf(b)!)[0]
+			const position = this.order.indexOf(id)!
+			record.past.clear()
+			let nearest = Infinity
+			record.future = undefined
+			for (let i = 0; i < record.wires.length; i++) {
+				const list = (i === 0 ? this.accesses : this.writes).get(record.wires[i])
+				const previous = this.neighbor(list, position, false)
+				if (previous !== undefined) record.past.add(previous)
+				const next = this.neighbor(list, position, true)
+				if (next === undefined) continue
+				const nextPosition = this.order.indexOf(next)!
+				if (nextPosition < nearest) {
+					nearest = nextPosition
+					record.future = next
+				}
+			}
 		}
 	}
 	/** Access-list edits change adjacent target users. Write edits additionally
@@ -46,7 +85,7 @@ export class IncrementalGraph {
 	private collectAffected(id: number, affected: Set<number>) {
 		const record = this.records.get(id)!
 		const position = this.order.indexOf(id)!
-		for (const wire of record.wires) {
+		for (const wire of new Set(record.wires)) {
 			for (const future of [false, true]) {
 				const next = this.neighbor(this.accesses.get(wire), position, future)
 				if (next !== undefined) affected.add(next)
