@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import sqlite3 from 'sqlite3'
 import { broadRegions, broadSearch } from './broad-search.js'
-import { config } from './config.js'
+import { config, minimumBroadGates } from './config.js'
 import { createOptimizerCaches, massOptimizeStep } from './processing.js'
 import { RainbowPortfolio } from './rainbow-portfolio.js'
 import { functionKey, encodeGates } from './semantic.js'
@@ -33,6 +33,14 @@ try {
 	const suffix: Gate[] = Array.from({ length: 1250 }, () => ({ a: 3, b: 4, target: 5, gate_i: 1 }))
 	const input = [...prefix, ...middle, ...suffix]
 	const nativeFind = tables.findReplacements.bind(tables)
+	const small = middle.slice(0, minimumBroadGates() - 1)
+	for (const adaptive of [false, true]) {
+		config.search.strategyAdaptive = adaptive
+		resetStrategyStats()
+		assert.equal(await broadSearch(tables, small, 8, createOptimizerCaches(), 5000, () => false, () => {}), small)
+		assert.deepEqual(strategySnapshot(), [], 'broad search leaves local-sized circuits to local workers')
+	}
+	config.search.strategyAdaptive = false
 	let largestWindow = 0
 	tables.findReplacements = async (windows, cache) => {
 		for (const window of windows) largestWindow = Math.max(largestWindow, window.mappedGates.length)

@@ -95,3 +95,5 @@ export const configPath = resolve(process.env.OPTIMIZER_CONFIG ?? fileURLToPath(
 export const config: SolverConfig = !isMainThread && workerData?.solverConfig
 	? parseConfig(workerData.solverConfig)
 	: parseConfig(JSON.parse(readFileSync(configPath, 'utf8')))
+
+export const minimumBroadGates = () => Math.max(2, 1 + config.search.subsetMaximum, 1 + config.search.sliceMaximum)
