@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import sqlite3 from 'sqlite3'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { allSQL, runSQL } from './sql.js'
 import { SQLObserver } from './sql-observer.js'
-import { ShardedStagingWriter, stagingShard } from './generation-shards.js'
+import { cleanupStagingDirectories, ShardedStagingWriter, stagingShard } from './generation-shards.js'
 import { StagingRow, StagingWriter } from './generation-staging.js'
 import { makeStagingFixture } from './staging-fixture.js'
 import { parseConfig } from './config.js'
@@ -13,6 +13,14 @@ const directory = await mkdtemp(join(tmpdir(), 'staging-shards-test-'))
 const db = new sqlite3.Database(join(directory, 'owner.db'))
 const observer = new SQLObserver(db)
 try {
+	await cleanupStagingDirectories(join(directory, 'missing'))
+	const stale = join(directory, 'rainbow-staging-abandoned')
+	await mkdir(stale)
+	await writeFile(join(stale, 'writer-0.db-wal'), 'discarded batch')
+	await writeFile(join(directory, 'worker.json'), 'keep')
+	await cleanupStagingDirectories(directory)
+	assert.ok(!(await readdir(directory)).includes('rainbow-staging-abandoned'))
+	assert.ok((await readdir(directory)).includes('worker.json'))
 	await runSQL(db, 'CREATE TEMP TABLE BuildCandidates(state BLOB NOT NULL,mask INTEGER NOT NULL,reads INTEGER NOT NULL,gates BLOB NOT NULL,wires INTEGER NOT NULL,PRIMARY KEY(state,mask)) WITHOUT ROWID')
 	const options = { prepared: true, sort: false, parameterLimit: 40, cacheEntries: 2 }
 	const rows: StagingRow[] = Array.from({ length: 300 }, (_, i) => [Buffer.from([i % 13]), i % 7, i % 11, Buffer.from([i % 256]), 2])
@@ -23,6 +31,8 @@ try {
 	for (const writers of [2, 4]) for (const compactBindings of [false, true]) {
 		const shards = await ShardedStagingWriter.create(db, { ...options, compactBindings, writers, directory, cacheMegabytes: 4 })
 		try {
+			await cleanupStagingDirectories(directory)
+			assert.ok((await readdir(directory)).includes(basename(shards.directory)))
 			assert.equal((await allSQL(db, 'PRAGMA database_list')).length, writers + 2)
 			await assert.rejects(shards.importBatch(), /No committed/)
 			for (let batch = 0; batch < 2; batch++) {

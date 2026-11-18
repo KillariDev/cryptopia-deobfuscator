@@ -11,10 +11,12 @@ import { databaseFilename } from './rainbowtable.js'
 export const WORKER_ROUND_MS = config.timing.roundMinutes * 60_000
 export type JobCircuits = { originalCircuit: CircuitData, inputCircuit: CircuitData }
 
-export function loadJob(working: string, original: string): JobCircuits {
+export function loadJob(working: string, original = working, startOver = false): JobCircuits {
 	const originalCircuit = readJsonFile(`${original}.json`) as CircuitData | null
 	if (!originalCircuit) throw new Error(`Cannot load original circuit: ${original}.json`)
-	const inputCircuit = existsSync(`${working}.json`) ? readJsonFile(`${working}.json`) as CircuitData | null : originalCircuit
+	const latest = outputPaths(working).latest
+	const inputPath = !startOver && existsSync(latest) ? latest : !startOver && working !== original && existsSync(`${working}.json`) ? `${working}.json` : undefined
+	const inputCircuit = inputPath ? readJsonFile(inputPath) as CircuitData | null : originalCircuit
 	if (!inputCircuit) throw new Error(`Cannot load working circuit: ${working}.json`)
 	for (const circuit of [originalCircuit, inputCircuit]) {
 		if (circuit.wire_count > config.validation.maximumWires) throw new Error('Circuit exceeds validation.maximumWires in solver.config.json')
@@ -32,7 +34,7 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 		...Object.entries(config).map(([section, settings]) => `Settings ${section}: ${JSON.stringify(settings)}`),
 		`Mode: ${resuming ? 'resume saved circuit' : 'start from original circuit'}`,
 		`Original: ${resolve(original + '.json')} (${originalCircuit.gates.length} gates, ${originalCircuit.wire_count} wires)`,
-		`Input: ${resolve((resuming ? working : original) + '.json')} (${inputCircuit.gates.length} gates, ${inputCircuit.wire_count} wires)`,
+		`Input: ${resolve(resuming ? (existsSync(paths.latest) ? paths.latest : working + '.json') : original + '.json')} (${inputCircuit.gates.length} gates, ${inputCircuit.wire_count} wires)`,
 		`Requested working file: ${resolve(working + '.json')}`,
 		`Latest verified circuit: ${resolve(paths.latest)}`,
 		`Progress checkpoints: ${resolve(dirname(paths.progress(inputCircuit.gates.length)))}`,

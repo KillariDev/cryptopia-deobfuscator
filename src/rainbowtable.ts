@@ -1,3 +1,4 @@
+import { cleanupStagingDirectories } from './generation-shards.js'
 import { GenerationActivity } from './generation-prefetch.js'
 import { GenerationDiagnostics, formatDiagnosticSample } from './generation-diagnostics.js'
 import { finalizeGeneration } from './generation-finalize.js'
@@ -137,6 +138,7 @@ export function* generateAllGates(wires: number): Generator<Gate, undefined, unk
 
 
 export const createRainbowTable = async (wires: number, gates: number, onMetrics?: (profile: GenerationProfile | undefined, activity: GenerationActivity | undefined) => void) => {
+	await cleanupStagingDirectories(join(config.files.dataDirectory, config.files.workerDirectory))
 	const db = getRainbowTable(wires, gates)
 	await databaseReady(db)
 	let diagnostics: GenerationDiagnostics | undefined

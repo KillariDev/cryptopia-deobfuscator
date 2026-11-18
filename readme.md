@@ -20,15 +20,21 @@ npm ci
 Put your original circuit in `data/obfuscated.json`, then run:
 
 ```bash
-npm run optimize -- data/latest.json data/obfuscated.json
+npm run optimize -- data/obfuscated.json
 ```
 
-The arguments are:
+Pass the original puzzle file. The solver creates `data/obfuscated-latest.json`
+and automatically resumes from it on subsequent runs. The original remains the
+reference used to verify all saved improvements.
 
-1. **Working circuit:** the file to resume from. If it does not exist, the solver
-   starts from the original circuit.
-2. **Original circuit:** the reference used to check that optimizations preserve
-   the circuit's behavior. Keep this file unchanged.
+To restart from the original instead of the latest checkpoint:
+
+```bash
+npm run optimize -- data/obfuscated.json --startover
+```
+
+This replaces the latest checkpoint when optimization starts; earlier progress
+snapshots remain available.
 
 Circuit JSON contains `wire_count`, `gate_count`, and a `gates` array. Each gate
 is `[controlWireA, controlWireB, targetWire, controlFunction]`.
@@ -41,14 +47,14 @@ disk space on setup.
 ## Saving and resuming
 
 The solver runs continuously. Stop it with **Ctrl+C**, then run the same command
-to resume from `data/latest.json`.
+to resume from `data/obfuscated-latest.json`.
 
 Default output locations:
 
 | Location | Contents |
 | --- | --- |
-| `data/latest.json` | Most recently saved, verified full circuit |
-| `data/progress/<job>.solved-<gate-count>.json` | Verified progress checkpoints |
+| `data/obfuscated-latest.json` | Most recently saved, verified full circuit |
+| `data/obfuscated-progress/obfuscated.solved-<gate-count>.json` | Verified progress checkpoints |
 | `data/worker/` | Worker chunk snapshots and disposable generation scratch files |
 | `rainbow_<wires>_<gates>.db` | Reusable lookup tables |
 
@@ -57,10 +63,8 @@ for gate reductions and saves a verified improvement if one is available.
 Completed rounds can also save checkpoints. These intervals are cooperative;
 an optimization step may take time to finish.
 
-The first argument is a resume source, not a separate output destination. For
-example, starting with `data/restart.json` still saves verified results to
-`data/latest.json` by default. Resume from that latest file to use the newest
-saved circuit. Configure output locations in `solver.config.json`.
+Latest checkpoints and progress folders are named after the input file and stored
+beside it, so each puzzle keeps its own saved work.
 
 Worker snapshots are for inspection; use a verified full circuit to resume.
 Interrupted lookup-table generation resumes from its own database checkpoint.
@@ -172,7 +176,7 @@ on the database; low CPU usage alone does not establish a disk bottleneck.
 ```bash
 npm test
 npm run test:benchmark
-npm run benchmark -- data/latest.json data/obfuscated.json
+npm run benchmark -- data/obfuscated-latest.json data/obfuscated.json
 ```
 
 Tests cover circuit evaluation, rewrite correctness, lookup behavior, workers and

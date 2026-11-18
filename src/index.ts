@@ -4,8 +4,8 @@ import { join, parse } from 'path'
 import { splitTaskAndRun } from './processing.js'
 import { loadJob, logJob } from './job.js'
 
-const run = async (pathToFileWithoutExt: string, original: string) => {
-	const circuits = loadJob(pathToFileWithoutExt, original)
+const run = async (pathToFileWithoutExt: string, original: string, startOver: boolean) => {
+	const circuits = loadJob(pathToFileWithoutExt, original, startOver)
 	logJob(pathToFileWithoutExt, original, circuits)
 	logTimed('Initializing rainbow table portfolio...')
 	await initializeRainbowTables()
@@ -15,7 +15,11 @@ const run = async (pathToFileWithoutExt: string, original: string) => {
 		console.error(e)
 	}
 }
-if (process.argv.length !== 4) throw new Error('Usage: npm run optimize -- working.json original.json')
-const workingFile = parse(process.argv[2])
-const originalFile = parse(process.argv[3])
-run(join(workingFile.dir, workingFile.name), join(originalFile.dir, originalFile.name))
+const args = process.argv.slice(2)
+const startOver = args.includes('--startover')
+const files = args.filter(arg => arg !== '--startover')
+if (files.length !== 1 || files[0].startsWith('--')) throw new Error('Usage: npm run optimize -- puzzle.json [--startover]')
+const originalFile = parse(files[0])
+if (originalFile.ext !== '.json') throw new Error('Input must be a .json circuit file')
+const original = join(originalFile.dir, originalFile.name)
+run(original, original, startOver).catch(error => { console.error(error); process.exitCode = 1 })
