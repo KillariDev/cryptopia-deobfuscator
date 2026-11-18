@@ -19,7 +19,7 @@ import { Gate } from './types.js'
 import { LimitedMap } from './limitedMap.js'
 import { allSQL, runSQL } from './sql.js'
 import { createDependencyGraph } from './lineswapper.js'
-import { calculateAllOutputsArray, generateCombinations, dependencyGraphToMap, getVars } from './utils.js'
+import { calculateAllOutputsArray, generateCombinations, dependencyGraphToMap, dependencySort, getVars } from './utils.js'
 
 let seed = 6297
 const random = (n: number) => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return (seed >>> 8) % n }
@@ -81,6 +81,10 @@ for (let trial = 0; trial < 4; trial++) {
 		assert.deepEqual(search.nodes, nodes.map(node => ({ ...node, dependOnFutureLine: -1 })))
 		assert.deepEqual(search.access, graph.context().access)
 		assert.deepEqual(search.dependantMap, graph.context().dependantMap)
+		for (const size of [2, 8, 24]) {
+			const anchor = random(gates.length)
+			assert.deepEqual(searchGraph.selectRegion(anchor, size), dependencySort(search.dependantMap, nodes[anchor], size, nodes, gates, search.access))
+		}
 	}
 }
 

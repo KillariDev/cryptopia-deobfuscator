@@ -719,7 +719,10 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 	do {
 		if (subsetSize > circuit.length) break
 		activity.stage = 'preparing'
-		let graphIterator = findConvexSubsets(subsetSize, circuit, config.search.prioritizeChangedWires ? changedWires : undefined, graph?.context(), config.search.localSearch ? neighborhoods.take() : [], () => { activity.stage = 'preparing'; return timeToEndWorker() })
+		const preferred = config.search.prioritizeChangedWires ? changedWires : undefined
+		const seeds = config.search.localSearch ? neighborhoods.take() : []
+		const stopped = () => { activity.stage = 'preparing'; return timeToEndWorker() }
+		const graphIterator = graph ? graph.regions(subsetSize, config.search.localSearch && !seeds.length ? undefined : preferred, seeds, stopped) : findConvexSubsets(subsetSize, circuit, preferred, undefined, seeds, stopped)
 		regenerateGraph = false
 		for (let lines of graphIterator) {
 			activity.stage = 'searching'
@@ -1085,8 +1088,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const checkpointTimer = setInterval(() => {
 				void flushCheckpoint().catch(error => { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) })
 			}, config.timing.checkpointSeconds * 1000)
-			const report = (force = false, roundResult?: number) => {
-				const elapsed = performance.now() - lastIterationTime
+			const report = (force = false, roundResult?: number, elapsed = performance.now() - lastIterationTime) => {
 				if (config.workers.keepBusy) logVerbose(`Jobs finished this round: ${completed}; continuing searches across ${jobCount} ${wholeCircuit ? 'whole-circuit alternatives' : 'chunks'}.`)
 				else logVerbose(formatProgress(nPrevGates, (wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)), completed, jobCount, elapsed))
 				logVerbose(formatWorkerActivity(statuses, elapsed, WORKER_ROUND_MS))
@@ -1192,28 +1194,28 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				await checkpointFlush
 				beginPhase('finishing round')
 			}
-			report(false, currentGates.length)
+			const roundElapsedMs = performance.now() - lastIterationTime
+			report(false, currentGates.length, roundElapsedMs)
 			const filename = paths.progress(currentGates.length)
 			if (!checkpoint.hasSaved) {
 				await writer.write([filename, paths.latest], currentGates)
 			} else await checkpoint.saveIfReduced(currentGates)
 			const gatesRemoved = nPrevGates - currentGates.length
 			const endTime = performance.now()
-			const timeDiffMins = (endTime - lastIterationTime) / 60000
 			if (config.workers.adaptiveConcurrency && !config.workers.keepBusy) {
 				const resources = statuses.map(status => status.activity?.resources)
 				const reason = concurrency.observe({ concurrency: nWorkers, elapsedMs: endTime - lastIterationTime, removed: gatesRemoved, databaseMs: resources.reduce((sum, value) => sum + (value?.databaseMs ?? 0), 0), workerMs: resources.reduce((sum, value) => sum + (value?.elapsedMs ?? 0), 0), memoryPressure: memoryPressure(config.workers.memoryBudgetMegabytes) })
 				if (reason === 'memory budget pressure') { pool.setConcurrency(concurrency.limit(nMaxWorkers)); await pool.trimIdle() }
 				if (reason) logVerbose(`Next round worker target: ${concurrency.limit(nMaxWorkers)} (${reason})`)
 			}
-			logVerbose(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
 			if (!config.workers.keepBusy && !wholeCircuit && !(runBroad && currentGates.length < nPrevGates)) {
 				beginPhase('shuffling next round')
 				currentGates = await pool.run(currentGates, inputCircuit.wire_count, undefined, undefined, config.workers.jobSeconds * 1000, false, 'shuffle')
 			}
 			const localRemoved = nPrevGates - localCount()
 			const globalReduction = runBroad ? ` | Global: ${nPrevGates - broadBest.length} gates removed` : ''
-			logTimed(`Round winner: ${winner} | Local: ${localRemoved} gates removed${globalReduction}`)
+			const gatesPerHour = roundElapsedMs > 0 ? Math.floor(gatesRemoved * 3_600_000 / roundElapsedMs) : 0
+			logTimed(`Round winner: ${winner} | Local: ${localRemoved} gates removed${globalReduction} | ${gatesPerHour} gates/hour`)
 			for (const side of ['Local', 'Global'] as const) {
 				const counts = formatRoundStrategies(roundStrategies[side].values(), side)
 				if (counts) logTimed(counts)

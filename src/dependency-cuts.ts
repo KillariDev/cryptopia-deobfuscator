@@ -1,5 +1,5 @@
 import { Gate } from './types.js'
-import { getVars } from './utils.js'
+import { appendWireAccess, getVars, wireAccessLowerBound } from './utils.js'
 
 export type WireVersion = { wire: number, version: number }
 export type DependencyCut = { indices: number[], gates: Gate[], wires: number[], inputs: WireVersion[], outputs: WireVersion[] }
@@ -10,24 +10,25 @@ export class CutCancelled extends Error {}
 export class DependencyCutIndex {
 	readonly predecessors: number[][] = []
 	readonly successors: number[][] = []
-	readonly readVersions: WireVersion[][] = []
+	private readonly writes = new Map<number, number[]>()
 	readonly outputSeeds: number[]
 	constructor(readonly gates: Gate[], private stopped: () => boolean = () => false) {
-		const writers = new Map<number, number>(), readers = new Map<number, Set<number>>()
+		const readers = new Map<number, number[]>()
 		for (let i = 0; i < gates.length; i++) {
 			this.check()
-			const used = [...new Set(getVars(gates[i]))], target = gates[i].target, previous = new Set<number>()
-			this.readVersions.push(used.map(wire => ({ wire, version: (writers.get(wire) ?? -1) + 1 })))
-			for (const wire of used) { const writer = writers.get(wire); if (writer !== undefined) previous.add(writer) }
+			const used = getVars(gates[i]).filter((wire, index, wires) => wires.indexOf(wire) === index)
+			const target = gates[i].target, previous = new Set<number>()
+			for (const wire of used) {
+				const writer = this.writes.get(wire)?.at(-1)
+				if (writer !== undefined) previous.add(writer)
+			}
 			for (const reader of readers.get(target) ?? []) { this.check(); previous.add(reader) }
 			this.predecessors.push([...previous].sort((a, b) => a - b)); this.successors.push([])
 			for (const from of previous) this.successors[from].push(i)
-			readers.set(target, new Set()); writers.set(target, i)
-			for (const wire of used) if (wire !== target) {
-				let list = readers.get(wire); if (!list) { list = new Set(); readers.set(wire, list) }; list.add(i)
-			}
+			readers.delete(target); appendWireAccess(this.writes, target, i)
+			for (const wire of used) if (wire !== target) appendWireAccess(readers, wire, i)
 		}
-		this.outputSeeds = [...new Set(writers.values())].sort((a, b) => b - a)
+		this.outputSeeds = [...this.writes.values()].map(lines => lines[lines.length - 1]).sort((a, b) => b - a)
 	}
 	setStop(stopped: () => boolean) { this.stopped = stopped }
 	private check() { if (this.stopped()) throw new CutCancelled('Dependency cut canceled') }
@@ -45,7 +46,9 @@ export class DependencyCutIndex {
 		const inputs = new Map<number, number>(), outputs = new Map<number, number>(), used = new Set<number>()
 		for (const i of ordered) {
 			this.check()
-			for (const { wire, version } of this.readVersions[i]) {
+			for (const wire of getVars(this.gates[i])) {
+				const writes = this.writes.get(wire)
+				const version = writes ? (writes[wireAccessLowerBound(writes, i) - 1] ?? -1) + 1 : 0
 				used.add(wire)
 				if (version > 0 && chosen.has(version - 1)) continue
 				if (inputs.has(wire) && inputs.get(wire) !== version) return undefined

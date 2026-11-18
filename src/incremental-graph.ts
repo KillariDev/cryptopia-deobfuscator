@@ -1,5 +1,5 @@
 import { Gate, DependencyNode } from './types.js'
-import { getVars, DependencyContext } from './utils.js'
+import { getVars, appendWireAccess, wireAccessLowerBound, DependencyContext, DependencyQueries, dependencyQueries, selectDependencyRegion } from './utils.js'
 import { ChunkedSequence } from './chunked-sequence.js'
 
 type WireEdit = { firstRemoval: number, lastRemoval: number, incoming: number[] }
@@ -35,11 +35,7 @@ export class IncrementalGraph {
 	}
 
 	private initialize() {
-		const append = (index: Map<number, number[]>, wire: number, id: number) => {
-			const list = index.get(wire)
-			if (!list) index.set(wire, [id])
-			else if (list[list.length - 1] !== id) list.push(id)
-		}
+
 		const latest = (index: Map<number, number[]>, wire: number) => {
 			const list = index.get(wire)
 			return list?.[list.length - 1]
@@ -54,8 +50,8 @@ export class IncrementalGraph {
 				const writer = latest(this.writes, record.wires[i])
 				if (writer !== undefined) this.addPast(record, writer)
 			}
-			for (const wire of record.wires) append(this.accesses, wire, id)
-			append(this.writes, target, id)
+			for (const wire of record.wires) appendWireAccess(this.accesses, wire, id)
+			appendWireAccess(this.writes, target, id)
 		}
 		// Local region selection resolves future conflicts from the wire indexes.
 		if (!this.trackFuture) return
@@ -71,14 +67,9 @@ export class IncrementalGraph {
 			nextWrite.set(target, id)
 		}
 	}
+	private readonly positionOf = (id: number) => this.order.indexOf(id)!
 	private lowerBound(list: readonly number[], position: number) {
-		let low = 0, high = list.length
-		while (low < high) {
-			const mid = (low + high) >>> 1
-			if (this.order.indexOf(list[mid])! < position) low = mid + 1
-			else high = mid
-		}
-		return low
+		return wireAccessLowerBound(list, position, this.positionOf)
 	}
 	private recompute(ids: Set<number>) {
 		for (const id of ids) {
@@ -224,6 +215,118 @@ export class IncrementalGraph {
 		this.collectAffected(newIds, affected)
 		this.recompute(affected)
 	}
+	/** Resolve edges against the current order only when a region visits them. */
+	private readonly queries: DependencyQueries = {
+		past: line => {
+			const { past0, past1, past2 } = this.records.get(this.order.at(line))!
+			const result: number[] = []
+			if (past0 !== undefined) result.push(this.order.indexOf(past0)!)
+			if (past1 !== undefined) result.push(this.order.indexOf(past1)!)
+			if (past2 !== undefined) result.push(this.order.indexOf(past2)!)
+			return result
+		},
+		lastConflict: (line, before, selected) => {
+			const { wires } = this.records.get(this.order.at(line))!
+			let last = line
+			for (let i = 0; i < wires.length; i++) {
+				const list = (i === 0 ? this.accesses : this.writes).get(wires[i])
+				if (!list) continue
+				for (let at = this.lowerBound(list, before) - 1; at >= 0; at--) {
+					const position = this.order.indexOf(list[at])!
+					if (position <= last) break
+					if (!selected.has(position)) { last = position; break }
+				}
+			}
+			return last === line ? -1 : last
+		},
+		followers: (line, before, selected) => {
+			const id = this.order.at(line)
+			const { wires } = this.records.get(id)!
+			const followers = new Set<number>()
+			for (const wire of wires) {
+				const list = this.accesses.get(wire)!
+				const start = this.lowerBound(list, line + 1)
+				for (let i = start; i < list.length; i++) {
+					const next = this.records.get(list[i])!
+					const position = this.order.indexOf(list[i])!
+					if (position >= before) break
+					if (!selected.has(position) && (next.past0 === id || next.past1 === id || next.past2 === id)) followers.add(position)
+					// For a read, only the immediately following access can
+					// depend on it. For a write, readers can depend on it
+					// until the next write.
+					if (wire !== wires[0] || next.gate.target === wire) break
+				}
+			}
+			return [...followers]
+		},
+	}
+
+	selectRegion(anchor: number, size: number, stopped?: () => boolean) {
+		return selectDependencyRegion(this.queries, anchor, size, stopped)
+	}
+
+	*regions(size: number, preferredWires: ReadonlySet<number> | undefined, seeds: number[], stopped: () => boolean) {
+		const visited = new Set<number>()
+		let queries = this.queries
+		const choose = (line: number) => {
+			if (line < 0 || line >= this.order.length || visited.has(line)) return undefined
+			visited.add(line)
+			// Amortize the dense context on long scans. Early candidates
+			// usually only need the stable indexes.
+			if (visited.size === 33) {
+				const { nodes, dependantMap, access } = this.context()
+				const gates = { length: this.order.length, at: (index: number) => this.records.get(this.order.at(index))!.gate }
+				queries = dependencyQueries(dependantMap, nodes, gates, access)
+			}
+			const region = selectDependencyRegion(queries, line, size, stopped)
+			return region.length >= size ? region : undefined
+		}
+		for (const seed of seeds) {
+			if (stopped()) return
+			const region = choose(seed)
+			if (region) yield region
+		}
+		if (preferredWires?.size) {
+			// Try a bounded sample of gates touching changed wires, preferring
+			// repeated operations that may now be close in dependency order.
+			const nearby: { line: number, key: string }[] = []
+			const frequencies = new Map<string, number>()
+			const sampled = new Set<number>()
+			for (const wire of preferredWires) {
+				if (stopped()) return
+				const list = this.accesses.get(wire) ?? []
+				const start = Math.floor(Math.random() * list.length)
+				for (let i = 0; i < Math.min(4, list.length) && nearby.length < 32; i++) {
+					const id = list[(start + i) % list.length]
+					if (sampled.has(id)) continue
+					sampled.add(id)
+					const { gate } = this.records.get(id)!
+					const key = `${gate.gate_i}:${gate.a}:${gate.b}:${gate.target}`
+					nearby.push({ line: this.order.indexOf(id)!, key })
+					frequencies.set(key, (frequencies.get(key) ?? 0) + 1)
+				}
+				if (nearby.length >= 32) break
+			}
+			nearby.sort((a, b) => frequencies.get(b.key)! - frequencies.get(a.key)!)
+			for (const { line } of nearby) {
+				if (stopped()) return
+				const region = choose(line)
+				if (region) yield region
+			}
+		}
+		// Draw a random permutation lazily, so early wins need no full shuffle.
+		const swaps = new Map<number, number>()
+		for (let remaining = this.order.length; remaining > 0; remaining--) {
+			if (stopped()) return
+			const index = Math.floor(Math.random() * remaining)
+			const line = swaps.get(index) ?? index
+			swaps.set(index, swaps.get(remaining - 1) ?? remaining - 1)
+			swaps.delete(remaining - 1)
+			const region = choose(line)
+			if (region) yield region
+		}
+	}
+
 	context(): DependencyContext {
 		if (this.cached) return this.cached
 		const length = this.order.length
