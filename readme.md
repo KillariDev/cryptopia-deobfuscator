@@ -90,6 +90,14 @@ The solver combines several approaches:
   regions. These methods are enabled by default, with limits on circuit size,
   search effort and time; each can be disabled in `synthesis`.
 
+The GF(2) affine pass (`synthesis.affine`, enabled by default) simplifies complete
+reversible affine circuits and contiguous affine regions inside mixed circuits.
+It handles CNOT, XOR, NOT and complemented controls using matrix elimination,
+then checks the replacement's exact symbolic transformation before accepting a
+strict gate-count reduction. It runs on the full input before work is split and
+at the start of worker searches, independently of rainbow-table and SMT window
+sizes. Nonlinear gates and singular affine regions are left unchanged.
+
 Replacements are ordered by gate count, then used-wire count and read cost.
 Multiple workers search circuit chunks, retaining caches between jobs. For circuits
 with at most 2,000 gates, workers instead run independent whole-circuit searches

@@ -10,7 +10,7 @@ import { SlidingWindowWires } from './window-wires.js'
 import { LazyCircuit } from './circuit-edit.js'
 import { IncrementalGraph } from './incremental-graph.js'
 import { WindowFingerprints } from './fingerprints.js'
-import { templates, advancedRewrite } from './strategies.js'
+import { affineRewrite, templates, advancedRewrite } from './strategies.js'
 import { IncrementalEvaluator } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, createSearchArms, independentComponents } from './search.js'
 import { config } from './config.js'
@@ -587,6 +587,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	const simplifyStarted = performance.now()
 	optimizedVersion = gateSimplifier(optimizedVersion)
 	recordStrategy('gate-simplification', {}, simplifyStarted, originalGates.length, optimizedVersion.length, optimizedVersion.length < originalGates.length)
+	optimizedVersion = affineRewrite(optimizedVersion)
 	verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
 	let lastSaved = performance.now()
 	const { ioIdentifierCache, processedGatesCache } = caches
@@ -718,11 +719,17 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 
 	const { originalCircuit, inputCircuit } = circuits
 	const originalGates: Gate[] = originalCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
-	const gates: Gate[] = inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
+	let gates: Gate[] = inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
 	if (originalCircuit.wire_count !== inputCircuit.wire_count) throw new Error('Latest circuit wire count differs from original')
 	if (originalGates.length < gates.length) throw new Error('Latest circuit has more gates than original')
 	verifyCircuit(originalGates, gates, originalCircuit.wire_count, config.validation.checkpointInputs)
-	writeCircuit(outputPaths(pathToFileWithoutExt).latest, inputCircuit.wire_count, gates)
+	const affine = affineRewrite(gates)
+	if (affine !== gates) {
+		const paths = outputPaths(pathToFileWithoutExt)
+		save([paths.progress(affine.length), paths.latest], affine, inputCircuit.wire_count, originalGates)
+		gates = affine
+	} else writeCircuit(outputPaths(pathToFileWithoutExt).latest, inputCircuit.wire_count, gates)
+	if (!gates.length) return
 	const nMaxWorkers = configuredWorkerCount()
 	const sharedTables = await loadSharedTables()
 	const pool = new WorkerPool(nMaxWorkers, undefined, sharedTables)

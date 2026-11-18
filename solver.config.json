@@ -142,6 +142,7 @@
     "generationStagingQueueBatches": 2
   },
   "synthesis": {
+    "affine": true,
     "templates": true,
     "templateEntries": 10000,
     "maximumWires": 3,

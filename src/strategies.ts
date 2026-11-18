@@ -1,3 +1,4 @@
+import { simplifyAffineRegions } from './affine.js'
 import { synthesizeSMT } from './smt.js'
 import { recordStrategy } from './strategy-stats.js'
 import { config } from './config.js'
@@ -40,4 +41,13 @@ export async function advancedRewrite(gates: Gate[], random = Math.random): Prom
 	})
 	pending = job.catch(() => {})
 	return job
+}
+
+/** Global/region affine synthesis has its own polynomial bound, not the tiny SMT window. */
+export function affineRewrite(gates: Gate[]) {
+	if (!config.synthesis.affine) return gates
+	const started = performance.now()
+	const result = simplifyAffineRegions(gates, config.validation.maximumWires)
+	recordStrategy('gf2-affine', { maximumWires: config.validation.maximumWires }, started, gates.length, result.length, result !== gates)
+	return result
 }
