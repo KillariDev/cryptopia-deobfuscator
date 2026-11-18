@@ -56,10 +56,11 @@ try {
 	const before = [cn, invertControl, cn], after = [invertControl, { ...invertControl, target: 0 }]
 	const lookup = new LimitedMap<string, Gate[] | null>(100), processed = new LimitedMap<string, boolean>(100), tested = new LimitedMap<string, boolean>(100)
 	const activity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const }
-	assert.deepEqual(await optimizeSubset(portfolio, before, lookup, processed, 3, 3, 'heavy', () => false, activity, () => {}, tested, 'rainbow'), before)
+	assert.deepEqual(await optimizeSubset(portfolio, before, lookup, processed, 3, 3, 'heavy', () => false, activity, () => {}, tested, 'rainbow', undefined, { deadline: -Infinity }), before)
+	// Isolate template/cache invalidation from the independently tested synthesis solvers.
 	const previousChecks = activity.checks
 	assert.equal(templates.learn(before, after, false), true)
-	const reduced = await optimizeSubset(portfolio, before, lookup, processed, 3, 3, 'heavy', () => false, activity, () => {}, tested, 'rainbow')
+	const reduced = await optimizeSubset(portfolio, before, lookup, processed, 3, 3, 'heavy', () => false, activity, () => {}, tested, 'rainbow', undefined, { deadline: -Infinity })
 	assert.ok(activity.checks > previousChecks, 'new rules invalidate stale subset failures')
 	assert.equal(reduced.length, 2)
 	assert.deepEqual(calculateAllOutputsArray(reduced, generateCombinations(2)), calculateAllOutputsArray(before, generateCombinations(2)))

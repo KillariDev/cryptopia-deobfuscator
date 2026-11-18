@@ -1,0 +1,54 @@
+{
+  "puzzle": "nonlinear-basis-maze",
+  "puzzle_sha256": "44845f48dfedd5107d8873f8301ce9270fc85cee1d309239f6e0e8018ab21a0d",
+  "new_strategies": [
+    "factored",
+    "block-cancellation",
+    "sat-sweeping"
+  ],
+  "runs": [
+    {
+      "mode": "original",
+      "seconds": 7.55,
+      "latest_gates": 1000,
+      "reached_1000": true,
+      "corruption_reported": false,
+      "worker_limit": 4,
+      "rainbow": {
+        "wires": 3,
+        "gates": 3
+      },
+      "additional_sample_inputs": 1024,
+      "checkpoint_sha256": "806dc8d4afd797215440ac1c243dd82c224edb5b75ce1aeb81ac6b8de26205b2"
+    },
+    {
+      "mode": "original",
+      "seconds": 3.04,
+      "latest_gates": 1000,
+      "reached_1000": true,
+      "corruption_reported": false,
+      "worker_limit": 4,
+      "rainbow": {
+        "wires": 3,
+        "gates": 3
+      },
+      "additional_sample_inputs": 1024,
+      "checkpoint_sha256": "806dc8d4afd797215440ac1c243dd82c224edb5b75ce1aeb81ac6b8de26205b2"
+    },
+    {
+      "mode": "resume",
+      "seconds": 60.41,
+      "latest_gates": 96848,
+      "reached_1000": false,
+      "corruption_reported": false,
+      "worker_limit": 4,
+      "rainbow": {
+        "wires": 3,
+        "gates": 3
+      },
+      "additional_sample_inputs": 1024,
+      "checkpoint_sha256": "abc2ad8530beffa2d528ff0186901baa10c54cb927e23a70b98b4a2800365e3f"
+    }
+  ],
+  "notes": "Fresh runs use the original puzzle; the resume trial uses the independently verified 97037-gate checkpoint from the corruption-fix test. The runs use a stochastic scheduler and are bounded smoke tests, not controlled speedup benchmarks. All trials use isolated temporary copies; repository checkpoints are untouched."
+}

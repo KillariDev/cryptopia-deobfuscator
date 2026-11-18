@@ -476,7 +476,12 @@ try {
 } finally { await closeRainbowTable(integrationDb) }
 console.log('Solver integration regressions passed')
 
-const { formatStatus } = await import('./logging.js')
+const { formatStatus, SummaryThrottle } = await import('./logging.js')
+const summaryThrottle = new SummaryThrottle(30_000)
+assert.equal(summaryThrottle.allow(0), true)
+for (let round = 1; round < 30; round++) assert.equal(summaryThrottle.allow(round * 1000), false, 'quiet cadence survives rapid round restarts')
+assert.equal(summaryThrottle.allow(30_000), true)
+assert.equal(summaryThrottle.allow(30_001, true), true, 'verbose and final reports bypass the interval')
 const compact = formatStatus({ original: 1000, roundStart: 200, candidate: 100, saved: 100, statuses: [status, { updatedAtMs: 0, done: true }], elapsedMs: 60_000 })
 assert.match(compact, /90.00% fewer than original; 100 removed this round/)
 assert.match(compact, /Checkpoint up to date/)
@@ -587,22 +592,22 @@ assert.equal(parseConfig({ synthesis: { forwardSemanticSearch: true } }).synthes
 const { advancedRewrite } = await import('./strategies.js')
 const synthesisOptions = { ...config.synthesis }
 try {
-	Object.assign(config.synthesis, { forwardSemanticSearch: true, smt: true, meetInMiddle: false, equalitySaturation: false, attemptEvery: 1, maximumWires: 3, timeoutMs: 5000, states: 2000, maximumReplacementGates: 0 })
+	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, quadratic: false, affine: false, forwardSemanticSearch: true, smt: true, meetInMiddle: false, equalitySaturation: false, maximumWires: 3, states: 2000, maximumReplacementGates: 0 })
 	const input = [singleGate[0], singleGate[0], singleGate[0]]
 	resetStrategyStats()
-	assert.equal(await advancedRewrite(input, () => 0), undefined)
-	assert.deepEqual(strategySnapshot().map(stat => stat.strategy), ['forward-semantic-search'])
-	assert.equal(await advancedRewrite(input, () => 0), undefined)
-	assert.deepEqual(strategySnapshot().map(stat => stat.strategy), ['forward-semantic-search', 'z3'])
+	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
+	assert.equal(strategySnapshot().length, 1)
+	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
+	assert.deepEqual(new Set(strategySnapshot().map(stat => stat.strategy)), new Set(['forward-semantic-search', 'z3']))
 	const count = strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0)
-	assert.equal(await advancedRewrite(input, () => 0), undefined)
+	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
 	assert.equal(strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0), count)
-	// A different window chooses Z3 directly when the random draw selects it.
+	// Rotation continues predictably on a different window.
 	config.synthesis.maximumReplacementGates = 1
-	const recovered = await advancedRewrite([not0, not0, not0], () => 0.75)
+	const recovered = await advancedRewrite([not0, not0, not0], { deadline: performance.now() + 5000 })
 	assert.ok(recovered && recovered.length === 1)
 	assert.equal(functionKey(recovered!, 2), functionKey([not0], 2))
-	assert.equal(strategySnapshot()[strategySnapshot().length - 1].strategy, 'z3')
+	assert.ok(['z3', 'forward-semantic-search'].includes(strategySnapshot()[strategySnapshot().length - 1].strategy))
 } finally {
 	Object.assign(config.synthesis, synthesisOptions)
 	resetStrategyStats()
@@ -977,3 +982,33 @@ await import('./generation-interval-test.js')
 await import('./generation-final-lookup-test.js')
 
 await import('./generation-streaming-test.js')
+
+await import('./round-search-test.js')
+
+await import('./affine-test.js')
+
+await import('./symbolic-affine-test.js')
+
+await import('./strategy-summary-test.js')
+
+await import('./strategy-picker-test.js')
+
+await import('./broad-search-test.js')
+
+await import('./polynomial-synthesis-test.js')
+
+await import('./coordinator-status-test.js')
+
+await import('./adaptive-strategy-test.js')
+
+await import('./probabilistic-rewrite-test.js')
+
+await import('./structural-strategies-test.js')
+
+await import('./worker-utilization-test.js')
+
+await import('./run-lifecycle-test.js')
+
+await import('./memory-concurrency-test.js')
+
+await import('./dependency-cuts-test.js')

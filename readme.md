@@ -58,10 +58,10 @@ Default output locations:
 | `data/worker/` | Worker chunk snapshots and disposable generation scratch files |
 | `rainbow_<wires>_<gates>.db` | Reusable lookup tables |
 
-Output folders are created automatically. Every 30 seconds, the solver checks
-for gate reductions and saves a verified improvement if one is available.
-Completed rounds can also save checkpoints. These intervals are cooperative;
-an optimization step may take time to finish.
+Output folders are created automatically. Worker improvements are verified and
+saved when reported; periodic summaries default to every 30 seconds. Completed
+rounds can also save checkpoints. Cancellation is cooperative, so an optimization
+step may take time to finish.
 
 Latest checkpoints and progress folders are named after the input file and stored
 beside it, so each puzzle keeps its own saved work.
@@ -83,15 +83,81 @@ The solver combines several approaches:
 - **Dependency-aware search and shuffling:** choose regions using gate
   dependencies and reorder gates when that preserves behavior. Reordering can
   expose simplifications that were not adjacent before.
-- **Adaptive local search:** prioritize recently changed regions and methods
-  that have found useful reductions, while continuing to explore other regions.
-- **Bounded synthesis:** select randomly among enabled forward semantic search,
-  Z3/SMT synthesis, meet-in-the-middle search and equality saturation on small
-  regions. These methods are enabled by default, with limits on circuit size,
-  search effort and time; each can be disabled in `synthesis`.
+- **Local search:** prioritize recently changed regions. Adaptive search modes
+  remain available through `search.adaptive`, but are off by default.
+- **Adaptive strategy selection:** start with equal chances, favor approaches
+  that remove gates per worker-second, and decay stale preferences. Uniform
+  exploration keeps every eligible approach reachable. Templates, variables,
+  rainbow lookup and each individual synthesis solver receive their own weights.
+
+The default exploration probability is 20% of selection decisions
+(`search.strategyExplorationProbability`). Learned rewards have a five-minute
+half-life (`search.strategyDecayHalfLifeSeconds`), and unsuccessful attempts
+reduce a strategy's learned score. Histories persist across worker jobs and rapid
+restarts; local and broad search learn separate preferences. These are
+selection probabilities, not guarantees of equal wall-clock time: a selected
+strategy can use the remaining worker lifetime. Set `search.strategyAdaptive` to
+false to restore the fixed pipeline and synthesis rotation. Failed-region caches
+are separate by strategy so trying one method cannot suppress another.
+
+Local GF(2) affine synthesis (`synthesis.affine`, enabled by default) is selected among
+the eligible synthesis choices. It is not an unconditional startup or worker
+prepass. It searches affine runs and smaller subwindows inside the selected
+region, using its own `synthesis.affineMaximumWindowGates` bound (default 256) and
+`validation.maximumWires`, independently of the tiny SMT/template limits.
+Exact symbolic verification is required for every accepted reduction. The solver
+also composes Boolean polynomials through mixed gates: nonlinear intermediates
+may cancel to an affine map. It can rewrite that map directly, or find smaller
+mixed subwindows whose final transformation is affine. Truly nonlinear maps and
+singular affine maps are preserved.
+
+Sparse quadratic synthesis (`synthesis.quadratic`, enabled by default) can also
+emit genuinely nonlinear results: NOTs, controlled XORs, AND-controlled flips,
+and complemented variants. It orders target updates so all controls still have
+their original input values, then recomposes the candidate and checks every output
+polynomial exactly. Dependency cycles, target-dependent deltas and degree above
+two are declined by this emitter. The affine emitter still handles general
+invertible linear maps, including cyclic linear dependencies. Both local and
+broad searches use quadratic synthesis, sharing the existing symbolic resource
+limits and worker lifetime. The original recursive affine maze synthesizes to its
+known four-gate solution.
+
+Mixed symbolic analysis is bounded by `synthesis.affineMaximumTerms` (default
+100,000 stored monomials), `synthesis.affineMaximumOperations` (10,000,000 symbolic
+operations per candidate), the wire limit, and the worker job deadline. Exhausting
+any limit declines that candidate without dropping terms or accepting an
+approximate equivalence.
+
+A broad worker searches alongside the chunk workers, using the same toolkit:
+templates, variable elimination, rainbow lookup and eligible synthesis solvers.
+It starts with the full circuit and scans overlapping coarse-to-fine regions.
+Variable and rainbow scans also use full-region and progressively smaller window
+sizes, rather than inheriting the local slice cap; their wire limits still apply.
+At most one broad job runs in a round, scheduled no more often than
+`workers.broadSearchSeconds` (default 60 seconds; 0 disables broad work). The broad
+job is queued first and shares the existing worker cap; with only one available
+slot, jobs run serially. It cannot be starved behind the local job queue. After an improvement, broad
+work is eligible immediately on the new baseline, rather than waiting for the
+old baseline's cadence timer.
+
+A broad improvement is a complete alternative circuit. It is never concatenated
+with old chunk results. Verified improvements stop peer work, cancel queued jobs
+and restart from the best complete candidate returned while stopping. Quiet
+summaries distinguish broad strategy timings and show a running broad worker.
+
+`workers.jobSeconds` is the only time limit (default 120 seconds, or two minutes).
+All strategies use the job's remaining time and stop cooperatively when a better
+result is found. State, memory and circuit-size bounds remain active. Legacy
+`synthesis.affineWholeCircuitSeconds` is accepted as an alias for the broad cadence;
+old per-strategy timer and attempt-cadence settings are accepted but ignored.
 
 Replacements are ordered by gate count, then used-wire count and read cost.
-Multiple workers search circuit chunks, retaining caches between jobs. The
+Multiple workers search circuit chunks, retaining caches between jobs. For circuits
+with at most 2,000 gates, workers instead run independent whole-circuit searches
+and keep the best result, preserving opportunities across chunk boundaries. Each
+strict gate-count improvement is immediately verified and saved, then active
+searches stop cooperatively and queued jobs are discarded. The next round starts
+from the new best; any better result returned while stopping is retained. The
 coordinator verifies combined results before saving them. By default, improving
 rounds aim to finish after five minutes; rounds without reductions retain a
 25-minute budget. Later rounds repartition and shuffle the circuit.
@@ -121,6 +187,9 @@ fail at startup. Job-specific circuit filenames stay on the command line.
 
 Useful settings to start with:
 
+- `workers.wholeCircuitMaximumGates`: use parallel whole-circuit searches below
+  this gate count (inclusive); default 2,000, or 0 to always split into chunks.
+  The adaptive concurrency and memory limits still apply.
 - `workers.maximum`: upper bound on solver workers; the default cap is 24.
   Actual concurrency also depends on the circuit and resource limits.
 - `runtime.heapMegabytes`: Node heap budget; the default is 16,384 MiB. SQLite,
@@ -165,6 +234,16 @@ Table generation shows one completion percentage and one ETA. Before all layer
 sizes are known, these are estimates. The ETA follows recent measured throughput;
 it cannot guarantee a finish time.
 
+With `logging.verbose: false`, optimization prints a compact status and one short strategy/timing line per
+`timing.summarySeconds` interval, even across rapid restarts. One run-wide timer also reports preparation and
+between-round shuffling phases. Shuffling runs in a worker with the same job
+lifetime; improvement-triggered restarts skip that shuffle. Checkpoints are still
+saved immediately. Strategy summaries aggregate completed attempts since the last
+summary across rapid restarts; times are summed per-strategy worker elapsed time,
+not wall-clock time or CPU time. Broad GF(2) jobs also show elapsed time while
+running. Individual save/restart messages, detailed strategy breakdowns and the
+full startup settings dump are only printed in verbose mode.
+
 With `logging.verbose: true`, additional reports show CPU, memory, SQL costs,
 staging-writer utilization and committed work per second. Database-operation
 timings identify expensive membership checks, lookup writes or frontier cleanup.
@@ -187,3 +266,36 @@ measurements.
 
 For background on the original challenge, read
 [Breaking the $10,000 iO Bounty](https://mirror.xyz/killaridev.eth/x2x6yFhovUQJxICCM8jJ7ezcjIvqyRN1iQfsWCG_Doc).
+
+## Puzzle files
+
+Puzzles and their `-solved.json` references live in `data/`. Reproducible Python
+generators live in `generators/`; generated verification metadata lives in
+`proofs/`. Generator output paths are relative to the repository, regardless of
+the directory from which a generator is launched.
+
+```bash
+python3 generators/generate-tangled-not.py
+python3 generators/generate-recursive-affine-maze.py
+```
+
+## Recursive affine challenge
+
+`data/recursive-affine-maze.json` contains 46,220 gates on 32 wires: exactly 20
+times the gate count of `tangled-not`. Four levels of affine conjugations mix
+nonlinear shears recursively. GF(2) region synthesis can remove affine overhead but
+cannot by itself recover cancellations across the nonlinear boundaries.
+
+Run `python3 generators/generate-recursive-affine-maze.py` to reproduce the puzzle,
+`data/recursive-affine-maze-solved.json`, and its metadata in
+`proofs/recursive-affine-maze-proof.json`. The generator checks
+exact algebraic normal forms for all outputs, proving equivalence for every
+input. The four-gate solution is optimal because four distinct output wires
+change and each gate affects just one target.
+
+```bash
+npm run optimize -- data/recursive-affine-maze.json
+```
+
+This is a stress case with a known solution; no full-solver runtime bound has
+been established.

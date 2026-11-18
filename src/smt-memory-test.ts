@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict'
 import { Worker } from 'node:worker_threads'
 import { synthesizeSMT } from './smt.js'
+import { reportSmtDiagnostic } from './smt-solver.js'
+
+const diagnostics: string[] = [], originalError = console.error
+try {
+	console.error = message => diagnostics.push(String(message))
+	reportSmtDiagnostic('received "cleanupThread" command from terminated worker: 4')
+	reportSmtDiagnostic('received "cleanupThread" command from terminated worker: 1')
+	reportSmtDiagnostic('received "abort" command from terminated worker: 4')
+	reportSmtDiagnostic('Z3 failed to initialize')
+	assert.deepEqual(diagnostics, ['received "abort" command from terminated worker: 4', 'Z3 failed to initialize'])
+} finally { console.error = originalError }
 
 // Repeated attempts must return a valid simplification and leave no live Z3
 // helper threads. Exercise both the main isolate and the optimizer's nesting.

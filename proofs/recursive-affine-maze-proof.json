@@ -1,0 +1,117 @@
+{
+  "seed": 20261119,
+  "wire_count": 32,
+  "gate_count": 46220,
+  "size_multiple_of_tangled_not": 20,
+  "recursive_depth_per_tree": 4,
+  "affine_conjugation_nodes_per_tree_pair": 30,
+  "expanded_affine_conjugations": 60,
+  "nonlinear_gates": 67,
+  "solution_gate_count": 4,
+  "optimality": "Four output wires change; each gate changes only one target, so at least four gates are necessary.",
+  "construction": "F G F G followed by the solution. F and G are recursively affine-conjugated shears: lower 16 wires unchanged, upper wires XOR functions of the lower half. All such shears commute and square to identity.",
+  "verification": "Exact algebraic normal forms for every output, valid for all 2^32 inputs; no random sampling.",
+  "output_monomials_hex": [
+    [
+      "0x1"
+    ],
+    [
+      "0x2"
+    ],
+    [
+      "0x4"
+    ],
+    [
+      "0x8"
+    ],
+    [
+      "0x10"
+    ],
+    [
+      "0x20"
+    ],
+    [
+      "0x40"
+    ],
+    [
+      "0x80"
+    ],
+    [
+      "0x100"
+    ],
+    [
+      "0x200"
+    ],
+    [
+      "0x400"
+    ],
+    [
+      "0x800"
+    ],
+    [
+      "0x1000"
+    ],
+    [
+      "0x2000"
+    ],
+    [
+      "0x4000"
+    ],
+    [
+      "0x8000"
+    ],
+    [
+      "0x3",
+      "0x10000"
+    ],
+    [
+      "0x0",
+      "0x20000"
+    ],
+    [
+      "0xc",
+      "0x40000"
+    ],
+    [
+      "0x80000"
+    ],
+    [
+      "0x30",
+      "0x100000"
+    ],
+    [
+      "0x200000"
+    ],
+    [
+      "0x400000"
+    ],
+    [
+      "0x800000"
+    ],
+    [
+      "0x1000000"
+    ],
+    [
+      "0x2000000"
+    ],
+    [
+      "0x4000000"
+    ],
+    [
+      "0x8000000"
+    ],
+    [
+      "0x10000000"
+    ],
+    [
+      "0x20000000"
+    ],
+    [
+      "0x40000000"
+    ],
+    [
+      "0x80000000"
+    ]
+  ],
+  "circuit_sha256": "2c910b4f50ecdefcc604ef03799cf0f1512423b0c3da88f321dedf02cd97428c"
+}

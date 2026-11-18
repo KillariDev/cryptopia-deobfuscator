@@ -1,0 +1,154 @@
+{
+  "scope": "Investigation uses the supplied checkpoint and synthetic mixed-function fixtures; no original puzzle or generator proof is used. The proposed cut/SAT improvements are experimental, not enabled production strategies in this change.",
+  "checkpoint_sha256": "abc2ad8530beffa2d528ff0186901baa10c54cb927e23a70b98b4a2800365e3f",
+  "checkpoint_gates": 96848,
+  "default_factored_profile": {
+    "gates": 96848,
+    "edge_limit": 16000000,
+    "failure": "graph limit",
+    "forms": 32177,
+    "products": 12047,
+    "edges": 15998887,
+    "elapsed_ms": 1971,
+    "rss_mb": 410
+  },
+  "raised_allowance_profile": {
+    "maximum_edges": 64000000,
+    "forms": 72285,
+    "products": 24959,
+    "stored_edges": 47049152,
+    "elapsed_ms": 6305,
+    "rss_megabytes": 1278,
+    "emitted_gates": null,
+    "note": "Measured in a separate isolated profile; raising the cap alone did not produce an emitted circuit."
+  },
+  "bounded_small_cut_scan": {
+    "gates": 96848,
+    "forms": 72285,
+    "ands": 24959,
+    "edges": 47049152,
+    "simulation_candidate_pairs": 20363,
+    "delta_size_histogram": {
+      "2": 9055,
+      ">32": 10644,
+      "17-32": 294,
+      "9-16": 194,
+      "5-8": 112,
+      "3-4": 64
+    },
+    "small_delta_candidates_checked": 4096,
+    "universal_small_cut_proofs": 0,
+    "proofs_with_large_support_abstract_leaves": 0,
+    "examples": [],
+    "elapsed_ms": 7849,
+    "scan_parameters": {
+      "maximum_leaves": 3,
+      "maximum_cuts_per_form": 12,
+      "maximum_expanded_xor_fanins": 8,
+      "maximum_candidate_pairs": 4096
+    }
+  },
+  "controlled_probes": {
+    "abstract_rainbow": {
+      "table": {
+        "wires": 3,
+        "gates": 3
+      },
+      "abstract_inputs": 2,
+      "accumulator_wires": 1,
+      "primary_support": 12,
+      "before_abstract_gates": 3,
+      "after_abstract_gates": 1,
+      "exhaustive_substituted_assignments": 8192,
+      "limitation": "A logical cut rewrite, not yet a physical circuit rewrite: leaf values need to be live or reversibly materialized."
+    },
+    "dependency_region": {
+      "span_gates": 10002,
+      "selected_gates": 2,
+      "selected_wires": 2,
+      "removed_gates": 2,
+      "exhaustive_inputs": 64,
+      "elapsed_ms": 30,
+      "finding": "Existing dependencySort can already find the noncontiguous region globally; broadSearch only supplies contiguous windows and local search is chunk-bounded."
+    },
+    "sat_mixed_circuit": {
+      "before_gates": 10,
+      "whole_circuit_output": null,
+      "whole_circuit_proofs": {
+        "queries": 1,
+        "merges": 1,
+        "counterexamples": 0
+      },
+      "dependency_region_gates": 7,
+      "dependency_region_output": 0,
+      "regional_proofs": {
+        "queries": 1,
+        "merges": 1,
+        "counterexamples": 0
+      },
+      "patched_circuit_gates": 3,
+      "exhaustive_inputs": 2048,
+      "finding": "The whole-circuit sweep proves an identity but cannot emit the remaining cubic map. A regional patch preserves that map and removes the independent identity."
+    }
+  },
+  "implementation_findings": {
+    "abstract_rainbow": "Existing tables index complete reversible wire transformations, not scalar Boolean functions. An adapter must include accumulator/boundary state, preserve live outputs, and lower abstract leaves to actual wire values. Universal cut truth tables remain valid even if leaves are correlated.",
+    "sat_sweeping": "Current code builds a global formula, groups candidates once, counts SAT counterexamples without resimulating them, and applies aliases without a repeated rebuild/sweep. The emitter only handles affine or supported quadratic maps, so valid internal merges can yield no saved progress on mixed maps.",
+    "dependency_regions": "Local findConvexSubsets already uses dependency selection, but worker chunks and local gate-count limits bound it. Broad search is contiguous. A global, version-aware convex region interface can route safely extractable regions through existing strategies."
+  },
+  "recommended_order": [
+    "Global dependency regions with preserved boundary versions and safe circuit patching.",
+    "Abstract-expression cut truth tables and rainbow adapters, using register/liveness-aware lowering.",
+    "Cone-local SAT proofs, retain proved identities, refine simulation from counterexamples, rebuild and sweep again, and emit local circuit patches.",
+    "Measure a compact XOR representation or live-graph compaction before increasing global graph allowances."
+  ],
+  "sources": [
+    "https://mockturtle.readthedocs.io/en/latest/algorithms/cut_rewriting.html",
+    "https://mockturtle.readthedocs.io/en/latest/algorithms/cut_enumeration.html",
+    "https://people.eecs.berkeley.edu/~alanmi/publications/2020/dac20_sweep.pdf"
+  ],
+  "worker_utilization_validation": {
+    "configured_maximum": 4,
+    "initial_concurrency": 1,
+    "job_seconds": 0.2,
+    "broad_cadence_seconds": 0.2,
+    "cli_seconds": 4,
+    "status_samples": [
+      {
+        "timestamp": "2026-11-18 12:28:24",
+        "workers_active": 4
+      },
+      {
+        "timestamp": "2026-11-18 12:28:24",
+        "workers_active": 4
+      },
+      {
+        "timestamp": "2026-11-18 12:28:25",
+        "workers_active": 4
+      },
+      {
+        "timestamp": "2026-11-18 12:28:25",
+        "workers_active": 4
+      },
+      {
+        "timestamp": "2026-11-18 12:28:26",
+        "workers_active": 4
+      },
+      {
+        "timestamp": "2026-11-18 12:28:26",
+        "workers_active": 4
+      },
+      {
+        "timestamp": "2026-11-18 12:28:27",
+        "workers_active": 2
+      }
+    ],
+    "corruption_reported": false,
+    "integration_coverage": [
+      "Refill locals while broad search is active.",
+      "Run broad searches repeatedly during long rounds with queue priority.",
+      "Retarget empty chunk lanes and select the best alternative without concatenating retries.",
+      "Stop refilling on cancellation, improvement restart, or round completion."
+    ]
+  }
+}

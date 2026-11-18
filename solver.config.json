@@ -10,11 +10,13 @@
     "databaseDirectory": "."
   },
   "workers": {
+    "keepBusy": true,
+    "wholeCircuitMaximumGates": 2000,
     "maximum": 24,
     "minimumChunkGates": 100,
     "maximumChunkFraction": 0.5,
     "jobsPerWorker": 4,
-    "jobSeconds": 30,
+    "jobSeconds": 120,
     "shareTemplates": true,
     "sharedTemplateSeconds": 15,
     "sharedTemplateEntries": 64,
@@ -24,7 +26,8 @@
     "concurrencySampleRounds": 2,
     "concurrencyDatabaseFraction": 0.6,
     "concurrencyRateTolerance": 0.05,
-    "memoryBudgetMegabytes": 8192
+    "memoryBudgetMegabytes": 8192,
+    "broadSearchSeconds": 60
   },
   "timing": {
     "roundMinutes": 25,
@@ -46,6 +49,10 @@
     "maximumWires": 64
   },
   "search": {
+    "dependencyCuts": true,
+    "strategyAdaptive": true,
+    "strategyExplorationProbability": 0.2,
+    "strategyDecayHalfLifeSeconds": 300,
     "probabilistic": true,
     "variableElimination": true,
     "exactMaximumWires": 7,
@@ -57,7 +64,7 @@
     "minimumInnerChunkGates": 200,
     "workerShufflePasses": 200,
     "roundShufflePasses": 2000,
-    "adaptive": true,
+    "adaptive": false,
     "explorationEvery": 5,
     "searchArms": 16,
     "prioritizeChangedWires": true,
@@ -145,13 +152,21 @@
     "generationStagingQueueBatches": 2
   },
   "synthesis": {
+    "factored": true,
+    "blockCancellation": true,
+    "satSweeping": true,
+    "factoredMaximumNodes": 200000,
+    "factoredMaximumEdges": 16000000,
+    "quadratic": true,
+    "affine": true,
+    "affineMaximumWindowGates": 256,
+    "affineMaximumTerms": 100000,
+    "affineMaximumOperations": 10000000,
     "templates": true,
     "templateEntries": 10000,
     "maximumWires": 3,
     "maximumWindowGates": 8,
     "maximumReplacementGates": 3,
-    "attemptEvery": 100,
-    "timeoutMs": 100,
     "states": 2000,
     "forwardSemanticSearch": true,
     "smt": true,

@@ -13,7 +13,7 @@ export function configuredWorkerCount() {
 	return count
 }
 
-type Job = { budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
+type Job = { solver: 'local' | 'affine' | 'broad' | 'shuffle', restartOnImprovement: boolean, budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
 export class WorkerPool {
 	private slots: { worker: Worker, job?: Job, retiring?: boolean }[] = []
 	private queue: Job[] = []
@@ -29,6 +29,21 @@ export class WorkerPool {
 		this.concurrency = limit
 		this.dispatch()
 	}
+	/** Release excess isolates promptly under memory pressure. Their last
+	 * reported reductions remain in the coordinator; unfinished jobs return
+	 * their seed as an alternative and may retry at the lower concurrency. */
+	async trimForMemory(limit: number) {
+		if (!Number.isSafeInteger(limit) || limit < 1 || limit > this.size) throw new Error('Invalid worker concurrency')
+		this.concurrency = limit
+		const victims = [...this.slots].sort((a, b) => Number(!!a.job) - Number(!!b.job) || (b.job?.gates.length ?? 0) - (a.job?.gates.length ?? 0)).slice(0, Math.max(0, this.slots.length - limit))
+		for (const slot of victims) { slot.retiring = true; this.slots.splice(this.slots.indexOf(slot), 1) }
+		await Promise.all(victims.map(async slot => {
+			const job = slot.job; slot.job = undefined
+			await slot.worker.terminate()
+			job?.resolve(job.gates)
+		}))
+		this.dispatch()
+	}
 	async trimIdle() {
 		const retired: Worker[] = []
 		for (let i = this.slots.length - 1; i >= 0 && this.slots.length > this.concurrency; i--) {
@@ -38,11 +53,13 @@ export class WorkerPool {
 		}
 		await Promise.all(retired.map(worker => worker.terminate()))
 	}
-	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000): Promise<Gate[]> {
+	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000, restartOnImprovement = false, solver: 'local' | 'affine' | 'broad' | 'shuffle' = 'local'): Promise<Gate[]> {
 		if (this.failure) return Promise.reject(this.failure)
 		if (!Number.isFinite(budgetMs) || budgetMs <= 0) return Promise.reject(new Error('Invalid job budget'))
 		return new Promise((resolve, reject) => {
-			this.queue.push({ budgetMs, gates, wires, stopSignal, onProgress, resolve, reject })
+			const job = { solver, restartOnImprovement, budgetMs, gates, wires, stopSignal, onProgress, resolve, reject }
+			if (solver === 'broad') this.queue.unshift(job)
+			else this.queue.push(job)
 			this.dispatch()
 		})
 	}
@@ -62,14 +79,17 @@ export class WorkerPool {
 				const current = slot
 				this.slots.push(current)
 				worker.on('message', (message: { gates?: Gate[], error?: string, progress?: number, activity?: WorkerActivity, snapshot?: Gate[], sharedTemplates?: TemplateRule[] }) => {
+					if (current.retiring) return
 					if (config.workers.shareTemplates && message.sharedTemplates?.length) {
 						this.shared.importShared(message.sharedTemplates, config.workers.sharedTemplateBatch, true)
 						const rules = this.shared.drainShared(config.workers.sharedTemplateBatch)
 						if (rules.length) for (const peer of this.slots) if (peer !== current) peer.worker.postMessage({ sharedTemplates: rules })
 					}
 					const job = current.job
-					if (message.progress !== undefined) { job?.onProgress?.(message.progress, message.activity, message.snapshot); return }
+					const activity = message.activity ? { ...message.activity, workerId: current.worker.threadId } : undefined
+					if (message.progress !== undefined) { job?.onProgress?.(message.progress, activity, message.snapshot); return }
 					if (message.gates === undefined && message.error === undefined) return
+					if (message.gates !== undefined && activity) job?.onProgress?.(message.gates.length, activity)
 					current.job = undefined
 					if (message.error) { this.fail(new Error(message.error)); job?.reject(this.failure!); return }
 					job?.resolve(message.gates!)
@@ -79,13 +99,13 @@ export class WorkerPool {
 					const rules = this.shared.exportShared(config.workers.sharedTemplateEntries)
 					for (let i = 0; i < rules.length; i += config.workers.sharedTemplateBatch) worker.postMessage({ sharedTemplates: rules.slice(i, i + config.workers.sharedTemplateBatch) })
 				}
-				worker.on('error', error => this.fail(error))
+				worker.on('error', error => { if (!current.retiring) this.fail(error) })
 				worker.on('exit', code => {
 					if (!this.failure && !current.retiring) this.fail(new Error(`Worker exited unexpectedly (${code})`))
 				})
 			}
 			slot.job = this.queue.shift()!
-			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs })
+			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs, restartOnImprovement: slot.job.restartOnImprovement, solver: slot.job.solver })
 		}
 	}
 	private fail(error: Error) {

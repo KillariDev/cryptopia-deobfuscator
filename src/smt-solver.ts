@@ -1,10 +1,16 @@
 import { Gate } from './types.js'
 import { evalCircuit, generateCombinations, isReplacementSimpler } from './utils.js'
 
+export function reportSmtDiagnostic(message: string) {
+	// Emscripten can receive late cleanup acknowledgements while Z3 shuts down.
+	if (/^received "cleanupThread" command from terminated worker: \d+$/.test(message)) return
+	console.error(message)
+}
+
 // Runs inside a disposable worker so WASM memory is reclaimed at worker termination.
 export async function synthesizeSMT(original: Gate[], wires: number, maxGates: number, timeoutMs: number): Promise<Gate[] | undefined> {
 	const { init, killThreads } = await import('z3-solver')
-	const api = await init()
+	const api = await init({ printErr: reportSmtDiagnostic })
 	try {
 		const { Solver, Int, Bool, Or, If, Xor } = new api.Context('synthesis')
 		const end = performance.now() + timeoutMs

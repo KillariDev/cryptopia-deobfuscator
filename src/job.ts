@@ -39,8 +39,8 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 		`Latest verified circuit: ${resolve(paths.latest)}`,
 		`Progress checkpoints: ${resolve(dirname(paths.progress(inputCircuit.gates.length)))}`,
 		`Worker snapshots: ${resolve(dirname(paths.worker(0)))}`,
-		`Worker limit: ${configuredWorkerCount()} (${process.env.OPTIMIZER_WORKERS === undefined ? 'automatic CPU-based limit' : 'OPTIMIZER_WORKERS override'}); actual count depends on circuit size`,
-		`Round budget: ${WORKER_ROUND_MS / 60_000} minutes; worker job budget: ${config.workers.jobSeconds} seconds; up to ${config.workers.jobsPerWorker} jobs per worker (checked between optimization steps)`,
+		`Worker limit: ${configuredWorkerCount()} (${process.env.OPTIMIZER_WORKERS === undefined ? 'automatic CPU-based limit' : 'OPTIMIZER_WORKERS override'}); ${config.workers.keepBusy ? 'continuously refill configured worker slots' : 'actual count depends on circuit size and adaptive concurrency'}`,
+		`Round budget: ${WORKER_ROUND_MS / 60_000} minutes; worker job budget: ${config.workers.jobSeconds} seconds; ${config.workers.keepBusy ? 'jobs refill until the round ends' : `up to ${config.workers.jobsPerWorker} jobs per worker`} (checked between optimization steps)`,
 		...config.database.tables.map(table => `Rainbow table: ${resolve(databaseFilename(table.wires, table.gates))} (${table.wires} wires, up to ${table.gates} gates)`),
 		`Logging: ${verboseLogging() ? 'verbose' : `summaries every ${config.timing.summarySeconds} seconds (OPTIMIZER_VERBOSE=1 enables details)`}`,
 		`Optimization: probabilistic=${config.search.probabilistic}; subset sizes ${config.search.subsetMinimum}-${config.search.subsetMaximum}; slice sizes ${config.search.sliceMinimum}-${config.search.sliceMaximum}`,
@@ -50,5 +50,7 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 }
 
 export function logJob(working: string, original: string, circuits: JobCircuits) {
-	for (const line of describeJob(working, original, circuits).split('\n')) logTimed(line)
+	for (const line of describeJob(working, original, circuits).split('\n')) {
+		if (verboseLogging() || /^(Mode|Original|Input|Latest verified circuit|Logging):/.test(line)) logTimed(line)
+	}
 }

@@ -58,7 +58,8 @@ export function* semanticCircuits(wires: number, maxGates: number, catalog: Gate
 }
 
 /** Meet-in-the-middle is valid only for bijective target functions. */
-export function meetInMiddle(gates: Gate[], wires: number, catalog: Gate[], maxDepth: number, limit: number, timeoutMs: number) {
+export function meetInMiddle(gates: Gate[], wires: number, catalog: Gate[], maxDepth: number, limit: number, timeoutMs: number, shouldStop: () => boolean = () => false) {
+	if (shouldStop()) return undefined
 	catalog = catalog.filter(gate => !getVars(gate).slice(1).includes(gate.target))
 	const target = circuitState(gates, wires)
 	if (new Set(target).size !== target.length) return undefined
@@ -70,7 +71,7 @@ export function meetInMiddle(gates: Gate[], wires: number, catalog: Gate[], maxD
 	for (let depth = 1; depth <= Math.ceil(maxDepth / 2); depth++) {
 		const next: typeof frontier = []
 		for (const entry of frontier) for (const gate of catalog) {
-			if (performance.now() >= end || left.size >= limit) return undefined
+			if ((performance.now() >= end || shouldStop()) || left.size >= limit) return undefined
 			const state = applyState(entry.state, gate), key = stateKey(state)
 			if (!left.has(key)) {
 				const sequence = [...entry.gates, gate]
@@ -92,7 +93,7 @@ export function meetInMiddle(gates: Gate[], wires: number, catalog: Gate[], maxD
 			}
 			if (depth === Math.floor(maxDepth / 2)) continue
 			for (const gate of catalog) {
-				if (performance.now() >= end || next.length >= limit) return undefined
+				if ((performance.now() >= end || shouldStop()) || next.length >= limit) return undefined
 				next.push({ state: applyState(entry.state, gate), gates: [...entry.gates, gate] })
 			}
 		}
@@ -105,8 +106,9 @@ export function meetInMiddle(gates: Gate[], wires: number, catalog: Gate[], maxD
  * Full truth states merge equivalent prefixes. A collision of two inputs that the
  * target distinguishes can never be undone by any suffix, so prune it immediately.
  */
-export function forwardSemanticSearch(original: Gate[], wires: number, maxGates: number, limit: number, timeoutMs: number): Gate[] | undefined {
+export function forwardSemanticSearch(original: Gate[], wires: number, maxGates: number, limit: number, timeoutMs: number, shouldStop: () => boolean = () => false): Gate[] | undefined {
 	if (!Number.isInteger(wires) || wires < 1 || wires > 4) throw new Error('Forward semantic search supports 1-4 wires')
+	if (shouldStop()) return undefined
 	const end = performance.now() + timeoutMs
 	const target = circuitState(original, wires), identity = circuitState([], wires)
 	const goal = stateKey(target)
@@ -115,7 +117,7 @@ export function forwardSemanticSearch(original: Gate[], wires: number, maxGates:
 	// Deduplicate single-gate transformations, including unused/repeated controls.
 	const catalog = new Map<string, Gate>()
 	for (let target = 0; target < wires; target++) for (let a = 0; a < wires; a++) for (let b = 0; b < wires; b++) for (let gate_i = 1; gate_i < 16; gate_i++) {
-		if (performance.now() >= end) return undefined
+		if ((performance.now() >= end || shouldStop())) return undefined
 		const gate = { a, b, target, gate_i }, key = stateKey(applyState(identity, gate))
 		const old = catalog.get(key)
 		if (!old || isReplacementSimpler([gate], [old])) catalog.set(key, gate)
@@ -125,7 +127,7 @@ export function forwardSemanticSearch(original: Gate[], wires: number, maxGates:
 	for (let depth = 1; depth <= Math.min(maxGates, original.length - 1); depth++) {
 		const next: typeof frontier = []
 		for (const entry of frontier) for (const gate of catalog.values()) {
-			if (performance.now() >= end) return undefined
+			if ((performance.now() >= end || shouldStop())) return undefined
 			const state = applyState(entry.state, gate), key = stateKey(state)
 			if (seen.has(key)) continue
 			const candidate = [...entry.gates, gate]
