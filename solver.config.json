@@ -35,7 +35,7 @@
     "standaloneSaveSeconds": 60
   },
   "logging": {
-    "verbose": true,
+    "verbose": false,
     "generationDiagnostics": true,
     "generationDiagnosticsMinimumSeconds": 5,
     "eventLoopResolutionMilliseconds": 20
@@ -87,17 +87,21 @@
   },
   "database": {
     "tables": [
-      {
-        "wires": 3,
-        "gates": 6
-      },
-      {
-        "wires": 4,
-        "gates": 5
+	  {
+        "wires": 8,
+        "gates": 3
       },
       {
         "wires": 5,
         "gates": 2
+      },
+      {
+        "wires": 4,
+        "gates": 5
+      }
+      {
+        "wires": 3,
+        "gates": 6
       }
     ],
     "queryBatchSize": 900,
@@ -116,7 +120,7 @@
     "sharedTableBytes": 33554432,
     "sharedTableMaximumRows": 100000,
     "generationReadRows": 4096,
-    "generationCacheMegabytes": 256,
+    "generationCacheMegabytes": 1024,
     "generationTempStore": "file",
     "generationJournalMode": "wal",
     "generationSynchronous": "full",
@@ -136,7 +140,7 @@
     "etaTrendMinimumSamples": 10,
     "etaTrendMinimumWorkGrowth": 0.25,
     "generationCountFinalInserts": false,
-    "generationCandidateCacheMegabytes": 32,
+    "generationCandidateCacheMegabytes": 128,
     "generationStreamStaging": true,
     "generationStagingQueueBatches": 2
   },
