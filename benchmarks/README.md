@@ -8,8 +8,8 @@ section. The versioned `results/` summaries retain previous measurements.
 ## Solver comparisons
 
 ```bash
-npm run benchmark -- data/latest.json data/obfuscated.json
-npm run benchmark:ablate -- data/latest.json data/obfuscated.json
+npm run benchmark -- data/obfuscated-latest.json data/obfuscated.json
+npm run benchmark:ablate -- data/obfuscated-latest.json data/obfuscated.json
 npm run benchmark:cases
 npm run test:benchmark
 ```

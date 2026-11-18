@@ -718,8 +718,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	const { originalCircuit, inputCircuit } = circuits
 	const originalGates: Gate[] = originalCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
 	const gates: Gate[] = inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
-	if (originalGates.length < gates.length) throw new Error('Original circuit is bigger than working. Do you have arguments the right way?')
+	if (originalCircuit.wire_count !== inputCircuit.wire_count) throw new Error('Latest circuit wire count differs from original')
+	if (originalGates.length < gates.length) throw new Error('Latest circuit has more gates than original')
 	verifyCircuit(originalGates, gates, originalCircuit.wire_count, config.validation.checkpointInputs)
+	writeCircuit(outputPaths(pathToFileWithoutExt).latest, inputCircuit.wire_count, gates)
 	const nMaxWorkers = configuredWorkerCount()
 	const sharedTables = await loadSharedTables()
 	const pool = new WorkerPool(nMaxWorkers, undefined, sharedTables)

@@ -1,8 +1,8 @@
 import { WriterUtilization } from './generation-utilization.js'
 import sqlite3 from 'sqlite3'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { runSQL } from './sql.js'
 import { observeRelatedSQL } from './sql-observer.js'
 import { StagingOptions, StagingRow, StagingWriter } from './generation-staging.js'
@@ -10,6 +10,21 @@ import { StagingOptions, StagingRow, StagingWriter } from './generation-staging.
 export type ShardOptions = StagingOptions & { writers: number, directory?: string, cacheMegabytes: number }
 type Shard = { db: sqlite3.Database, alias: string, attached: boolean, writer?: StagingWriter, observing: () => void, transaction: boolean, pending: StagingRow[], pageRows: number, submittedRows: number }
 const closeDB = (db: sqlite3.Database) => new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
+const activeDirectories = new Set<string>()
+
+/** Scratch shards are rebuilt from the main checkpoint, never used for resume. */
+export async function cleanupStagingDirectories(root: string) {
+	let entries
+	try { entries = await readdir(root, { withFileTypes: true }) }
+	catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error }
+	for (const entry of entries) {
+		const directory = resolve(root, entry.name)
+		if (entry.isDirectory() && entry.name.startsWith('rainbow-staging-') && !activeDirectories.has(directory)) {
+			await rm(directory, { recursive: true, force: true })
+		}
+	}
+}
+
 /** Hash only the exact function key: all masks and ties for a function share an owner. */
 export function stagingShard(state: Buffer, count: number) {
 	let hash = 2166136261
@@ -42,6 +57,7 @@ export class ShardedStagingWriter {
 		const root = options.directory ?? tmpdir()
 		await mkdir(root, { recursive: true })
 		const instance = new ShardedStagingWriter(owner, await mkdtemp(join(root, 'rainbow-staging-')))
+		activeDirectories.add(resolve(instance.directory))
 		instance.utilization = new WriterUtilization(options.writers)
 		try {
 			for (let i = 0; i < options.writers; i++) {
@@ -133,7 +149,10 @@ export class ShardedStagingWriter {
 				try { await closeDB(shard.db) } catch (error) { errors.push(error) }
 			}
 			// Close all connections before removal (also required on Windows).
-			if (!errors.length) await rm(this.directory, { recursive: true, force: true })
+			if (!errors.length) {
+				await rm(this.directory, { recursive: true, force: true })
+				activeDirectories.delete(resolve(this.directory))
+			}
 			if (errors.length) throw errors[0]
 		})()
 	}

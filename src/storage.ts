@@ -7,8 +7,8 @@ import { convertToOriginal } from './utils.js'
 export const outputPaths = (problemName: string, dataDirectory = config.files.dataDirectory) => {
 	const name = basename(problemName)
 	return {
-		latest: join(dataDirectory, config.files.latestName),
-		progress: (gateCount: number) => join(dataDirectory, config.files.progressDirectory, `${name}.solved-${gateCount}.json`),
+		latest: `${problemName}-latest.json`,
+		progress: (gateCount: number) => join(`${problemName}-progress`, `${name}.solved-${gateCount}.json`),
 		worker: (index: number) => join(dataDirectory, config.files.workerDirectory, `${name}_worker${index}.json`),
 	}
 }
