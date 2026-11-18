@@ -33,7 +33,7 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 		if (stopped()) break
 		activity.subsets++
 		const region = input.slice(start, end)
-		if (config.synthesis.affine || config.synthesis.quadratic) {
+		if (!config.search.strategyAdaptive && (config.synthesis.affine || config.synthesis.quadratic)) {
 			const affine = wholeCircuitAffineSearch(region, Math.max(0, deadline - performance.now()), stopped)
 			report()
 			if (affine.length < region.length) {
@@ -48,7 +48,7 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 		for (let slice = region.length; slice >= config.search.sliceMinimum; slice = Math.floor(slice / 2)) {
 			if (stopped()) break
 			activity.passes++; activity.checks++
-			const next = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, slice, config.search.probabilistic, config.search.variableElimination, true, preparation, { deadline, shouldStop })
+			const next = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, slice, config.search.probabilistic, config.search.variableElimination, true, preparation, { deadline, shouldStop, broad: true }, caches.broadStrategyPicker)
 			report()
 			if (next.changed && next.gates.length < region.length) {
 				activity.improvements++

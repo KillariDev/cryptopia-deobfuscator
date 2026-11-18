@@ -85,13 +85,23 @@ The solver combines several approaches:
   expose simplifications that were not adjacent before.
 - **Local search:** prioritize recently changed regions. Adaptive search modes
   remain available through `search.adaptive`, but are off by default.
-- **Synthesis rotation:** after cheap template, variable and rainbow rewrites
-  stall, take turns in a fixed order: GF(2), quadratic synthesis, forward search, Z3, meet-in-the-middle,
-  equality saturation. Disabled, ineligible and cached failures are skipped.
-  Region sizes still vary so persistent workers explore different candidates.
+- **Adaptive strategy selection:** start with equal chances, favor approaches
+  that remove gates per worker-second, and decay stale preferences. Uniform
+  exploration keeps every eligible approach reachable. Templates, variables,
+  rainbow lookup and each individual synthesis solver receive their own weights.
+
+The default exploration probability is 20% of selection decisions
+(`search.strategyExplorationProbability`). Learned rewards have a five-minute
+half-life (`search.strategyDecayHalfLifeSeconds`), and unsuccessful attempts
+reduce a strategy's learned score. Histories persist across worker jobs and rapid
+restarts; local and broad search learn separate preferences. These are
+selection probabilities, not guarantees of equal wall-clock time: a selected
+strategy can use the remaining worker lifetime. Set `search.strategyAdaptive` to
+false to restore the fixed pipeline and synthesis rotation. Failed-region caches
+are separate by strategy so trying one method cannot suppress another.
 
 Local GF(2) affine synthesis (`synthesis.affine`, enabled by default) is selected among
-the synthesis rotation after local rewrites stall. It is not an unconditional startup or worker
+the eligible synthesis choices. It is not an unconditional startup or worker
 prepass. It searches affine runs and smaller subwindows inside the selected
 region, using its own `synthesis.affineMaximumWindowGates` bound (default 256) and
 `validation.maximumWires`, independently of the tiny SMT/template limits.

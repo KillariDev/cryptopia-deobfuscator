@@ -1,4 +1,4 @@
-import { StrategyPicker } from './strategy-picker.js'
+import { AdaptiveStrategyPicker } from './strategy-picker.js'
 import { searchAffineRegions, searchPolynomialRegions } from './symbolic-affine.js'
 import { synthesizeSMT } from './smt.js'
 import { recordStrategy } from './strategy-stats.js'
@@ -14,8 +14,8 @@ import { LimitedMap } from './limitedMap.js'
 
 export const templates = new TemplateLibrary(config.synthesis.templateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates, config.workers.sharedTemplateEntries)
 const failed = new LimitedMap<string, boolean>(config.synthesis.templateEntries)
-const picker = new StrategyPicker(['gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'])
-export type SynthesisBudget = { deadline: number, shouldStop?: () => boolean }
+const picker = new AdaptiveStrategyPicker(['gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], () => ({ enabled: config.search.strategyAdaptive, exploration: config.search.strategyExplorationProbability, halfLifeSeconds: config.search.strategyDecayHalfLifeSeconds }))
+export type SynthesisBudget = { deadline: number, shouldStop?: () => boolean, broad?: boolean, selectedStrategy?: string }
 // Serialize synthesis so Z3 initialization and cleanup cannot overlap.
 let pending: Promise<unknown> = Promise.resolve()
 export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = { deadline: performance.now() + config.workers.jobSeconds * 1000 }): Promise<Gate[] | undefined> {
@@ -45,7 +45,7 @@ export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = {
 		} })
 		// Cache failures per strategy: a capped forward semantic search must not exclude Z3.
 		const available = choices.filter(choice => !failed.has(`${choice.name}:${key}`))
-		const choice = picker.pick(available)
+		const choice = budget.selectedStrategy ? available.find(choice => choice.name === budget.selectedStrategy) : picker.pick(available)
 		if (!choice) return undefined
 		const started = performance.now()
 		const result = await choice.run()
@@ -54,6 +54,7 @@ export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = {
 			? { maximumWires: config.validation.maximumWires, maximumWindowGates: options.affineMaximumWindowGates, workerJobSeconds: config.workers.jobSeconds }
 			: { maximumWires: options.maximumWires, maximumWindowGates: options.maximumWindowGates, maximumReplacementGates: options.maximumReplacementGates, ...(choice.name !== 'z3' ? { states: options.states } : {}), workerJobSeconds: config.workers.jobSeconds }
 		recordStrategy(choice.name, settings, started, normalized.length, accepted ? result!.length : normalized.length, accepted)
+		picker.observe(choice.name, accepted ? normalized.length - result!.length : 0, performance.now() - started)
 		if (accepted) return reverseMapCircuit(result!, wires)
 		if (!stopped()) failed.set(`${choice.name}:${key}`, true)
 		return undefined

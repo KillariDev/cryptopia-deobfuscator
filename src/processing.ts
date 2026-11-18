@@ -1,3 +1,4 @@
+import { AdaptiveStrategyPicker } from './strategy-picker.js'
 import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { StrategySummary, formatStrategyActivity } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
@@ -10,7 +11,7 @@ import { SlidingWindowWires } from './window-wires.js'
 import { LazyCircuit } from './circuit-edit.js'
 import { IncrementalGraph } from './incremental-graph.js'
 import { WindowFingerprints } from './fingerprints.js'
-import { templates, advancedRewrite, SynthesisBudget } from './strategies.js'
+import { templates, advancedRewrite, wholeCircuitAffineSearch, SynthesisBudget } from './strategies.js'
 import { IncrementalEvaluator } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, createSearchArms, independentComponents } from './search.js'
 import { config } from './config.js'
@@ -334,22 +335,64 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 	return { gates: newCircuit, changed: true }
 }
 
-export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, lookup = true, preparation = new SubsetPreparation(originalGates), synthesisBudget?: SynthesisBudget): Promise<{ gates: Gate[], changed: boolean }> => {
+const adaptiveFailureCaches = new WeakMap<AdaptiveStrategyPicker, Map<string, LimitedMap<string, boolean>>>()
+
+export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, lookup = true, preparation = new SubsetPreparation(originalGates), synthesisBudget?: SynthesisBudget, strategyPicker?: AdaptiveStrategyPicker): Promise<{ gates: Gate[], changed: boolean }> => {
+	const attemptStarted = performance.now()
+	const symbolic = config.synthesis.affine || config.synthesis.quadratic
+	const maxSynthesis = Math.max(config.synthesis.maximumWindowGates, symbolic ? config.synthesis.affineMaximumWindowGates : 0)
+	const wireCount = originalGates.length <= maxSynthesis ? new Set(originalGates.flatMap(getVars)).size : Infinity
+
+	const smallEligible = originalGates.length <= config.synthesis.maximumWindowGates && wireCount <= config.synthesis.maximumWires
+	const symbolicEligible = originalGates.length <= config.synthesis.affineMaximumWindowGates && wireCount <= config.validation.maximumWires
+	const synthesisNames = [
+		...(symbolicEligible && config.synthesis.affine ? ['gf2-affine'] : []),
+		...(symbolicEligible && config.synthesis.quadratic ? ['quadratic'] : []),
+		...(smallEligible && config.synthesis.forwardSemanticSearch ? ['forward-semantic-search'] : []),
+		...(smallEligible && config.synthesis.smt ? ['z3'] : []),
+		...(smallEligible && config.synthesis.meetInMiddle ? ['meet-in-the-middle'] : []),
+		...(smallEligible && config.synthesis.equalitySaturation ? ['equality-saturation'] : []),
+	]
+	const available = [
+		...(config.synthesis.templates ? [{ name: 'templates' }] : []),
+		...(findUselessVarsSetting && sliceSize > 2 ? [{ name: 'variables' }] : []),
+		...(lookup ? [{ name: 'rainbow' }] : []),
+		...synthesisNames.map(name => ({ name })),
+		...(synthesisBudget?.broad && (config.synthesis.affine || config.synthesis.quadratic) ? [{ name: 'symbolic' }] : []),
+	]
+	const selected = config.search.strategyAdaptive ? strategyPicker?.pick(available)?.name : undefined
+	if (strategyPicker && config.search.strategyAdaptive && !selected) return { gates: originalGates, changed: false }
+	const runTemplates = selected === undefined || selected === 'templates'
+	const runSynthesis = selected === undefined || synthesisNames.includes(selected)
+	const selectedBudget = selected && runSynthesis ? { deadline: synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000, ...synthesisBudget, selectedStrategy: selected } : synthesisBudget
+	if (selected !== undefined && strategyPicker) {
+		let caches = adaptiveFailureCaches.get(strategyPicker)
+		if (!caches) { caches = new Map(); adaptiveFailureCaches.set(strategyPicker, caches) }
+		let cache = caches.get(selected)
+		if (!cache) { cache = new LimitedMap(Math.max(1, Math.floor(config.cache.processedEntries / 4))); caches.set(selected, cache) }
+		processedGatesCache = cache
+	}
+	if (selected !== undefined) { findUselessVarsSetting &&= selected === 'variables'; lookup &&= selected === 'rainbow' }
 	const finish = (result: { gates: Gate[], changed: boolean }) => {
 		if (result.changed && config.synthesis.templates) templates.learn(originalGates, result.gates)
+		if (selected) strategyPicker!.observe(selected, originalGates.length - result.gates.length, performance.now() - attemptStarted)
 		return result
+	}
+	if (selected === 'symbolic') {
+		const result = wholeCircuitAffineSearch(originalGates, Math.max(0, (synthesisBudget?.deadline ?? performance.now()) - performance.now()), () => synthesisBudget?.shouldStop?.() === true)
+		return finish({ gates: result, changed: result !== originalGates })
 	}
 	const prepared = new Map<number, PreparedWindow>()
 	if (preparation.gates !== originalGates) throw new Error('Subset preparation belongs to a different circuit')
 	let strategyStarted = performance.now()
-	const templateResult = preparation.templateGates()
-	if (config.synthesis.templates) recordStrategy('templates', { maximumWires: config.synthesis.maximumWires, maximumWindowGates: config.synthesis.maximumWindowGates }, strategyStarted, originalGates.length, templateResult.length, templateResult !== originalGates)
+	const templateResult = runTemplates ? preparation.templateGates() : originalGates
+	if (config.synthesis.templates && runTemplates) recordStrategy('templates', { maximumWires: config.synthesis.maximumWires, maximumWindowGates: config.synthesis.maximumWindowGates }, strategyStarted, originalGates.length, templateResult.length, templateResult !== originalGates)
 	strategyStarted = performance.now()
 	const changes = optimizeVariables(processedGatesCache, templateResult, sliceSize, useProbabilistically, findUselessVarsSetting, lookup ? tables.maximumWires : 0, prepared, preparation, () => synthesisBudget?.shouldStop?.() === true || (synthesisBudget !== undefined && performance.now() >= synthesisBudget.deadline))
 	if (findUselessVarsSetting && sliceSize > 2) recordStrategy('variables', { slice: sliceSize, probabilistic: useProbabilistically, exactMaximumWires: config.search.exactMaximumWires }, strategyStarted, templateResult.length, changes.gates.length, changes.changed)
 	changes.changed ||= templateResult !== originalGates
 	if (!lookup) {
-		if (!changes.changed) { const candidate = await advancedRewrite(originalGates, synthesisBudget); if (candidate) return finish({ gates: candidate, changed: true }) }
+		if (runSynthesis && !changes.changed) { const candidate = await advancedRewrite(originalGates, selectedBudget); if (candidate) return finish({ gates: candidate, changed: true }) }
 		return finish(changes)
 	}
 	const gates = changes.gates
@@ -394,7 +437,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	}
 	recordStrategy('rainbow', { slice: sliceSize, maximumWires: tables.maximumWires }, strategyStarted, gates.length, gates.length - replacements.reduce((sum, entry) => sum + entry.end - entry.start + 1 - entry.replacement.length, 0), replacements.length > 0)
 	if (replacements.length === 0) {
-		if (!changes.changed) { const candidate = await advancedRewrite(originalGates, synthesisBudget); if (candidate) return finish({ gates: candidate, changed: true }) }
+		if (runSynthesis && !changes.changed) { const candidate = await advancedRewrite(originalGates, selectedBudget); if (candidate) return finish({ gates: candidate, changed: true }) }
 		return finish(changes)
 	}
 	const newCircuit = replace(gates, replacements)
@@ -547,7 +590,7 @@ function appendMissingNumbers(arr: number[], n: number): number[] {
 	return [...Array.from(allNumbers), ...arr]
 }
 
-export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method'], onLazyCandidate?: (gates: ChunkedSequence<Gate>) => void, synthesisBudget?: SynthesisBudget): Promise<Gate[]> => {
+export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method'], onLazyCandidate?: (gates: ChunkedSequence<Gate>) => void, synthesisBudget?: SynthesisBudget, strategyPicker?: AdaptiveStrategyPicker): Promise<Gate[]> => {
 	const useProbabilistically = method !== 'rainbow' && phase === 'heavy' && config.search.probabilistic
 	const findUselessVarsSetting = method !== 'rainbow' && config.search.variableElimination
 	let regenerateGraph = false
@@ -560,7 +603,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 		regenerateGraph = false
 		for (let lines of graphIterator) {
 			const subsetKey = `${config.synthesis.templates ? templates.version : 0}:${maxSlice}:${method}:${hashGates(lines.map(line => circuit.at(line)))}`
-			if (testedSubsets.has(subsetKey)) continue
+			if (!(config.search.strategyAdaptive && strategyPicker) && testedSubsets.has(subsetKey)) continue
 			let subsetChanged = false
 			activity.subsets++
 			while (lines.length) {
@@ -570,7 +613,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 				for (let slice = config.search.sliceMinimum; slice <= Math.min(maxSlice, lines.length); slice++) {
 					if (timeToEndWorker()) return circuit.toArray()
 					activity.checks++
-					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables', preparation, synthesisBudget)
+					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables', preparation, synthesisBudget, strategyPicker)
 					if (!optimizationOutput.changed) continue
 					subsetChanged = true; changed = true; activity.improvements++
 					changedWires = new Set([...inGates, ...optimizationOutput.gates].flatMap(getVars))
@@ -588,7 +631,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 				}
 				if (!changed) break
 			}
-			if (!subsetChanged) testedSubsets.set(subsetKey, true)
+			if (!subsetChanged && !(config.search.strategyAdaptive && strategyPicker)) testedSubsets.set(subsetKey, true)
 			if (regenerateGraph) {
 				break
 			}
@@ -597,7 +640,10 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 	return circuit.toArray()
 }
 
+const pickerOptions = () => ({ enabled: config.search.strategyAdaptive, exploration: config.search.strategyExplorationProbability, halfLifeSeconds: config.search.strategyDecayHalfLifeSeconds })
 export const createOptimizerCaches = () => ({
+	strategyPicker: new AdaptiveStrategyPicker(['templates', 'variables', 'rainbow', 'gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions),
+	broadStrategyPicker: new AdaptiveStrategyPicker(['symbolic', 'templates', 'variables', 'rainbow', 'gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions),
 	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(config.cache.lookupEntries, config.cache.lookupPolicy),
 	processedGatesCache: new LimitedMap<string, boolean>(config.cache.processedEntries),
 	arms: createSearchArms(config.search.searchArms, config.search.subsetMinimum, config.search.subsetMaximum, config.search.sliceMinimum, config.search.sliceMaximum),
@@ -672,7 +718,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 			const result = await optimizeSubset(tables, data, ioIdentifierCache, methodCache!, subsetSize, maxSlice, phase, timeToEndWorker, activity, () => {}, caches.testedSubsets, method, gates => {
 				candidateParts.update(index, gates)
 				timeToEndWorker()
-			}, { deadline: jobDeadline, shouldStop: () => shouldFinish?.(activity) === true })
+			}, { deadline: jobDeadline, shouldStop: () => shouldFinish?.(activity) === true }, caches.strategyPicker)
 			candidateParts.update(index, result)
 			return result
 		}))

@@ -596,9 +596,9 @@ try {
 	const input = [singleGate[0], singleGate[0], singleGate[0]]
 	resetStrategyStats()
 	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
-	assert.deepEqual(strategySnapshot().map(stat => stat.strategy), ['forward-semantic-search'])
+	assert.equal(strategySnapshot().length, 1)
 	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
-	assert.deepEqual(strategySnapshot().map(stat => stat.strategy), ['forward-semantic-search', 'z3'])
+	assert.deepEqual(new Set(strategySnapshot().map(stat => stat.strategy)), new Set(['forward-semantic-search', 'z3']))
 	const count = strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0)
 	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
 	assert.equal(strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0), count)
@@ -607,7 +607,7 @@ try {
 	const recovered = await advancedRewrite([not0, not0, not0], { deadline: performance.now() + 5000 })
 	assert.ok(recovered && recovered.length === 1)
 	assert.equal(functionKey(recovered!, 2), functionKey([not0], 2))
-	assert.equal(strategySnapshot()[strategySnapshot().length - 1].strategy, 'z3')
+	assert.ok(['z3', 'forward-semantic-search'].includes(strategySnapshot()[strategySnapshot().length - 1].strategy))
 } finally {
 	Object.assign(config.synthesis, synthesisOptions)
 	resetStrategyStats()
@@ -998,3 +998,5 @@ await import('./broad-search-test.js')
 await import('./polynomial-synthesis-test.js')
 
 await import('./coordinator-status-test.js')
+
+await import('./adaptive-strategy-test.js')
