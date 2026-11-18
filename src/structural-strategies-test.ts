@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { Gate } from './types.js'
 import { analyzeFactored, FactoredGraph, FactoredOptions, Form, synthesizeFactored } from './factored.js'
 import { cancelBlocks } from './block-cancellation.js'
-import { sweepFactored } from './sat-sweeping-core.js'
+import { sweepFactored, SweepStats } from './sat-sweeping-core.js'
 import { structuralRewrite, structuralNames } from './structural-strategies.js'
 import { evalCircuit, generateCombinations, verifyCircuit } from './utils.js'
 import { seededRandom } from './random.js'
@@ -28,7 +28,11 @@ const values = (graph: FactoredGraph, rows: Form[], input: boolean[]) => {
 // All truth functions, aliased controls/targets, and exact graph semantics.
 for (let gate_i = 0; gate_i < 16; gate_i++) for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) for (let target = 0; target < 3; target++) {
 	const input = [{ a, b, target, gate_i }], { graph, rows } = analyzeFactored(input, options)
-	for (const bits of generateCombinations(3)) assert.deepEqual(values(graph, rows, bits), graph.wires.map(wire => evalCircuit(input, bits)[wire]))
+	const compact = graph.rebuild(rows, new Map())
+	for (const bits of generateCombinations(3)) {
+		assert.deepEqual(values(graph, rows, bits), graph.wires.map(wire => evalCircuit(input, bits)[wire]))
+		assert.deepEqual(values(compact.graph, compact.rows, bits), values(graph, rows, bits))
+	}
 }
 const t: Gate = { a: 0, b: 1, target: 2, gate_i: 1 }
 const random = seededRandom(20261123), pick = (n: number) => Math.floor(random() * n)
@@ -72,9 +76,10 @@ const stats = { queries: 0, merges: 0, counterexamples: 0 }
 const swept = await sweepFactored(distributed, options, performance.now() + 30000, stats)
 assert.deepEqual(swept, [])
 assert.ok(stats.queries > 0 && stats.merges > 0, 'a real UNSAT proof authorizes the rewrite')
-const collisions = { queries: 0, merges: 0, counterexamples: 0 }
+const collisions: SweepStats = { queries: 0, merges: 0, counterexamples: 0 }
 assert.equal(await sweepFactored([t], { ...options, simulationBits: 1 }, performance.now() + 30000, collisions), undefined)
 assert.ok(collisions.counterexamples > 0, 'simulation collisions must not authorize a merge')
+assert.ok(collisions.refinementSkips! > 0, 'model counterexamples prevent redundant queries against distinguishable expressions')
 assert.equal(await structuralRewrite('sat-sweeping', distributed, performance.now() + 30000, () => true), undefined)
 let cancellationChecks = 0
 assert.equal(await structuralRewrite('sat-sweeping', distributed, performance.now() + 30000, () => ++cancellationChecks > 2), undefined)

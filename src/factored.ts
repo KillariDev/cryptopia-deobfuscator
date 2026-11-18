@@ -117,6 +117,50 @@ export class FactoredGraph {
 		}
 		return rows.map(row => visit(row))
 	}
+	/** Compact the live cone after proved merges. Bulk parity interning avoids
+	 * constructing every prefix of a wide XOR during congruence rebuilding. */
+	rebuild(rows: Form[], aliases: Map<number, Form>) {
+		const live = new Set<number>(), pending = rows.slice()
+		while (pending.length) {
+			this.check()
+			const form = pending.pop()!
+			if (live.has(form.id)) continue
+			live.add(form.id)
+			const alias = aliases.get(form.id)
+			if (alias) {
+				if (alias.id >= form.id) throw new Error('Cyclic factored alias')
+				pending.push(alias); continue
+			}
+			for (const atom of form.atoms) if (atom > this.wires.length) {
+				this.check(); const node = this.products[atom - this.wires.length - 1]
+				pending.push(node.left, node.right)
+			}
+		}
+		const graph = new FactoredGraph(this.wires, this.options), memo = new Map<number, Form>(), products = new Map<number, Form>()
+		let work = 0
+		for (const id of [...live].sort((a, b) => a - b)) {
+			this.check()
+			const alias = aliases.get(id)
+			if (alias) { memo.set(id, memo.get(alias.id)!); continue }
+			const parity = new Set<number>()
+			for (const atom of this.forms[id].atoms) {
+				let term: Form
+				if (!atom) term = graph.one
+				else if (atom <= this.wires.length) term = graph.inputs[atom - 1]
+				else {
+					const node = this.products[atom - this.wires.length - 1]
+					term = products.get(atom) ?? graph.and(memo.get(node.left.id)!, memo.get(node.right.id)!)
+					products.set(atom, term)
+				}
+				for (const next of term.atoms) {
+					if (++work > this.options.maximumEdges) throw new FactoredLimit('rebuild limit')
+					this.check(); if (!parity.delete(next)) parity.add(next)
+				}
+			}
+			memo.set(id, graph.intern([...parity].sort((a, b) => a - b)))
+		}
+		return { graph, rows: rows.map(row => memo.get(row.id)!) }
+	}
 	/** Expand only final low-degree expressions, not nonlinear intermediates. */
 	private quadratic(rows: Form[]): Set<bigint>[] | undefined {
 		const memo = new Map<number, Set<bigint> | undefined>()

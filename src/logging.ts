@@ -113,7 +113,7 @@ export function formatStrategyActivity(statuses: WorkerStatus[]) {
 
 /** Persistent worker policies: count each worker's latest policy once per scope. */
 export function formatStrategyWeights(statuses: WorkerStatus[]): string[] {
-	const labels: Record<string, string> = { 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'block-cancellation broad': 'blocks broad', 'sat-sweeping broad': 'SAT sweep broad', 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', z3: 'Z3' }
+	const labels: Record<string, string> = { 'dependency-cuts': 'cuts', 'dependency-cuts broad': 'cuts broad', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'block-cancellation broad': 'blocks broad', 'sat-sweeping broad': 'SAT sweep broad', 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', z3: 'Z3' }
 	const lines: string[] = []
 	for (const scope of ['local', 'broad'] as const) {
 		const workers = new Map<number, WorkerStatus>()
@@ -167,7 +167,7 @@ export class StrategySummary {
 	}
 	finish(job: number) { this.jobs.delete(job) }
 	flush() {
-		const labels: Record<string, string> = { 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'block-cancellation broad': 'blocks broad', 'sat-sweeping broad': 'SAT sweep broad', 'gate-simplification': 'simplify', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', 'gf2-affine': 'GF2 local', 'gf2-affine-whole': 'GF2 broad', 'symbolic-whole': 'symbolic broad', 'quadratic broad': 'quadratic broad', 'gf2-affine broad': 'GF2 broad window', 'forward-semantic-search broad': 'forward broad', 'meet-in-the-middle broad': 'MITM broad', 'equality-saturation broad': 'equality broad', z3: 'Z3' }
+		const labels: Record<string, string> = { 'dependency-cuts': 'cuts', 'dependency-cuts broad': 'cuts broad', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'block-cancellation broad': 'blocks broad', 'sat-sweeping broad': 'SAT sweep broad', 'gate-simplification': 'simplify', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', 'gf2-affine': 'GF2 local', 'gf2-affine-whole': 'GF2 broad', 'symbolic-whole': 'symbolic broad', 'quadratic broad': 'quadratic broad', 'gf2-affine broad': 'GF2 broad window', 'forward-semantic-search broad': 'forward broad', 'meet-in-the-middle broad': 'MITM broad', 'equality-saturation broad': 'equality broad', z3: 'Z3' }
 		const parts = [...this.totals].sort((a, b) => b[1].elapsedMs - a[1].elapsedMs)
 			.map(([name, total]) => `${labels[name] ?? name} ${total.attempts}x/${(total.elapsedMs / 1000).toFixed(2)}s`)
 		this.totals.clear()

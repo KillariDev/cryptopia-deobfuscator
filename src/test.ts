@@ -1010,3 +1010,5 @@ await import('./worker-utilization-test.js')
 await import('./run-lifecycle-test.js')
 
 await import('./memory-concurrency-test.js')
+
+await import('./dependency-cuts-test.js')

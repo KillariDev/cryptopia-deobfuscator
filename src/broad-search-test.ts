@@ -20,6 +20,9 @@ const db = new sqlite3.Database(':memory:')
 const tables = new RainbowPortfolio([{ wires: 3, gates: 1, db }])
 try {
 	config.search.strategyAdaptive = false
+	// This case isolates contiguous broad windows; global cuts have separate
+	// integration coverage and may find a smaller improvement first.
+	config.search.dependencyCuts = false
 	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, quadratic: false, affine: false, templates: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
 	config.search.probabilistic = false
 	config.search.variableElimination = false

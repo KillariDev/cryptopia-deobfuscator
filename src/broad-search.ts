@@ -35,11 +35,13 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 		activity.subsets++
 		const region = input.slice(start, end)
 		if (!config.search.strategyAdaptive) {
-			const selected = caches.broadStrategyPicker.pick(structuralChoices().map(name => ({ name })))
+			const selected = caches.broadStrategyPicker.pick([...structuralChoices(), ...(config.search.dependencyCuts ? ['dependency-cuts'] : [])].map(name => ({ name })))
 			if (selected) {
-				const next = await structuralRewrite(selected.name, region, deadline, shouldStop)
+				const next = selected.name === 'dependency-cuts'
+					? (await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, region.length, config.search.probabilistic, config.search.variableElimination, true, new SubsetPreparation(region), { deadline, shouldStop, broad: true, selectedStrategy: selected.name, onProgress: () => report() }, caches.broadStrategyPicker)).gates
+					: await structuralRewrite(selected.name as ReturnType<typeof structuralChoices>[number], region, deadline, shouldStop)
 				report()
-				if (next) { activity.improvements++; const result = [...input.slice(0, start), ...next, ...input.slice(end)]; report(result); return result }
+				if (next && next.length < region.length) { activity.improvements++; const result = [...input.slice(0, start), ...next, ...input.slice(end)]; report(result); return result }
 			}
 		}
 		if (!config.search.strategyAdaptive && (config.synthesis.affine || config.synthesis.quadratic)) {
@@ -57,7 +59,7 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 		for (let slice = region.length; slice >= config.search.sliceMinimum; slice = Math.floor(slice / 2)) {
 			if (stopped()) break
 			activity.passes++; activity.checks++
-			const next = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, slice, config.search.probabilistic, config.search.variableElimination, true, preparation, { deadline, shouldStop, broad: true }, caches.broadStrategyPicker)
+			const next = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, slice, config.search.probabilistic, config.search.variableElimination, true, preparation, { deadline, shouldStop, broad: true, onProgress: () => report() }, caches.broadStrategyPicker)
 			report()
 			if (next.changed && next.gates.length < region.length) {
 				activity.improvements++

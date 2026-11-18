@@ -49,6 +49,7 @@
     "maximumWires": 64
   },
   "search": {
+    "dependencyCuts": true,
     "strategyAdaptive": true,
     "strategyExplorationProbability": 0.2,
     "strategyDecayHalfLifeSeconds": 300,

@@ -1,4 +1,5 @@
 import { AdaptiveStrategyPicker } from './strategy-picker.js'
+import { searchDependencyCuts } from './dependency-cuts.js'
 import { setImmediate as yieldToCoordinator, setTimeout as waitForWork } from 'node:timers/promises'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
@@ -341,6 +342,7 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 }
 
 const adaptiveFailureCaches = new WeakMap<AdaptiveStrategyPicker, Map<string, LimitedMap<string, boolean>>>()
+const dependencySearches = new WeakMap<object, { picker: AdaptiveStrategyPicker, processed: LimitedMap<string, boolean>, offset: number }>()
 
 export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, lookup = true, preparation = new SubsetPreparation(originalGates), synthesisBudget?: SynthesisBudget, strategyPicker?: AdaptiveStrategyPicker): Promise<{ gates: Gate[], changed: boolean }> => {
 	const attemptStarted = performance.now()
@@ -360,13 +362,14 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		...(smallEligible && config.synthesis.equalitySaturation ? ['equality-saturation'] : []),
 	]
 	const available = [
+		...(config.search.dependencyCuts && synthesisBudget?.broad && !synthesisBudget.dependencyRegion ? [{ name: 'dependency-cuts' }] : []),
 		...(config.synthesis.templates ? [{ name: 'templates' }] : []),
 		...(findUselessVarsSetting && sliceSize > 2 ? [{ name: 'variables' }] : []),
 		...(lookup ? [{ name: 'rainbow' }] : []),
 		...synthesisNames.map(name => ({ name })),
 		...(synthesisBudget?.broad && (config.synthesis.affine || config.synthesis.quadratic) ? [{ name: 'symbolic' }] : []),
 	]
-	const selected = config.search.strategyAdaptive ? strategyPicker?.pick(available)?.name : undefined
+	const selected = synthesisBudget?.selectedStrategy ?? (config.search.strategyAdaptive || synthesisBudget?.dependencyRegion ? strategyPicker?.pick(available)?.name : undefined)
 	if (strategyPicker && config.search.strategyAdaptive && !selected) return { gates: originalGates, changed: false }
 	const runTemplates = selected === undefined || selected === 'templates'
 	const runSynthesis = selected === undefined || synthesisNames.includes(selected)
@@ -381,8 +384,30 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	if (selected !== undefined) { findUselessVarsSetting &&= selected === 'variables'; lookup &&= selected === 'rainbow' }
 	const finish = (result: { gates: Gate[], changed: boolean }) => {
 		if (result.changed && config.synthesis.templates) templates.learn(originalGates, result.gates)
-		if (selected) strategyPicker!.observe(selected, originalGates.length - result.gates.length, performance.now() - attemptStarted)
+		if (selected) strategyPicker?.observe(selected, originalGates.length - result.gates.length, performance.now() - attemptStarted)
 		return result
+	}
+	if (selected === 'dependency-cuts') {
+		const key = strategyPicker ?? ioIdentifierCache
+		let state = dependencySearches.get(key)
+		if (!state) {
+			state = { picker: new AdaptiveStrategyPicker(['rainbow', 'templates', 'variables', ...structuralNames, 'symbolic', 'gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions), processed: new LimitedMap(config.cache.processedEntries), offset: 0 }
+			dependencySearches.set(key, state)
+		}
+		const deadline = synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000
+		let lastProgress = performance.now()
+		const stopped = () => {
+			if (performance.now() - lastProgress >= config.timing.workerReportSeconds * 1000) { lastProgress = performance.now(); synthesisBudget?.onProgress?.() }
+			return performance.now() >= deadline || synthesisBudget?.shouldStop?.() === true
+		}
+		const stats = { regions: 0, solverMs: 0 }
+		const result = await searchDependencyCuts(originalGates, stopped, async cut => {
+			const next = await massOptimizeStep(tables, ioIdentifierCache, state!.processed, cut.gates, cut.gates.length, useProbabilistically, config.search.variableElimination, true, new SubsetPreparation(cut.gates), { deadline, shouldStop: stopped, broad: true, dependencyRegion: true }, state!.picker)
+			return next.changed ? next.gates : undefined
+		}, state.offset++, stats)
+		// Toolkit calls have their own timings; count only cut-index overhead here.
+		recordStrategy('dependency-cuts', { global: true }, attemptStarted + stats.solverMs, originalGates.length, result?.length ?? originalGates.length, result !== undefined)
+		return finish({ gates: result ?? originalGates, changed: result !== undefined })
 	}
 	if (selected === 'symbolic') {
 		const result = wholeCircuitAffineSearch(originalGates, Math.max(0, (synthesisBudget?.deadline ?? performance.now()) - performance.now()), () => synthesisBudget?.shouldStop?.() === true)
@@ -653,7 +678,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 const pickerOptions = () => ({ enabled: config.search.strategyAdaptive, exploration: config.search.strategyExplorationProbability, halfLifeSeconds: config.search.strategyDecayHalfLifeSeconds })
 export const createOptimizerCaches = () => ({
 	strategyPicker: new AdaptiveStrategyPicker(['templates', 'variables', 'rainbow', 'gf2-affine', 'quadratic', ...structuralNames, 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions),
-	broadStrategyPicker: new AdaptiveStrategyPicker([...structuralNames, 'symbolic', 'templates', 'variables', 'rainbow', 'gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions),
+	broadStrategyPicker: new AdaptiveStrategyPicker([...structuralNames, 'dependency-cuts', 'symbolic', 'templates', 'variables', 'rainbow', 'gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], pickerOptions),
 	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(config.cache.lookupEntries, config.cache.lookupPolicy),
 	processedGatesCache: new LimitedMap<string, boolean>(config.cache.processedEntries),
 	arms: createSearchArms(config.search.searchArms, config.search.subsetMinimum, config.search.subsetMaximum, config.search.sliceMinimum, config.search.sliceMaximum),
