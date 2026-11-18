@@ -80,25 +80,50 @@ export class IncrementalGraph {
 			}
 		}
 	}
-	/** Access-list edits change adjacent target users. Write edits additionally
-	 * change control dependencies throughout the neighboring write interval. */
-	private collectAffected(id: number, affected: Set<number>) {
-		const record = this.records.get(id)!
-		const position = this.order.indexOf(id)!
-		for (const wire of new Set(record.wires)) {
-			for (const future of [false, true]) {
-				const next = this.neighbor(this.accesses.get(wire), position, future)
-				if (next !== undefined) affected.add(next)
+	/** Access-list edits affect adjacent target users. Writes additionally
+	 * affect control dependencies between the surrounding writes. */
+	private collectAffected(ids: number[], affected: Set<number>) {
+		const ranges = new Map<number, [number, number][]>()
+		for (const id of ids) {
+			const { gate, wires } = this.records.get(id)!
+			const position = this.order.indexOf(id)!
+			for (let i = 0; i < wires.length; i++) {
+				const wire = wires[i]
+				if (wires.indexOf(wire) !== i) continue
+				const accesses = this.accesses.get(wire)
+				const before = this.neighbor(accesses, position, false)
+				const after = this.neighbor(accesses, position, true)
+				if (before !== undefined) affected.add(before)
+				if (after !== undefined) affected.add(after)
 			}
-			if (wire !== record.gate.target) continue
+			const wire = gate.target
 			const before = this.neighbor(this.writes.get(wire), position, false)
 			const after = this.neighbor(this.writes.get(wire), position, true)
-			const low = before === undefined ? -1 : this.order.indexOf(before)!
-			const high = after === undefined ? this.order.length : this.order.indexOf(after)!
+			const low = before === undefined ? 0 : this.order.indexOf(before)!
+			const high = after === undefined ? this.order.length : this.order.indexOf(after)! + 1
+			const intervals = ranges.get(wire)
+			if (intervals) intervals.push([low, high])
+			else ranges.set(wire, [[low, high]])
+		}
+		for (const [wire, intervals] of ranges) {
 			const list = this.accesses.get(wire) ?? []
-			let start = 0, end = list.length
-			while (start < end) { const mid = (start + end) >>> 1; if (this.order.indexOf(list[mid])! < low) start = mid + 1; else end = mid }
-			for (let i = start; i < list.length && this.order.indexOf(list[i])! <= high; i++) affected.add(list[i])
+			const lowerBound = (position: number) => {
+				let low = 0, high = list.length
+				while (low < high) {
+					const mid = (low + high) >>> 1
+					if (this.order.indexOf(list[mid])! < position) low = mid + 1
+					else high = mid
+				}
+				return low
+			}
+			intervals.sort((a, b) => a[0] - b[0])
+			let coveredThrough = 0
+			for (const [low, high] of intervals) {
+				if (high <= coveredThrough) continue
+				const end = lowerBound(high)
+				for (let i = lowerBound(Math.max(low, coveredThrough)); i < end; i++) affected.add(list[i])
+				coveredThrough = high
+			}
 		}
 	}
 
@@ -106,7 +131,7 @@ export class IncrementalGraph {
 		const oldIds = selected.map(index => this.order.at(index))
 		const touched = new Set([...oldIds.flatMap(id => this.records.get(id)!.wires), ...replacement.flatMap(getVars)])
 		const affected = new Set<number>()
-		for (const id of oldIds) this.collectAffected(id, affected)
+		this.collectAffected(oldIds, affected)
 		const newIds = replacement.map(gate => this.add(gate))
 		this.order.replace(selected, newIds)
 		for (const id of oldIds) this.records.delete(id)
@@ -124,7 +149,8 @@ export class IncrementalGraph {
 			}
 			merge(this.accesses, false); merge(this.writes, true)
 		}
-		for (const id of newIds) { affected.add(id); this.collectAffected(id, affected) }
+		for (const id of newIds) affected.add(id)
+		this.collectAffected(newIds, affected)
 		this.recompute(affected)
 	}
 	context(): DependencyContext {
