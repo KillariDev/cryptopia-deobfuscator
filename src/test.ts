@@ -366,16 +366,17 @@ try {
 	assert.match(missingInputs.stderr, /Usage:/)
 } finally { await rm(configDir, { recursive: true, force: true }) }
 
-const { IncrementalEvaluator } = await import('./packed.js')
+const { IncrementalEvaluator, PackedInputs } = await import('./packed.js')
 const { RewriteCache, normalizeWindow, SearchScheduler, balancedChunks, improving } = await import('./search.js')
 const { isReplacementSimpler, findConvexSubsets } = await import('./utils.js')
 for (const wires of [1, 4, 8]) {
 	const combinations = generateCombinations(wires)
 	for (const count of [0, 1, 17, 32, 33, 64, 202]) {
 		const inputs = Array.from({ length: count }, (_, i) => combinations[i % combinations.length])
+		const packedInputs = new PackedInputs(inputs)
 		const reference = makeGates(45, wires)
 		for (const bytes of [0, 64, 8192]) {
-			const evaluator = new IncrementalEvaluator(reference, inputs, bytes, 4)
+			const evaluator = new IncrementalEvaluator(reference, bytes === 0 ? inputs : packedInputs, bytes, 4)
 			assert.deepEqual(evaluator.unpack(), inputs.map(input => evalCircuit(reference, input)))
 			assert.ok([...evaluator.checkpoints.values()].reduce((sum, state) => sum + state.byteLength, 0) <= bytes)
 			const variants = [reference, [], reference.slice(1), reference.slice(0, -1), [...reference, ...makeGates(1, wires)], [...reference.slice(0, 30), ...makeGates(1, wires), ...reference.slice(31)]]

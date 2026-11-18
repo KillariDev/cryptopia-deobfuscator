@@ -18,7 +18,7 @@ import { LazyCircuit } from './circuit-edit.js'
 import { IncrementalGraph } from './incremental-graph.js'
 import { WindowFingerprints } from './fingerprints.js'
 import { templates, advancedRewrite, wholeCircuitAffineSearch, SynthesisBudget } from './strategies.js'
-import { IncrementalEvaluator } from './packed.js'
+import { IncrementalEvaluator, PackedInputs } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, createSearchArms, independentComponents } from './search.js'
 import { config, minimumBroadGates } from './config.js'
 import { formatCoordinatorPhase, SummaryThrottle, verboseLogging, formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
@@ -116,11 +116,7 @@ const removeNonTargetVariable = (gates: Gate[], variable: number) => {
 export const areCircuitsProbabilisticallyTheSame = (cachedOutputs: boolean[][], oldCircuit: Gate[], newCircuit: Gate[], attempts: number, nVariables: number) => {
 	if (attempts < 0 || attempts > INPUTS || !Number.isInteger(attempts)) throw new Error('Invalid attempt count')
 	if (attempts === 0) return true
-	let inputs = randomInputSets.get(nVariables)
-	if (!inputs) {
-		inputs = randomInputs.map(input => input.slice(0, nVariables))
-		randomInputSets.set(nVariables, inputs)
-	}
+	const inputs = sampledInputs(nVariables)
 	// Reject most bad candidates with one scalar evaluation before batching.
 	if (cachedOutputs[0] === undefined) cachedOutputs[0] = evalCircuit(oldCircuit, inputs[0])
 	if (!areBooleanArraysEqual(cachedOutputs[0], evalCircuit(newCircuit, inputs[0]))) return false
@@ -162,16 +158,71 @@ for (let wires = 2; wires < MAX_DETERMINISTIC_USELESS_VARS; wires++) {
 const INPUTS = config.validation.probabilisticInputs
 const randomInputs = generateNRandomBooleanArray(INPUTS, config.validation.maximumWires)
 const randomInputSets = new Map<number, boolean[][]>()
+const packedVariableSamples = new Map<number, PackedInputs>()
+function sampledInputs(nVariables: number) {
+	let inputs = randomInputSets.get(nVariables)
+	if (!inputs) {
+		inputs = randomInputs.map(input => input.slice(0, nVariables))
+		randomInputSets.set(nVariables, inputs)
+	}
+	return inputs
+}
+
+/** The original region and samples are fixed for one variable search. */
+function createVariableSampleCheck(original: Gate[], nVariables: number) {
+	const inputs = sampledInputs(nVariables)
+	let firstOutput: boolean[] | undefined
+	let evaluator: IncrementalEvaluator | undefined
+	return (candidate: Gate[]) => {
+		if (!inputs.length) return true
+		firstOutput ??= evalCircuit(original, inputs[0])
+		if (!areBooleanArraysEqual(firstOutput, evalCircuit(candidate, inputs[0]))) return false
+		if (inputs.length === 1) return true
+		if (!evaluator) {
+			let packed = packedVariableSamples.get(nVariables)
+			if (!packed) {
+				packed = new PackedInputs(inputs.slice(1))
+				packedVariableSamples.set(nVariables, packed)
+			}
+			evaluator = new IncrementalEvaluator(original, packed, config.search.incrementalEvaluation ? config.search.prefixCacheBytes : 0, config.search.prefixStride)
+		}
+		return evaluator.equivalent(candidate)
+	}
+}
+
+/** Raw operand positions preserve substitutions on unused operands too.
+ * Active controls separately determine whether to try the control-only rewrite. */
+function indexVariableUses(gates: Gate[], variableCount: number) {
+	const uses = Array.from({ length: variableCount }, () => ({ all: [] as number[], controls: [] as number[], active: false, activeControl: false }))
+	for (let i = 0; i < gates.length; i++) {
+		const gate = gates[i]
+		uses[gate.a]?.all.push(i)
+		uses[gate.a]?.controls.push(i)
+		if (gate.b !== gate.a) {
+			uses[gate.b]?.all.push(i)
+			uses[gate.b]?.controls.push(i)
+		}
+		if (gate.target !== gate.a && gate.target !== gate.b) uses[gate.target]?.all.push(i)
+		const wires = getVars(gate)
+		for (let j = 0; j < wires.length; j++) {
+			const use = uses[wires[j]]
+			use.active = true
+			if (j > 0) use.activeControl = true
+		}
+	}
+	return uses
+}
+
 const packedReferences = new WeakMap<boolean[][], { evaluator: IncrementalEvaluator, signature: string, attempts: number, wires: number }>()
 const normalizedRewrites = new RewriteCache(config.search.normalizedCacheEntries)
 const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGates: Gate[], shouldStop: () => boolean = () => false) => {
 	if (shouldStop()) return undefined
 	const nVariables = variableIndexMapping.length
-	const cachedOutputs: boolean[][] = []
 	const canImprove = improving(mappedGates)
 	if (nVariables < MAX_DETERMINISTIC_USELESS_VARS) return undefined // no need to do this approach for less than 8 vars as we have exact way already
 	const proveEquivalent = createPolynomialEquivalenceChecker(mappedGates, nVariables, config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, shouldStop)
-	const accepted = (candidate: Gate[]) => areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, candidate, INPUTS, nVariables) && proveEquivalent(candidate) === true
+	const sampleMatch = createVariableSampleCheck(mappedGates, nVariables)
+	const accepted = (candidate: Gate[]) => sampleMatch(candidate) && proveEquivalent(candidate) === true
 	if (accepted([])) return []
 	
 	const combined = combineGates(mappedGates, shouldStop)
@@ -181,16 +232,15 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 		}
 	}
 	
+	const uses = indexVariableUses(mappedGates, nVariables)
+	let simplified: Gate[] | undefined
 	for (let variableIndex = 0; variableIndex < nVariables; variableIndex++) {
 		if (shouldStop()) return undefined
 		const newRemovedCircuit = removeVariable(mappedGates, variableIndex)
 		if (canImprove(newRemovedCircuit) && accepted(newRemovedCircuit)) {
 			return reverseMapCircuit(newRemovedCircuit, variableIndexMapping)
 		}
-		const hasVariableIndexAsNontarget = mappedGates.find((x) => {
-			const vars = getVars(x)
-			return vars.slice(1).includes(variableIndex)
-		}) !== undefined
+		const { all, controls, active, activeControl: hasVariableIndexAsNontarget } = uses[variableIndex]
 		if (hasVariableIndexAsNontarget) {
 			const newRemovedCircuitNontarget = removeNonTargetVariable(mappedGates, variableIndex)
 			if (canImprove(newRemovedCircuitNontarget) && accepted(newRemovedCircuitNontarget)) {
@@ -200,14 +250,19 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 		for (let newVar = 0; newVar < nVariables; newVar++) {
 			if (shouldStop()) return undefined
 			if (variableIndexMapping[variableIndex] <= variableIndexMapping[newVar]) continue
-			const newCircuit = mappedGates.map((gate) => replaceVar(gate, variableIndex, newVar))
-			if (canImprove(newCircuit) && accepted(newCircuit)) {
-				return reverseMapCircuit(newCircuit, variableIndexMapping)
+			// Whole-wire replacement preserves gate/read counts. It only improves
+			// the cost when two distinct active wires merge.
+			if (active && uses[newVar].active) {
+				const newCircuit = mappedGates.slice()
+				for (const index of all) newCircuit[index] = replaceVar(mappedGates[index], variableIndex, newVar)
+				if (accepted(newCircuit)) return reverseMapCircuit(newCircuit, variableIndexMapping)
 			}
 			
 			if (hasVariableIndexAsNontarget) {
-				const newCircuit2 = mappedGates.map((gate) => replaceNonTargetVar(gate, variableIndex, newVar))
-				if (canImprove(newCircuit2) && accepted(newCircuit2)) {
+				simplified ??= mappedGates.map(simplifyGate)
+				const newCircuit2 = simplified.slice()
+				for (const index of controls) newCircuit2[index] = replaceNonTargetVar(mappedGates[index], variableIndex, newVar)
+				if (sampleMatch(newCircuit2) && canImprove(newCircuit2) && proveEquivalent(newCircuit2) === true) {
 					return reverseMapCircuit(newCircuit2, variableIndexMapping)
 				}
 			}

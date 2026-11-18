@@ -2,17 +2,13 @@ import { Gate } from './types.js'
 
 const sameGate = (a: Gate, b: Gate) => a.a === b.a && a.b === b.b && a.target === b.target && a.gate_i === b.gate_i
 
-/** Packed inputs remain packed throughout candidate comparison. */
-export class IncrementalEvaluator {
-	readonly reference: Uint32Array
-	readonly gates: Gate[]
-	readonly checkpoints = new Map<number, Uint32Array>()
+/** Immutable input batches can be reused across reference circuits. */
+export class PackedInputs {
 	readonly wires: number
 	readonly batches: number
-	private initial: Uint32Array
-	private masks: Uint32Array
-	constructor(gates: Gate[], readonly inputs: boolean[][], prefixBytes: number, stride: number) {
-		this.gates = gates.map(gate => ({ ...gate }))
+	readonly initial: Uint32Array
+	readonly masks: Uint32Array
+	constructor(readonly inputs: boolean[][]) {
 		this.wires = inputs[0]?.length ?? 0
 		this.batches = Math.ceil(inputs.length / 32)
 		this.initial = new Uint32Array(this.batches * this.wires)
@@ -23,6 +19,27 @@ export class IncrementalEvaluator {
 		inputs.forEach((input, i) => input.forEach((value, wire) => {
 			if (value) this.initial[Math.floor(i / 32) * this.wires + wire] |= 1 << (i % 32)
 		}))
+	}
+}
+
+/** Packed inputs remain packed throughout candidate comparison. */
+export class IncrementalEvaluator {
+	readonly reference: Uint32Array
+	readonly gates: Gate[]
+	readonly checkpoints = new Map<number, Uint32Array>()
+	readonly inputs: boolean[][]
+	readonly wires: number
+	readonly batches: number
+	private initial: Uint32Array
+	private masks: Uint32Array
+	constructor(gates: Gate[], inputs: boolean[][] | PackedInputs, prefixBytes: number, stride: number) {
+		this.gates = gates.map(gate => ({ ...gate }))
+		const packed = inputs instanceof PackedInputs ? inputs : new PackedInputs(inputs)
+		this.inputs = packed.inputs
+		this.wires = packed.wires
+		this.batches = packed.batches
+		this.initial = packed.initial
+		this.masks = packed.masks
 		const capacity = this.initial.byteLength ? Math.floor(prefixBytes / this.initial.byteLength) : 0
 		const spacing = Math.max(stride, Math.ceil(gates.length / Math.max(1, capacity)))
 		const state = this.initial.slice()

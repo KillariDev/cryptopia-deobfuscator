@@ -1,6 +1,6 @@
 import { emitQuadraticMap } from './polynomial-synthesis.js'
 import { Gate } from './types.js'
-import { evalGate, getVars, simplifyGate } from './utils.js'
+import { evalGate, getVars } from './utils.js'
 import { simplifyAffineRegions, synthesizeAffineMap } from './affine.js'
 
 // Algebraic normal form f(a,b) = c XOR alpha*a XOR beta*b XOR gamma*a*b.
@@ -11,7 +11,13 @@ const coefficients = Array.from({ length: 16 }, (_, gate) => {
 	const ab = Number(evalGate(gate, true, true, false)) ^ c ^ a ^ b
 	return { c, a, b, ab }
 })
-const nonlinear = (gate: Gate) => coefficients[simplifyGate(gate).gate_i].ab !== 0
+const sameControlCoefficients = coefficients.map(({ c }, gate) => ({
+	c,
+	a: Number(evalGate(gate, true, true, false)) ^ c,
+	b: 0,
+	ab: 0,
+}))
+const nonlinear = (gate: Gate) => gate.a !== gate.b && coefficients[gate.gate_i].ab !== 0
 
 function composePolynomials(input: Gate[], wires: number[], maximumTerms: number, stopped: () => boolean, spend: () => boolean) {
 	const indices = new Map(wires.map((wire, i) => [wire, i]))
@@ -20,24 +26,33 @@ function composePolynomials(input: Gate[], wires: number[], maximumTerms: number
 	const rows = wires.map((_, i) => new Set([1n << BigInt(i)]))
 	let terms = rows.length
 	if (terms > maximumTerms) return undefined
-	const toggle = (row: Set<bigint>, monomial: bigint) => row.has(monomial) ? row.delete(monomial) : row.add(monomial)
+	const toggle = (row: Set<bigint>, monomial: bigint) => {
+		if (!row.delete(monomial)) row.add(monomial)
+	}
 	for (let index = 0; index < input.length; index++) {
 		if (stopped()) return undefined
-		const gate = input[index], rule = coefficients[gate.gate_i]
+		const gate = input[index]
+		// For one repeated control, evaluate the diagonal of the truth table.
+		// Boolean p*p is p, so multiplying the same ANF by itself is unnecessary.
+		const rule = (gate.a === gate.b ? sameControlCoefficients : coefficients)[gate.gate_i]
 		const target = indices.get(gate.target)!
-		const result = new Set(rows[target])
+		const leftIndex = rule.a || rule.ab ? indices.get(gate.a)! : -1
+		const rightIndex = rule.b || rule.ab ? indices.get(gate.b)! : -1
 		const oldSize = rows[target].size
+		// Preserve the pre-gate polynomial when a control reads the target.
+		const result = leftIndex === target || rightIndex === target ? new Set(rows[target]) : rows[target]
 		if (rule.c) toggle(result, 0n)
-		for (const control of [rule.a ? gate.a : undefined, rule.b ? gate.b : undefined]) {
-			if (control === undefined) continue
-			for (const monomial of rows[indices.get(control)!]) {
+		for (let operand = 0; operand < 2; operand++) {
+			const control = operand === 0 ? (rule.a ? leftIndex : -1) : (rule.b ? rightIndex : -1)
+			if (control === -1) continue
+			for (const monomial of rows[control]) {
 				if (spend()) return undefined
 				toggle(result, monomial)
 				if (terms - oldSize + result.size > maximumTerms) return undefined
 			}
 		}
 		if (rule.ab) {
-			for (const left of rows[indices.get(gate.a)!]) for (const right of rows[indices.get(gate.b)!]) {
+			for (const left of rows[leftIndex]) for (const right of rows[rightIndex]) {
 				if (spend()) return undefined
 				toggle(result, left | right)
 				if (terms - oldSize + result.size > maximumTerms) return undefined
@@ -71,7 +86,16 @@ export function createPolynomialEquivalenceChecker(input: Gate[], nVariables: nu
 		}
 		const actual = composePolynomials(candidate, wires, maximumTerms, shouldStop, spend)
 		if (!actual) return undefined
-		return actual.every((row, i) => row.size === expected![i].size && [...row].every(term => expected![i].has(term)))
+		let checked = 0
+		for (let i = 0; i < actual.length; i++) {
+			const row = actual[i], reference = expected[i]
+			if (row.size !== reference.size) return false
+			for (const term of row) {
+				if ((checked++ & 255) === 0 && shouldStop()) return undefined
+				if (!reference.has(term)) return false
+			}
+		}
+		return true
 	}
 }
 
