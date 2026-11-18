@@ -1,5 +1,5 @@
 import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
-import { formatStrategyActivity } from './logging.js'
+import { StrategySummary, formatStrategyActivity } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
 import { AdaptiveConcurrency, memoryPressure } from './concurrency.js'
@@ -733,19 +733,34 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	let currentGates = gates.slice()
 	const wireCosts = new Map<number, number>()
 	let savedGateCount: number | undefined
+	const strategySummary = new StrategySummary()
+	let nextStrategyJob = 0
 	const wholeAffine = new PeriodicStrategy(config.synthesis.affineWholeCircuitSeconds * 1000)
 	const summaryThrottle = new SummaryThrottle(config.timing.summarySeconds * 1000)
 	try {
 		while(currentGates.length > 0) {
 			if (config.synthesis.affine && wholeAffine.take(performance.now())) {
-				const result = await pool.run(currentGates, inputCircuit.wire_count, undefined, undefined, config.synthesis.affineWholeCircuitMinutes * 60_000, false, 'affine')
+				const job = nextStrategyJob++, started = performance.now()
+				const timer = setInterval(() => {
+					if (summaryThrottle.allow(performance.now())) {
+						logTimed(`Searching: GF2 broad | ${Math.floor((performance.now() - started) / 1000)}s elapsed | ${config.synthesis.affineWholeCircuitMinutes}m budget`)
+					}
+				}, config.timing.summarySeconds * 1000)
+				let result: Gate[]
+				try {
+					result = await pool.run(currentGates, inputCircuit.wire_count, (_, activity) => strategySummary.observe(job, activity?.strategies), undefined, config.synthesis.affineWholeCircuitMinutes * 60_000, false, 'affine')
+				} finally { clearInterval(timer); strategySummary.finish(job) }
 				if (result.length < currentGates.length) {
 					save([paths.progress(result.length), paths.latest], result, inputCircuit.wire_count, originalGates)
 					currentGates = result
 					savedGateCount = result.length
 					logVerbose(`Whole-circuit GF(2) search saved ${result.length} gates`)
 				}
-				if (!currentGates.length) break
+				if (!currentGates.length) {
+					logTimed('Gates: 0 | Verified identity checkpoint saved')
+					if (!verboseLogging()) logTimed(strategySummary.flush())
+					break
+				}
 			}
 			currentGates = gateSimplifier(currentGates)
 			let lastIterationTime = performance.now()
@@ -778,7 +793,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				const snapshot = roundSearchResult(restart ? [restart.best, ...snapshots] : snapshots, wholeCircuit)
 				checkpoint.saveIfReduced(snapshot)
 				if (verboseLogging()) logVerbose(formatStrategyActivity(statuses))
-				if (summaryThrottle.allow(performance.now(), verboseLogging() || snapshot.length === 0)) logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate: snapshot.length, saved: savedGateCount, statuses, elapsedMs: elapsed }))
+				if (summaryThrottle.allow(performance.now(), verboseLogging() || snapshot.length === 0)) {
+					logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate: snapshot.length, saved: savedGateCount, statuses, elapsedMs: elapsed }))
+					if (!verboseLogging()) logTimed(strategySummary.flush())
+				}
 				if ((elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, snapshot.length)) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
 					logVerbose(`Round time target reached; finishing active jobs and returning queued jobs unchanged.`)
@@ -794,8 +812,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 					const workerFile = paths.worker(index)
 					writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
 					let executionStarted: number | undefined
+					const strategyJob = nextStrategyJob++
 					const result = await pool.run(dataChunk, inputCircuit.wire_count, (count, activity, snapshot) => {
 							executionStarted ??= performance.now()
+							strategySummary.observe(strategyJob, activity?.strategies)
 							if (snapshot) {
 								snapshots[index] = snapshot
 								try { restart?.accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
@@ -803,6 +823,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 							candidateCounts[index] = count
 							statuses[index] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
 						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, wholeCircuit)
+					strategySummary.finish(strategyJob)
 					if (executionStarted !== undefined) {
 						const cost = (performance.now() - executionStarted) / Math.max(1, dataChunk.length)
 						for (const wire of new Set(dataChunk.flatMap(getVars))) wireCosts.set(wire, ((wireCosts.get(wire) ?? cost) + cost) / 2)

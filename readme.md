@@ -204,9 +204,12 @@ Table generation shows one completion percentage and one ETA. Before all layer
 sizes are known, these are estimates. The ETA follows recent measured throughput;
 it cannot guarantee a finish time.
 
-With `logging.verbose: false`, optimization prints one compact status line per
+With `logging.verbose: false`, optimization prints a compact status and one short strategy/timing line per
 `timing.summarySeconds` interval, even across rapid restarts. Checkpoints are still
-saved immediately; individual save/restart messages, strategy breakdowns and the
+saved immediately. Strategy summaries aggregate completed attempts since the last
+summary across rapid restarts; times are summed per-strategy worker elapsed time,
+not wall-clock time or CPU time. Broad GF(2) jobs also show elapsed time while
+running. Individual save/restart messages, detailed strategy breakdowns and the
 full startup settings dump are only printed in verbose mode.
 
 With `logging.verbose: true`, additional reports show CPU, memory, SQL costs,

@@ -105,3 +105,31 @@ export function formatStrategyActivity(statuses: WorkerStatus[]) {
 	}
 	return 'Strategies this round: ' + ([...totals.values()].sort((a, b) => b.gatesRemoved - a.gatesRemoved).map(stat => `${stat.strategy} ${stat.settings}: ${stat.gatesRemoved} gates removed, ${stat.rewrites}/${stat.attempts} improving attempts, ${(stat.elapsedMs / 1000).toFixed(3)} worker-seconds`).join('; ') || 'awaiting worker reports') + '.'
 }
+
+/** Interval deltas from cumulative job reports, retained across round restarts. */
+export class StrategySummary {
+	private jobs = new Map<number, Map<string, { attempts: number, elapsedMs: number }>>()
+	private totals = new Map<string, { attempts: number, elapsedMs: number }>()
+	observe(job: number, stats: StrategyStat[] = []) {
+		let previous = this.jobs.get(job)
+		if (!previous) { previous = new Map(); this.jobs.set(job, previous) }
+		for (const stat of stats) {
+			const key = `${stat.strategy}:${stat.settings}`
+			const old = previous.get(key) ?? { attempts: 0, elapsedMs: 0 }
+			const attempts = Math.max(0, stat.attempts - old.attempts), elapsedMs = Math.max(0, stat.elapsedMs - old.elapsedMs)
+			previous.set(key, { attempts: stat.attempts, elapsedMs: stat.elapsedMs })
+			if (!attempts && !elapsedMs) continue
+			const total = this.totals.get(stat.strategy) ?? { attempts: 0, elapsedMs: 0 }
+			total.attempts += attempts; total.elapsedMs += elapsedMs
+			this.totals.set(stat.strategy, total)
+		}
+	}
+	finish(job: number) { this.jobs.delete(job) }
+	flush() {
+		const labels: Record<string, string> = { 'gate-simplification': 'simplify', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', 'gf2-affine': 'GF2 local', 'gf2-affine-whole': 'GF2 broad', z3: 'Z3' }
+		const parts = [...this.totals].sort((a, b) => b[1].elapsedMs - a[1].elapsedMs)
+			.map(([name, total]) => `${labels[name] ?? name} ${total.attempts}x/${(total.elapsedMs / 1000).toFixed(2)}s`)
+		this.totals.clear()
+		return parts.length ? `Tried (worker time): ${parts.join(', ')}` : 'Tried: no new strategy timings reported'
+	}
+}

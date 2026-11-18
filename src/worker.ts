@@ -1,3 +1,4 @@
+import { resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { config } from './config.js'
 import { templates, wholeCircuitAffineSearch } from './strategies.js'
 import { TemplateRule } from './templates.js'
@@ -17,9 +18,10 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, solver = 
 			return
 		}
 		if (solver === 'affine') {
+			resetStrategyStats()
 			const stop = stopSignal ? new Int32Array(stopSignal) : undefined
 			const result = wholeCircuitAffineSearch(gates, budgetMs, () => stop !== undefined && Atomics.load(stop, 0) !== 0)
-			parentPort!.postMessage({ gates: result })
+			parentPort!.postMessage({ gates: result, activity: { passes: 1, subsets: 1, checks: 1, improvements: Number(result.length < gates.length), stage: 'verifying', strategies: strategySnapshot() } })
 			return
 		}
 		// Open once per persistent worker and wait for every connection to be ready.

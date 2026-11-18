@@ -988,3 +988,5 @@ await import('./round-search-test.js')
 await import('./affine-test.js')
 
 await import('./symbolic-affine-test.js')
+
+await import('./strategy-summary-test.js')
