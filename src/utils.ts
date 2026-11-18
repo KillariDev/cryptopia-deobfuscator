@@ -551,9 +551,19 @@ export function* findConvexSubsets(N: number, gates: GateSequence, preferredWire
 		return array
 	  }
 
-	const revesedNodes = shuffle(nodes.slice())
-	if (preferredWires?.size) revesedNodes.sort((a, b) => Number(getVars(gateAt(gates, b.lineNumber)).some(wire => preferredWires.has(wire))) - Number(getVars(gateAt(gates, a.lineNumber)).some(wire => preferredWires.has(wire))))
-	for (const node of revesedNodes) {
+	const shuffledNodes = shuffle(nodes.slice())
+	const preferred: DependencyNode[] = []
+	if (preferredWires?.size) {
+		// Stable partition preserves shuffled order within both groups.
+		let remaining = 0
+		for (const node of shuffledNodes) {
+			if (stopped()) return
+			if (getVars(gateAt(gates, node.lineNumber)).some(wire => preferredWires.has(wire))) preferred.push(node)
+			else shuffledNodes[remaining++] = node
+		}
+		shuffledNodes.length = remaining
+	}
+	for (const group of [preferred, shuffledNodes]) for (const node of group) {
 		if (stopped()) return
 		if (visited.has(node.lineNumber)) continue
 		const currentSubset = dependencySort(dependantMap, node, N, nodes, gates, access, stopped)

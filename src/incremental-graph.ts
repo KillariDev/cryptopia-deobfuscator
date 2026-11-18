@@ -2,9 +2,9 @@ import { Gate, DependencyNode } from './types.js'
 import { getVars, DependencyContext } from './utils.js'
 import { ChunkedSequence } from './chunked-sequence.js'
 
-type WireEdit = { firstRemoval: number, incoming: number[] }
+type WireEdit = { firstRemoval: number, lastRemoval: number, incoming: number[] }
 
-type Record = { gate: Gate, wires: number[], past: Set<number>, future?: number }
+type Record = { gate: Gate, wires: number[], past0?: number, past1?: number, past2?: number, future?: number }
 /** Edges use stable gate IDs. Only users of edited wires need edge recomputation. */
 export class IncrementalGraph {
 	private next = 0
@@ -13,15 +13,27 @@ export class IncrementalGraph {
 	private accesses = new Map<number, number[]>()
 	private writes = new Map<number, number[]>()
 	private cached?: DependencyContext
-	constructor(gates: Gate[], chunkSize = 128) {
-		this.order = new ChunkedSequence(gates.map(gate => this.add(gate)), chunkSize, true)
+	private readonly trackFuture: boolean
+	constructor(gates: Gate[], chunkSize = 128, { trackFuture = true }: { trackFuture?: boolean } = {}) {
+		this.trackFuture = trackFuture
+		for (const gate of gates) this.add(gate)
+		this.order = ChunkedSequence.consecutiveIds(gates.length, chunkSize)
 		this.initialize()
 	}
 	private add(gate: Gate) {
 		const id = this.next++
-		this.records.set(id, { gate, wires: getVars(gate), past: new Set() })
+		this.records.set(id, { gate, wires: getVars(gate), past0: undefined, past1: undefined, past2: undefined, future: undefined })
 		return id
 	}
+	// Each gate contributes at most three predecessor candidates: its target
+	// and up to two controls. Store the distinct IDs directly on the record.
+	private addPast(record: Record, id: number) {
+		if (record.past0 === undefined) record.past0 = id
+		else if (record.past0 === id || record.past1 === id) return
+		else if (record.past1 === undefined) record.past1 = id
+		else record.past2 = id
+	}
+
 	private initialize() {
 		const append = (index: Map<number, number[]>, wire: number, id: number) => {
 			const list = index.get(wire)
@@ -32,17 +44,21 @@ export class IncrementalGraph {
 			const list = index.get(wire)
 			return list?.[list.length - 1]
 		}
-		for (const [id, record] of this.records) {
+		let line = 0
+		for (const record of this.records.values()) {
+			const id = line++
 			const target = record.gate.target
 			const previous = latest(this.accesses, target)
-			if (previous !== undefined) record.past.add(previous)
+			if (previous !== undefined) this.addPast(record, previous)
 			for (let i = 1; i < record.wires.length; i++) {
 				const writer = latest(this.writes, record.wires[i])
-				if (writer !== undefined) record.past.add(writer)
+				if (writer !== undefined) this.addPast(record, writer)
 			}
 			for (const wire of record.wires) append(this.accesses, wire, id)
 			append(this.writes, target, id)
 		}
+		// Local region selection resolves future conflicts from the wire indexes.
+		if (!this.trackFuture) return
 		const nextAccess = new Map<number, number>(), nextWrite = new Map<number, number>()
 		// IDs are consecutive and in circuit order during construction.
 		for (let id = this.next - 1; id >= 0; id--) {
@@ -69,7 +85,7 @@ export class IncrementalGraph {
 			const record = this.records.get(id)
 			if (!record) continue
 			const position = this.order.indexOf(id)!
-			record.past.clear()
+			record.past0 = record.past1 = record.past2 = undefined
 			let nearest = Infinity
 			record.future = undefined
 			for (let i = 0; i < record.wires.length; i++) {
@@ -77,7 +93,8 @@ export class IncrementalGraph {
 				if (!list) continue
 				const at = this.lowerBound(list, position)
 				const previous = list[at - 1]
-				if (previous !== undefined) record.past.add(previous)
+				if (previous !== undefined) this.addPast(record, previous)
+				if (!this.trackFuture) continue
 				const next = list[list[at] === id ? at + 1 : at]
 				if (next === undefined) continue
 				const nextPosition = this.order.indexOf(next)!
@@ -133,12 +150,16 @@ export class IncrementalGraph {
 	private updateWireLists(
 		index: Map<number, number[]>, edits: Map<number, WireEdit>, removed: Set<number>,
 	) {
-		for (const [wire, { firstRemoval, incoming }] of edits) {
+		for (const [wire, { firstRemoval, lastRemoval, incoming }] of edits) {
 			const list = index.get(wire) ?? []
 			let kept = Math.min(firstRemoval, list.length)
-			for (let i = kept; i < list.length; i++) {
+			const end = Math.min(lastRemoval + 1, list.length)
+			for (let i = kept; i < end; i++) {
 				const id = list[i]
 				if (!removed.has(id)) list[kept++] = id
+			}
+			if (kept < end) {
+				for (let i = end; i < list.length; i++) list[kept++] = list[i]
 			}
 			list.length = kept
 			if (incoming.length) {
@@ -160,7 +181,7 @@ export class IncrementalGraph {
 		const editFor = (edits: Map<number, WireEdit>, wire: number) => {
 			let edit = edits.get(wire)
 			if (!edit) {
-				edit = { firstRemoval: Infinity, incoming: [] }
+				edit = { firstRemoval: Infinity, lastRemoval: -1, incoming: [] }
 				edits.set(wire, edit)
 			}
 			return edit
@@ -168,6 +189,7 @@ export class IncrementalGraph {
 		const markRemoval = (edits: Map<number, WireEdit>, wire: number, position: number) => {
 			const edit = editFor(edits, wire)
 			edit.firstRemoval = Math.min(edit.firstRemoval, position)
+			edit.lastRemoval = Math.max(edit.lastRemoval, position)
 		}
 		for (let i = 0; i < oldIds.length; i++) {
 			const { gate, wires } = this.records.get(oldIds[i])!
@@ -175,8 +197,15 @@ export class IncrementalGraph {
 			markRemoval(writeEdits, gate.target, selected[i])
 		}
 		// The lists still use the old circuit order here.
-		for (const [wire, edit] of accessEdits) edit.firstRemoval = this.lowerBound(this.accesses.get(wire)!, edit.firstRemoval)
-		for (const [wire, edit] of writeEdits) edit.firstRemoval = this.lowerBound(this.writes.get(wire)!, edit.firstRemoval)
+		const locateRemovals = (index: Map<number, number[]>, edits: Map<number, WireEdit>) => {
+			for (const [wire, edit] of edits) {
+				const list = index.get(wire)!
+				edit.firstRemoval = this.lowerBound(list, edit.firstRemoval)
+				edit.lastRemoval = this.lowerBound(list, edit.lastRemoval)
+			}
+		}
+		locateRemovals(this.accesses, accessEdits)
+		locateRemovals(this.writes, writeEdits)
 		for (const id of newIds) {
 			const { gate, wires } = this.records.get(id)!
 			for (const wire of wires) {
@@ -197,13 +226,39 @@ export class IncrementalGraph {
 	}
 	context(): DependencyContext {
 		if (this.cached) return this.cached
+		const length = this.order.length
+		const fresh = this.next === length
+		// Before the first edit, each stable ID is already its line number.
+		const ids = fresh ? this.order : [...this.order]
+		// Bound temporary storage when many stable IDs have been retired.
+		const byId = !fresh && this.next <= length * 2 ? new Uint32Array(this.next) : undefined
+		if (byId) {
+			let line = 0
+			for (const id of ids) byId[id] = line++
+		}
+		const positionOf = (id: number) => fresh ? id : byId ? byId[id] : this.order.indexOf(id)!
 		const nodes: DependencyNode[] = []
 		const dependantMap = new Map<number, number[]>()
-		for (const id of this.order) {
+		for (const id of ids) {
 			const record = this.records.get(id)!
 			const past: number[] = []
-			for (const dependency of record.past) past.push(this.order.indexOf(dependency)!)
-			past.sort((a, b) => a - b)
+			if (record.past0 !== undefined) past.push(positionOf(record.past0))
+			if (record.past1 !== undefined) past.push(positionOf(record.past1))
+			if (record.past2 !== undefined) past.push(positionOf(record.past2))
+			// At most three entries. Avoid invoking the generic array sort.
+			if (past.length > 1 && past[0] > past[1]) {
+				const first = past[0]
+				past[0] = past[1]
+				past[1] = first
+			}
+			if (past.length === 3 && past[1] > past[2]) {
+				const last = past[2]
+				past[2] = past[1]
+				if (past[0] > last) {
+					past[1] = past[0]
+					past[0] = last
+				} else past[1] = last
+			}
 			const lineNumber = nodes.length
 			for (const dependency of past) {
 				const dependants = dependantMap.get(dependency)
@@ -213,13 +268,13 @@ export class IncrementalGraph {
 			nodes.push({
 				lineNumber,
 				dependOnPastLines: past,
-				dependOnFutureLine: record.future === undefined ? -1 : this.order.indexOf(record.future)!,
+				dependOnFutureLine: record.future === undefined ? -1 : positionOf(record.future),
 			})
 		}
 		const map = (source: Map<number, number[]>) => {
 			const positions = new Map<number, number[]>()
 			for (const [wire, ids] of source) {
-				if (ids.length) positions.set(wire, ids.map(id => this.order.indexOf(id)!))
+				if (ids.length) positions.set(wire, ids.map(positionOf))
 			}
 			return positions
 		}

@@ -438,6 +438,10 @@ try {
 	Math.random = () => 0.5
 	const preferred = [...findConvexSubsets(3, gatesToBalance, new Set([0]))]
 	assert.deepEqual(preferred.map(lines => lines.join(',')).sort(), baseline.map(lines => lines.join(',')).sort())
+	// The selector partitions seeds, not the gates inside each returned region.
+	const favored = baseline.filter(lines => getVars(gatesToBalance[Math.max(...lines)]).includes(0))
+	const others = baseline.filter(lines => !getVars(gatesToBalance[Math.max(...lines)]).includes(0))
+	assert.deepEqual(preferred, [...favored, ...others])
 } finally { Math.random = savedRandom }
 console.log('Adaptive, incremental, packed, normalized-cache, pruning and balancing regressions passed')
 

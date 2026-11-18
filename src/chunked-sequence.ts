@@ -2,7 +2,24 @@ type Chunk<T> = { values: T[], start: number }
 /** Copy edited chunks, retain untouched ones, and index unique stable IDs locally. */
 export class ChunkedSequence<T> {
 	private chunks: Chunk<T>[] = []
-	private handles = new Map<T, { chunk: Chunk<T>, offset: number }>()
+	private handles = new Map<T, { chunk: Chunk<T>, offset: number } | null>()
+	private initialChunks?: Chunk<T>[]
+	private initialCount = 0
+	/** Initial IDs can locate their own chunk until an edit moves or removes them. */
+	static consecutiveIds(count: number, chunkSize: number): ChunkedSequence<number> {
+		if (!Number.isSafeInteger(count) || count < 0 || count > 0xffffffff) throw new Error('Invalid stable ID count')
+		const sequence = new ChunkedSequence<number>([], chunkSize, true)
+		sequence.initialCount = count
+		for (let start = 0; start < count; start += chunkSize) {
+			const values: number[] = []
+			const end = Math.min(count, start + chunkSize)
+			for (let id = start; id < end; id++) values.push(id)
+			sequence.chunks.push({ values, start })
+		}
+		sequence.initialChunks = sequence.chunks
+		sequence.length = count
+		return sequence
+	}
 	private snapshot?: T[]
 	length = 0
 	constructor(values: T[], private chunkSize = 128, private indexed = false) {
@@ -36,7 +53,15 @@ export class ChunkedSequence<T> {
 	indexOf(value: T): number | undefined {
 		if (!this.indexed) throw new Error('Sequence has no stable ID index')
 		const handle = this.handles.get(value)
-		return handle ? handle.chunk.start + handle.offset : undefined
+		if (handle !== undefined) return handle ? handle.chunk.start + handle.offset : undefined
+		if (this.isInitialId(value)) {
+			const id = value as number
+			return this.initialChunks![Math.floor(id / this.chunkSize)].start + id % this.chunkSize
+		}
+		return undefined
+	}
+	private isInitialId(value: T) {
+		return typeof value === 'number' && (value >>> 0) === value && value < this.initialCount
 	}
 	* [Symbol.iterator]() { for (const chunk of this.chunks) yield* chunk.values }
 	toArray() { return this.snapshot ??= [...this] }
@@ -47,10 +72,14 @@ export class ChunkedSequence<T> {
 		if (this.indexed) {
 			const removed = new Set(indices.map(i => this.at(i))), incoming = new Set<T>()
 			for (const value of replacement) {
-				if (incoming.has(value) || this.handles.has(value) && !removed.has(value)) throw new Error('Duplicate stable circuit ID')
+				if (incoming.has(value) || this.indexOf(value) !== undefined && !removed.has(value)) throw new Error('Duplicate stable circuit ID')
 				incoming.add(value)
 			}
-			for (const value of removed) this.handles.delete(value)
+			for (const value of removed) {
+				// A tombstone prevents the original-chunk lookup for a removed ID.
+				if (this.isInitialId(value)) this.handles.set(value, null)
+				else this.handles.delete(value)
+			}
 		}
 		const next: Chunk<T>[] = []
 		const append = (chunk: Chunk<T>) => {

@@ -635,6 +635,8 @@ function appendMissingNumbers(arr: number[], n: number): number[] {
 }
 
 export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method'], onLazyCandidate?: (gates: ChunkedSequence<Gate>) => void, synthesisBudget?: SynthesisBudget, strategyPicker?: AdaptiveStrategyPicker): Promise<Gate[]> => {
+	// No convex region can reach the requested size in this chunk.
+	if (subsetSize > slicedVersion.length) return slicedVersion.slice()
 	const useProbabilistically = method !== 'rainbow' && phase === 'heavy' && config.search.probabilistic
 	const findUselessVarsSetting = method !== 'rainbow' && config.search.variableElimination
 	let regenerateGraph = false
@@ -643,8 +645,9 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 	const circuit = new ChunkedSequence(slicedVersion, config.search.circuitChunkGates)
 	activity.stage = 'preparing'
 	if (timeToEndWorker()) return circuit.toArray()
-	const graph = config.search.incrementalDependencies ? new IncrementalGraph(slicedVersion, config.search.circuitChunkGates) : undefined
+	const graph = config.search.incrementalDependencies ? new IncrementalGraph(slicedVersion, config.search.circuitChunkGates, { trackFuture: false }) : undefined
 	do {
+		if (subsetSize > circuit.length) break
 		activity.stage = 'preparing'
 		let graphIterator = findConvexSubsets(subsetSize, circuit, config.search.prioritizeChangedWires ? changedWires : undefined, graph?.context(), config.search.localSearch ? neighborhoods.take() : [], () => { activity.stage = 'preparing'; return timeToEndWorker() })
 		regenerateGraph = false

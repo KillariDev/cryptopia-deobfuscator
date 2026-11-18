@@ -3,33 +3,34 @@ import { gateToText, getVars } from './utils.js'
 
 export const createDependencyGraph = (gates: Gate[]) => {
 	const dependencyGraph: DependencyNode[] = []
-	const variableDependedLast = new Map<number, number>() // <variable, line>
-	const variableSetLast = new Map<number, number>() // <variable, line>
-	gates.forEach((line, currentLineNumber) => {
-		const vars = getVars(line)
-		const target = vars[0]
-		const rest = vars.slice(1)
-		const targetDepends = variableDependedLast.get(target)
-		const restDepends = rest.map((variable) => variableSetLast.get(variable)).filter((variableOrUndefined): variableOrUndefined is number => variableOrUndefined !== undefined)
-
-		dependencyGraph.push({
-			lineNumber: currentLineNumber,
-			dependOnPastLines: Array.from(new Set([...(targetDepends !== undefined ? [targetDepends] : []), ...restDepends])).sort((a, b) => a - b),
-			dependOnFutureLine: -1,
-		})
-		vars.forEach((x) => variableDependedLast.set(x, currentLineNumber))
-		variableSetLast.set(vars[0], currentLineNumber)
-	})
-	// Nearest future access to our target, or write to any control wire.
-	const nextAccess = new Map<number, number>()
-	const nextWrite = new Map<number, number>()
+	const lastAccess = new Map<number, number>()
+	const lastWrite = new Map<number, number>()
+	for (let line = 0; line < gates.length; line++) {
+		const wires = getVars(gates[line])
+		const target = wires[0]
+		const previous: number[] = []
+		const targetAccess = lastAccess.get(target)
+		if (targetAccess !== undefined) previous.push(targetAccess)
+		for (let i = 1; i < wires.length; i++) {
+			const writer = lastWrite.get(wires[i])
+			if (writer !== undefined && !previous.includes(writer)) previous.push(writer)
+		}
+		if (previous.length > 1) previous.sort((a, b) => a - b)
+		dependencyGraph.push({ lineNumber: line, dependOnPastLines: previous, dependOnFutureLine: -1 })
+		for (const wire of wires) lastAccess.set(wire, line)
+		lastWrite.set(target, line)
+	}
+	// Reuse the scratch maps to find the nearest future access/write.
+	lastAccess.clear()
+	lastWrite.clear()
 	for (let i = gates.length - 1; i >= 0; i--) {
-		const [target, ...controls] = getVars(gates[i])
-		let next = nextAccess.get(target) ?? Infinity
-		for (const wire of controls) next = Math.min(next, nextWrite.get(wire) ?? Infinity)
+		const wires = getVars(gates[i])
+		const target = wires[0]
+		let next = lastAccess.get(target) ?? Infinity
+		for (let j = 1; j < wires.length; j++) next = Math.min(next, lastWrite.get(wires[j]) ?? Infinity)
 		dependencyGraph[i].dependOnFutureLine = next === Infinity ? -1 : next
-		for (const wire of [target, ...controls]) nextAccess.set(wire, i)
-		nextWrite.set(target, i)
+		for (const wire of wires) lastAccess.set(wire, i)
+		lastWrite.set(target, i)
 	}
 	return dependencyGraph
 }
