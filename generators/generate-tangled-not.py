@@ -1,6 +1,6 @@
-"""Generate tangled-not.json and tangled-not-solved.json beside this script.
+"""Generate the tangled NOT puzzle/solution in data/ and metadata in proofs/.
 
-Run: python3 data/generate-tangled-not.py
+Run: python3 generators/generate-tangled-not.py
 The 32-wire affine circuit hides a single NOT behind a dense identity network.
 Symbolic checks below prove equivalence for all inputs.
 """
@@ -8,7 +8,11 @@ import json
 import random
 from pathlib import Path
 
-out = Path(__file__).resolve().parent
+root = Path(__file__).resolve().parent.parent
+out = root / 'data'
+proofs = root / 'proofs'
+out.mkdir(exist_ok=True)
+proofs.mkdir(exist_ok=True)
 rng = random.Random(20261118)
 n = 32
 matrix = [1 << i for i in range(n)]
@@ -56,5 +60,5 @@ for a, b, target, gate in gates:
 assert forms == [(1 << i) ^ ((1 << n) if i == 0 else 0) for i in range(n)]
 for name, circuit in [('tangled-not', gates), ('tangled-not-solved', solution)]:
     (out / f'{name}.json').write_text(json.dumps({'wire_count': n, 'gate_count': len(circuit), 'gates': circuit}, indent=2) + '\n')
-(out / 'tangled-not-proof.json').write_text(json.dumps({'seed': 20261118, 'wire_count': n, 'obfuscated_gates': len(gates), 'optimal_gates': 1, 'function': 'wire 0 is inverted; all other wires are unchanged', 'verification': 'Exact symbolic GF(2) affine forms, valid for all 2^32 inputs', 'output_affine_forms_hex': [hex(v) for v in forms]}, indent=2) + '\n')
+(proofs / 'tangled-not-proof.json').write_text(json.dumps({'seed': 20261118, 'wire_count': n, 'obfuscated_gates': len(gates), 'optimal_gates': 1, 'function': 'wire 0 is inverted; all other wires are unchanged', 'verification': 'Exact symbolic GF(2) affine forms, valid for all 2^32 inputs', 'output_affine_forms_hex': [hex(v) for v in forms]}, indent=2) + '\n')
 print(f'Generated {len(gates)} gates; exactly equivalent to one NOT on wire 0')

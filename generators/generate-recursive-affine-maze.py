@@ -1,6 +1,6 @@
 """Generate a recursively mixed, 46,220-gate challenge and its optimal solution.
 
-Run: python3 data/generate-recursive-affine-maze.py
+Run: python3 generators/generate-recursive-affine-maze.py
 Each depth-four tree uses affine conjugations around nonlinear shears. The two
 resulting shears F and G commute and are involutions, so F G F G is identity.
 An independent algebraic-normal-form simulation verifies every output exactly.
@@ -10,7 +10,11 @@ import json
 import random
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / 'data'
+PROOFS = ROOT / 'proofs'
+OUT.mkdir(exist_ok=True)
+PROOFS.mkdir(exist_ok=True)
 NAME = 'recursive-affine-maze'
 SEED = 20261119
 WIRES = 32
@@ -112,5 +116,5 @@ proof = {
     'output_monomials_hex': [[hex(term) for term in sorted(row)] for row in actual],
     'circuit_sha256': hashlib.sha256((OUT / f'{NAME}.json').read_bytes()).hexdigest(),
 }
-(OUT / f'{NAME}-proof.json').write_text(json.dumps(proof, indent=2) + '\n')
+(PROOFS / f'{NAME}-proof.json').write_text(json.dumps(proof, indent=2) + '\n')
 print(f'Generated {len(gates):,} gates with recursive affine conjugations; exactly equivalent to an optimal {len(solution)}-gate solution')

@@ -211,6 +211,18 @@ measurements.
 For background on the original challenge, read
 [Breaking the $10,000 iO Bounty](https://mirror.xyz/killaridev.eth/x2x6yFhovUQJxICCM8jJ7ezcjIvqyRN1iQfsWCG_Doc).
 
+## Puzzle files
+
+Puzzles and their `-solved.json` references live in `data/`. Reproducible Python
+generators live in `generators/`; generated verification metadata lives in
+`proofs/`. Generator output paths are relative to the repository, regardless of
+the directory from which a generator is launched.
+
+```bash
+python3 generators/generate-tangled-not.py
+python3 generators/generate-recursive-affine-maze.py
+```
+
 ## Recursive affine challenge
 
 `data/recursive-affine-maze.json` contains 46,220 gates on 32 wires: exactly 20
@@ -218,8 +230,9 @@ times the gate count of `tangled-not`. Four levels of affine conjugations mix
 nonlinear shears recursively. GF(2) region synthesis can remove affine overhead but
 cannot by itself recover cancellations across the nonlinear boundaries.
 
-Run `python3 data/generate-recursive-affine-maze.py` to reproduce the puzzle,
-`recursive-affine-maze-solved.json`, and its proof metadata. The generator checks
+Run `python3 generators/generate-recursive-affine-maze.py` to reproduce the puzzle,
+`data/recursive-affine-maze-solved.json`, and its metadata in
+`proofs/recursive-affine-maze-proof.json`. The generator checks
 exact algebraic normal forms for all outputs, proving equivalence for every
 input. The four-gate solution is optimal because four distinct output wires
 change and each gate affects just one target.
