@@ -6,7 +6,7 @@ import { setImmediate as yieldToCoordinator, setTimeout as waitForWork } from 'n
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
 import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
-import { StrategySummary, formatRunningStrategies, formatStrategyActivity } from './logging.js'
+import { StrategySummary, formatRoundStrategies } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
 import { AdaptiveConcurrency, MemoryConcurrency, memoryPressure, memorySnapshot } from './concurrency.js'
@@ -984,8 +984,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	prepareOutputDirectories()
 	let currentGates = gates.slice()
 	const wireCosts = new Map<number, number>()
-	let savedGateCount: number | undefined
-	const strategySummary = new StrategySummary()
+	let lastReportedGates = currentGates.length
 	let nextStrategyJob = 0
 	let optimizerRound = 0
 	let lastImprovementTime = performance.now()
@@ -996,11 +995,8 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		const started = performance.now()
 		reportStatus = (force = false) => {
 			if (!summaryThrottle.allow(performance.now(), force || verboseLogging())) return
-			logTimed(formatCoordinatorPhase(currentGates.length, originalGates.length, savedGateCount, phase, performance.now() - started))
-			if (!verboseLogging()) {
-				const summary = strategySummary.flush()
-				if (summary) logTimed(summary)
-			}
+			logTimed(formatCoordinatorPhase(currentGates.length, originalGates.length, lastReportedGates, phase, performance.now() - started))
+			lastReportedGates = currentGates.length
 		}
 	}
 	beginPhase('preparing next round')
@@ -1011,6 +1007,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		while(currentGates.length > 0) {
 			onPhase('running optimizer searches')
 			optimizerRound++
+			const strategySummary = new StrategySummary()
+			const strategyAssignments = new Map<string, WorkerActivity>()
+			const observeStrategy = (job: number, activity?: WorkerActivity) => {
+				strategySummary.observe(job, activity?.strategies)
+				if (activity?.workerId !== undefined && activity.activeStrategy) {
+					strategyAssignments.set(`${activity.workerId}:${activity.activeStrategy}`, activity)
+				}
+			}
 			beginPhase('preparing next round')
 			currentGates = gateSimplifier(currentGates)
 			let lastIterationTime = performance.now()
@@ -1037,7 +1041,6 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			let broadStop: Int32Array | undefined
 			const checkpoint = new AsyncReductionCheckpoint(nPrevGates, async snapshot => {
 				await writer.write([paths.progress(snapshot.length), paths.latest], snapshot)
-				savedGateCount = snapshot.length
 			})
 			const restart = wholeCircuit || runBroad ? new WholeCircuitRestart(currentGates, stopSignal, candidate => {
 				logVerbose(`New best checkpoint: ${candidate.length} gates.`)
@@ -1074,21 +1077,16 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const checkpointTimer = setInterval(() => {
 				void flushLocal().catch(error => { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) })
 			}, config.timing.checkpointSeconds * 1000)
-			const report = (force = false) => {
+			const report = (force = false, roundResult?: number) => {
 				const elapsed = performance.now() - lastIterationTime
 				if (config.workers.keepBusy) logVerbose(`Jobs finished this round: ${completed}; continuing searches across ${jobCount} ${wholeCircuit ? 'whole-circuit alternatives' : 'chunks'}.`)
 				else logVerbose(formatProgress(nPrevGates, (wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)), completed, jobCount, elapsed))
 				logVerbose(formatWorkerActivity(statuses, elapsed, WORKER_ROUND_MS))
 				const snapshot = restart ? roundSearchResult([restart.best, localCandidate()], true) : localCandidate()
-				if (verboseLogging()) logVerbose(formatStrategyActivity(statuses))
-				if (summaryThrottle.allow(performance.now(), force || verboseLogging() || snapshot.length === 0)) {
-					logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate: snapshot.length, saved: savedGateCount, statuses, elapsedMs: elapsed }))
-					if (!verboseLogging()) {
-						const summary = strategySummary.flush()
-						if (summary) logTimed(summary)
-					}
-					const running = formatRunningStrategies(statuses)
-					if (running) logTimed(running)
+				const candidate = roundResult ?? snapshot.length
+				if (summaryThrottle.allow(performance.now(), force || verboseLogging() || candidate === 0)) {
+					logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate, previous: lastReportedGates, statuses, elapsedMs: elapsed }))
+					lastReportedGates = candidate
 				}
 				if ((elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, snapshot.length)) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
@@ -1125,7 +1123,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 						statuses[jobCount] = { updatedAtMs: performance.now() - lastIterationTime, done: false, started: false }
 						broadStarted = true
 						const result = await pool.run(roundSearchResult([restart!.best, localCandidate()], true), inputCircuit.wire_count, (_, activity, snapshot) => {
-							strategySummary.observe(broadJob, activity?.strategies)
+							observeStrategy(broadJob, activity)
 							statuses[jobCount] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
 							if (snapshot) {
 								globalActions = globalActions.then(() => acceptGlobal(snapshot))
@@ -1166,7 +1164,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 						}
 						const result = await pool.run(dataChunk, inputCircuit.wire_count, (_count, activity, snapshot) => {
 								executionStarted ??= performance.now()
-								strategySummary.observe(strategyJob, activity?.strategies)
+								observeStrategy(strategyJob, activity)
 								if (snapshot) {
 									try { accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
 								}
@@ -1194,11 +1192,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				if (restart) currentGates = roundSearchResult([restart.best, currentGates], true)
 			} finally { clearInterval(checkpointTimer); await localFlush; await globalActions; Atomics.store(stopSignal, 0, 1); if (broadStop) Atomics.store(broadStop, 0, 1); beginPhase('finishing round') }
 			if (broadStarted && currentGates.length < nPrevGates) broadSchedule.retry()
-			report()
+			report(false, currentGates.length)
 			const filename = paths.progress(currentGates.length)
 			if (!checkpoint.hasSaved) {
 				await writer.write([filename, paths.latest], currentGates)
-				savedGateCount = currentGates.length
 			} else await checkpoint.saveIfReduced(currentGates)
 			const gatesRemoved = nPrevGates - currentGates.length
 			const endTime = performance.now()
@@ -1216,6 +1213,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				try { currentGates = await pool.run(currentGates, inputCircuit.wire_count, (_, activity) => strategySummary.observe(job, activity?.strategies), undefined, config.workers.jobSeconds * 1000, false, 'shuffle') }
 				finally { strategySummary.finish(job) }
 			}
+			const counts = formatRoundStrategies(strategyAssignments.values())
+			if (counts) logTimed(counts)
+			const timings = strategySummary.flush()
+			if (timings) logTimed(timings)
 		}
 	} finally {
 		clearInterval(memoryTimer)

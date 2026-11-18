@@ -54,7 +54,7 @@ export function formatWorkerActivity(statuses: WorkerStatus[], elapsedMs: number
 		}
 	}
 	const budget = Math.min(100, Math.floor(Math.max(0, elapsedMs) / budgetMs * 100))
-	return `Work: ${totals.passes} passes, ${totals.subsets} subsets visited, ${totals.checks} optimization checks, ${totals.improvements} improving rewrites; workers: ${stages.preparing} preparing, ${stages.searching} searching, ${stages.shuffling} shuffling, ${stages.verifying} verifying, ${stages.waiting} awaiting report, ${stages.completed} completed; round time budget ${budget}% elapsed (not search completion); oldest active report ${Math.max(0, Math.floor(oldest / 1000))}s ago.${formatRainbowActivity(statuses)}`
+	return `Work: ${totals.passes} passes, ${totals.subsets} subsets visited, ${totals.checks} optimization checks, ${totals.improvements} improving rewrites; workers: ${stages.preparing} preparing, ${stages.searching} searching, ${stages.shuffling} shuffling, ${stages.verifying} verifying, ${stages.waiting} awaiting report, ${stages.completed} completed; round time budget ${budget}% elapsed (not search completion); oldest active report ${Math.max(0, Math.floor(oldest / 1000))}s ago.`
 }
 
 export const shouldFinishReducedRound = (elapsedMs: number, initialCount: number, currentCount: number) => elapsedMs >= config.timing.improvedRoundMinutes * 60_000 && currentCount < initialCount
@@ -64,27 +64,23 @@ export type SolverStatus = {
 	original: number
 	roundStart: number
 	candidate: number
-	saved?: number
+	previous: number
 	statuses: WorkerStatus[]
 	elapsedMs: number
 }
 export function formatStatus(status: SolverStatus) {
-	const { original, roundStart, candidate, saved, statuses, elapsedMs } = status
-	const reduction = original > 0 ? Math.max(0, (original - candidate) / original * 100) : 0
+	const { original, roundStart, candidate, previous, statuses, elapsedMs } = status
 	const finished = statuses.filter(worker => worker.done).length
 	const targetMs = (candidate < roundStart ? config.timing.improvedRoundMinutes : config.timing.roundMinutes) * 60_000
-	const progress = Math.min(100, Math.floor(Math.max(0, elapsedMs) / targetMs * 100))
 	const round = finished === statuses.length
 		? `Round finished in ${duration(elapsedMs)}`
-		: elapsedMs >= targetMs ? 'Finishing round (time target reached; waiting for optimization steps)'
-		: `Round time: ${duration(elapsedMs)} / ${duration(targetMs)} target (${progress}% elapsed)`
-	const save = saved === undefined ? 'No checkpoint saved this run yet' : saved === candidate ? 'Checkpoint up to date' : `Checkpoint: ${saved} gates; new reductions pending save`
+		: `Round time: ${duration(elapsedMs)} / ${duration(targetMs)}`
 	const active = statuses.filter(worker => !worker.done && worker.started !== false).length
 	const preparing = statuses.filter(worker => !worker.done && worker.started !== false && worker.activity?.stage === 'preparing').length
 	const broad = statuses.filter(worker => !worker.done && worker.started !== false && worker.activity?.scope === 'broad').length
 	const queued = statuses.filter(worker => !worker.done && worker.started === false).length
 	const late = statuses.filter(worker => !worker.done && worker.started !== false && elapsedMs - worker.updatedAtMs > Math.max(config.timing.summarySeconds * 2000, config.timing.workerReportSeconds * 3000)).length
-	return `Gates: ${candidate} (${reduction.toFixed(2)}% fewer than original; ${Math.max(0, roundStart - candidate)} removed this round) | ${save} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${preparing ? `; ${preparing} preparing regions` : ''}${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
+	return `${formatGateCount(candidate, previous, original)} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${preparing ? `; ${preparing} preparing regions` : ''}${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
 }
 
 /** Per-job snapshots are summed once, including completed jobs in this round. */
@@ -111,28 +107,23 @@ export function formatStrategyActivity(statuses: WorkerStatus[]) {
 	return 'Strategies this round: ' + ([...totals.values()].sort((a, b) => b.gatesRemoved - a.gatesRemoved).map(stat => `${stat.strategy} ${stat.settings}: ${stat.gatesRemoved} gates removed, ${stat.rewrites}/${stat.attempts} improving attempts, ${(stat.elapsedMs / 1000).toFixed(3)} worker-seconds`).join('; ') || 'awaiting worker reports') + '.'
 }
 
-/** Count each active worker once, using its latest job report. */
-export function formatRunningStrategies(statuses: WorkerStatus[]): string | undefined {
-	const workers = new Map<number, WorkerStatus>()
-	for (const status of statuses) {
-		const id = status.activity?.workerId
-		if (id === undefined) continue
-		const previous = workers.get(id)
-		if (!previous || status.updatedAtMs >= previous.updatedAtMs) workers.set(id, status)
+/** Count each worker once per strategy it was assigned during the round. */
+export function formatRoundStrategies(activities: Iterable<WorkerActivity>): string | undefined {
+	const workers = new Map<string, Set<number>>()
+	for (const { workerId, activeStrategy } of activities) {
+		if (workerId === undefined || !activeStrategy) continue
+		let ids = workers.get(activeStrategy)
+		if (!ids) { ids = new Set(); workers.set(activeStrategy, ids) }
+		ids.add(workerId)
 	}
-	const counts = new Map<string, number>()
-	for (const { activity, done } of workers.values()) {
-		const strategy = activity?.activeStrategy
-		if (!strategy || done) continue
-		counts.set(strategy, (counts.get(strategy) ?? 0) + 1)
-	}
+	const counts = [...workers].map(([strategy, ids]) => [strategy, ids.size] as const)
 	const labels: Record<string, string> = { 'dependency-cuts': 'cuts', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', z3: 'Z3' }
 	const summary = [...counts].sort(([a, countA], [b, countB]) => countB - countA || a.localeCompare(b))
 		.map(([strategy, count]) => `${labels[strategy] ?? strategy}:${count}`).join(', ')
-	return summary ? `Running strategies: ${summary}` : undefined
+	return summary ? `Round strategies: ${summary}` : undefined
 }
 
-/** Interval deltas from cumulative job reports, retained across round restarts. */
+/** Round totals from cumulative job reports. */
 export class StrategySummary {
 	private jobs = new Map<number, Map<string, { attempts: number, elapsedMs: number }>>()
 	private totals = new Map<string, { attempts: number, elapsedMs: number }>()
@@ -160,7 +151,12 @@ export class StrategySummary {
 	}
 }
 
-export function formatCoordinatorPhase(gates: number, original: number, saved: number | undefined, phase: string, elapsedMs: number) {
-	const reduction = original ? (original - gates) / original * 100 : 0
-	return `Gates: ${gates} (${reduction.toFixed(2)}% fewer than original) | ${saved === gates ? 'Checkpoint up to date' : 'Preparing current circuit'} | ${phase} | ${duration(elapsedMs)} elapsed`
+function formatGateCount(gates: number, previous: number, original: number) {
+	const reduction = original > 0 ? Math.max(0, (original - gates) / original * 100) : 0
+	const delta = gates > previous ? `+ ${gates - previous}` : `- ${previous - gates}`
+	return `Gates: ${gates} ${delta} (${reduction.toFixed(2)}% fewer than original)`
+}
+
+export function formatCoordinatorPhase(gates: number, original: number, previous: number, phase: string, elapsedMs: number) {
+	return `${formatGateCount(gates, previous, original)} | ${phase} | ${duration(elapsedMs)} elapsed`
 }

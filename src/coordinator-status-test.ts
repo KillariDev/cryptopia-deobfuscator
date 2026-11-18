@@ -25,20 +25,35 @@ try {
 	config.logging.verbose = false
 	process.env.OPTIMIZER_VERBOSE = '0'
 	let broadCalls = 0, shuffleCalls = 0
-	WorkerPool.prototype.run = function(gates, _wires, _progress, _stop, _budget, _restart, solver) {
+	const reports: string[] = []
+	WorkerPool.prototype.run = function(gates, _wires, progress, _stop, _budget, _restart, solver) {
 		if (solver === 'shuffle') { shuffleCalls++; return Promise.reject(new Error('Unexpected shuffle after improvement')) }
 		if (solver === 'broad') {
 			if (++broadCalls === 2) {
 				assert.equal(gates.length, 3001)
 				return Promise.reject(done)
 			}
-			return Promise.resolve(gates.slice(0, 3001)) // Same odd NOT parity.
+			progress?.(gates.length, {
+				scope: 'broad', workerId: 1, activeStrategy: 'sat-sweeping',
+				passes: 1, checks: 1, subsets: 1, improvements: 0, stage: 'searching',
+				strategies: [{ strategy: 'sat-sweeping broad', settings: '', attempts: 1, elapsedMs: 500, rewrites: 0, gatesRemoved: 0 }],
+			})
+			return new Promise(resolve => setTimeout(() => resolve(gates.slice(0, 3001)), 65)) // Same odd NOT parity.
 		}
 		return Promise.resolve(gates)
 	}
-	console.log = () => {}
+	console.log = (...args: unknown[]) => { reports.push(args.map(String).join(' ')) }
 	await assert.rejects(splitTaskAndRun(join(directory, 'early'), 'unused', { originalCircuit: circuit, inputCircuit: circuit }), error => error === done)
 	assert.equal(shuffleCalls, 0, 'large circuits restart immediately after an improvement instead of running 2000 shuffle passes')
+
+	const counts = reports.filter(line => line.includes('Round strategies:'))
+	const timings = reports.filter(line => line.includes('Tried (worker time):'))
+	assert.equal(counts.length, 1)
+	assert.match(counts[0], /SAT sweep:1/)
+	assert.equal(timings.length, 1)
+	assert.match(timings[0], /SAT sweep broad 1x\/0.50s/)
+	const periodic = reports.findIndex(line => line.includes('Gates: 5001 - 0'))
+	assert.ok(periodic >= 0 && periodic < reports.indexOf(counts[0]), 'periodic status precedes the round-end strategy totals')
 
 	let shuffleFinished = false, phaseReports = 0
 	let finishShuffle: (() => void) | undefined

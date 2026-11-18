@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { StrategySummary, formatRunningStrategies, WorkerStatus } from './logging.js'
+import { StrategySummary, formatRoundStrategies, WorkerActivity } from './logging.js'
 import { StrategyStat } from './strategy-stats.js'
 const stat = (strategy: string, settings: string, attempts: number, elapsedMs: number): StrategyStat => ({ strategy, settings, attempts, elapsedMs, rewrites: 0, gatesRemoved: 0 })
 const summary = new StrategySummary()
@@ -19,13 +19,11 @@ summary.finish(3)
 assert.equal(summary.flush(), undefined)
 console.log('Compact strategy summaries: settings aggregation, interval deltas, repeated snapshots and restarted jobs passed')
 
-const status = (workerId: number, updatedAtMs: number, activeStrategy: string, done = false): WorkerStatus => ({
-	updatedAtMs, done,
-	activity: { workerId, activeStrategy, passes: 1, subsets: 1, checks: 1, improvements: 0, stage: 'searching' },
+const assignment = (workerId: number, activeStrategy: string): WorkerActivity => ({
+	workerId, activeStrategy, passes: 1, subsets: 1, checks: 1, improvements: 0, stage: 'searching',
 })
-assert.equal(formatRunningStrategies([
-	status(1, 1, 'variables'), status(1, 2, 'rainbow'), status(2, 1, 'rainbow'),
-	status(3, 1, 'rainbow'), status(4, 1, 'rainbow'), status(5, 1, 'sat-sweeping'),
-	status(6, 1, 'variables'), status(6, 2, 'variables', true),
-]), 'Running strategies: rainbow:4, SAT sweep:1')
-assert.equal(formatRunningStrategies([]), undefined)
+assert.equal(formatRoundStrategies([
+	assignment(1, 'rainbow'), assignment(1, 'rainbow'), assignment(2, 'rainbow'),
+	assignment(3, 'rainbow'), assignment(4, 'rainbow'), assignment(5, 'sat-sweeping'),
+]), 'Round strategies: rainbow:4, SAT sweep:1')
+assert.equal(formatRoundStrategies([]), undefined)
