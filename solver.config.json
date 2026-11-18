@@ -13,7 +13,7 @@
     "broadSearchIdleSeconds": 30,
     "keepBusy": true,
     "wholeCircuitMaximumGates": 2000,
-    "maximum": 4,
+    "maximum": 8,
     "minimumChunkGates": 100,
     "maximumChunkFraction": 0.5,
     "jobsPerWorker": 4,
