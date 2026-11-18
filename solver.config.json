@@ -31,6 +31,7 @@
     "broadSearchSeconds": 60
   },
   "timing": {
+    "checkpointSeconds": 30,
     "roundMinutes": 25,
     "improvedRoundMinutes": 5,
     "summarySeconds": 30,

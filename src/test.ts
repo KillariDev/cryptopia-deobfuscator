@@ -1022,3 +1022,5 @@ await import('./dependency-deadline-test.js')
 await import('./worker-heartbeat-test.js')
 
 await import('./local-publication-test.js')
+
+await import('./checkpoint-coalescing-test.js')
