@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { Gate } from './types.js'
 import { analyzeFactored, FactoredGraph, FactoredOptions, Form, synthesizeFactored } from './factored.js'
+import { simplifyMixedBasis } from './mixed-basis.js'
 import { cancelBlocks } from './block-cancellation.js'
 import { sweepFactored, SweepStats } from './sat-sweeping-core.js'
 import { structuralRewrite, structuralNames } from './structural-strategies.js'
@@ -59,6 +60,21 @@ const blockInput = [...a, ...b, ...a], blockResult = cancelBlocks(blockInput, op
 assert.ok(blockResult && blockResult.length === b.length)
 equivalent(blockInput, blockResult, 6)
 assert.equal(synthesizeFactored(blockInput, options), undefined, 'cubic output needs block reasoning rather than the quadratic emitter')
+// Equal offsets survive a different ordering of independent basis gates.
+const basisLeft = { a: 0, b: 1, target: 2, gate_i: 1 }
+const basisRight = { a: 3, b: 0, target: 4, gate_i: 3 }
+const injection = { a: 2, b: 4, target: 5, gate_i: 1 }
+const linearOutput = { a: 5, b: 0, target: 6, gate_i: 3 }
+const mixed = [linearOutput, basisLeft, basisRight, injection, basisLeft, basisRight,
+	basisRight, basisLeft, injection, basisRight, basisLeft, linearOutput]
+const mixedResult = simplifyMixedBasis(mixed, options)
+assert.deepEqual(mixedResult, [])
+equivalent(mixed, mixedResult, 7)
+const noncanceling = mixed.slice(0, 8).concat(mixed.slice(9))
+const reducedMixed = simplifyMixedBasis(noncanceling, options)
+if (reducedMixed) equivalent(noncanceling, reducedMixed, 7)
+assert.equal(simplifyMixedBasis(mixed, { ...options, stopped: () => true }), undefined)
+
 const noncommuting = [...a, { a: 0, b: 0, target: 0, gate_i: 15 }, ...a]
 const rejected = cancelBlocks(noncommuting, options)
 if (rejected) equivalent(noncommuting, rejected, 5)
@@ -76,6 +92,17 @@ const stats = { queries: 0, merges: 0, counterexamples: 0 }
 const swept = await sweepFactored(distributed, options, performance.now() + 30000, stats)
 assert.deepEqual(swept, [])
 assert.ok(stats.queries > 0 && stats.merges > 0, 'a real UNSAT proof authorizes the rewrite')
+const cubic: Gate[] = [
+	{ a: 0, b: 1, target: 6, gate_i: 1 },
+	{ a: 6, b: 3, target: 7, gate_i: 1 },
+	{ a: 0, b: 1, target: 6, gate_i: 1 },
+]
+const mixedDegree = [...distributed, ...cubic]
+assert.equal(synthesizeFactored(mixedDegree, options), undefined)
+const partial = await sweepFactored(mixedDegree, options, performance.now() + 30000)
+assert.ok(partial && partial.length < mixedDegree.length)
+equivalent(mixedDegree, partial, 8)
+
 const collisions: SweepStats = { queries: 0, merges: 0, counterexamples: 0 }
 assert.equal(await sweepFactored([t], { ...options, simulationBits: 1 }, performance.now() + 30000, collisions), undefined)
 assert.ok(collisions.counterexamples > 0, 'simulation collisions must not authorize a merge')
@@ -89,7 +116,7 @@ const saved = structuredClone(config), tables = new RainbowPortfolio([{ wires: 3
 try {
 	Object.assign(config.synthesis, { templates: false, affine: false, quadratic: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false, factored: true, blockCancellation: true, satSweeping: true })
 	config.search.strategyAdaptive = true
-	const cases = { factored: [t, t, t], 'block-cancellation': blockInput, 'sat-sweeping': distributed }
+	const cases = { factored: [t, t, t], 'block-cancellation': blockInput, 'sat-sweeping': distributed, 'mixed-basis': blockInput }
 	for (const name of structuralNames) {
 		resetStrategyStats()
 		const input = cases[name], picker = new RoundStrategyPicker([name])

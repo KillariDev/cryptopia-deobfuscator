@@ -56,14 +56,16 @@ try {
     const opts = { maximumWires: 64, maximumNodes: 200000, maximumEdges: 16000000, stopped: () => false };
     const globalStats = { queries: 0, merges: 0, counterexamples: 0 };
     const whole = await sweepFactored(mixed, opts, performance.now() + 10000, globalStats);
-    assert.equal(whole, undefined);
+    assert.ok(whole && whole.length < mixed.length);
     assert.ok(globalStats.merges > 0);
     const regionStats = { queries: 0, merges: 0, counterexamples: 0 };
     const regional = await sweepFactored(identity, opts, performance.now() + 10000, regionStats);
     assert.deepEqual(regional, []);
-    for (const input of utils.generateCombinations(11))
+    for (const input of utils.generateCombinations(11)) {
+        assert.deepEqual(utils.evalCircuit(mixed, input), utils.evalCircuit(whole, input));
         assert.deepEqual(utils.evalCircuit(mixed, input), utils.evalCircuit(cubic, input));
-    results.sat_mixed_circuit = { before_gates: mixed.length, whole_circuit_output: whole?.length ?? null, whole_circuit_proofs: globalStats, dependency_region_gates: identity.length, dependency_region_output: regional.length, regional_proofs: regionStats, patched_circuit_gates: cubic.length, exhaustive_inputs: 2048, finding: 'The whole-circuit sweep proves an identity but cannot emit the remaining cubic map. A regional patch preserves that map and removes the independent identity.' };
+    }
+    results.sat_mixed_circuit = { before_gates: mixed.length, whole_circuit_output: whole?.length ?? null, whole_circuit_proofs: globalStats, dependency_region_gates: identity.length, dependency_region_output: regional.length, regional_proofs: regionStats, patched_circuit_gates: cubic.length, exhaustive_inputs: 2048, finding: 'The whole-circuit sweep keeps proved write cancellations even with a live cubic output. The isolated dependency region can remove the entire independent identity.' };
 }
 finally {
     await tables.close();

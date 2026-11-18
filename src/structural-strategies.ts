@@ -2,14 +2,15 @@ import { config } from './config.js'
 import { Gate } from './types.js'
 import { analyzeFactored, FactoredLimit, synthesizeFactored } from './factored.js'
 import type { FactoredOptions } from './factored.js'
+import { simplifyMixedBasis } from './mixed-basis.js'
 import { cancelBlocks } from './block-cancellation.js'
 import { SolverService } from './solver-worker.js'
 import { recordStrategy } from './strategy-stats.js'
 
-export const structuralNames = ['factored', 'block-cancellation', 'sat-sweeping'] as const
+export const structuralNames = ['factored', 'block-cancellation', 'sat-sweeping', 'mixed-basis'] as const
 export type StructuralStrategy = typeof structuralNames[number]
 export function structuralChoices() {
-	return structuralNames.filter(name => name === 'factored' ? config.synthesis.factored : name === 'block-cancellation' ? config.synthesis.blockCancellation : config.synthesis.satSweeping && !satService.busy)
+	return structuralNames.filter(name => name === 'factored' ? config.synthesis.factored : name === 'block-cancellation' ? config.synthesis.blockCancellation : name === 'mixed-basis' ? config.synthesis.mixedBasis : config.synthesis.satSweeping && !satService.busy)
 }
 
 const satService = new SolverService()
@@ -38,6 +39,7 @@ export async function structuralRewrite(name: StructuralStrategy, gates: Gate[],
 	const options = { maximumWires: config.validation.maximumWires, maximumNodes: config.synthesis.factoredMaximumNodes, maximumEdges: config.synthesis.factoredMaximumEdges, stopped }
 	const result = name === 'factored' ? synthesizeFactored(gates, options)
 		: name === 'block-cancellation' ? cancelBlocks(gates, options)
+		: name === 'mixed-basis' ? simplifyMixedBasis(gates, options)
 		: await satRewrite(gates, options, deadline)
 	const accepted = result !== undefined && result.length < gates.length
 	recordStrategy(name, { maximumWires: options.maximumWires, maximumNodes: options.maximumNodes, maximumEdges: options.maximumEdges }, started, gates.length, accepted ? result!.length : gates.length, accepted)

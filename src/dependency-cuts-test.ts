@@ -55,11 +55,13 @@ for (let i = 0; i < identity.length; i++) { selected.push(mixed.length); mixed.p
 const options = { maximumWires: 64, maximumNodes: 200000, maximumEdges: 16000000, stopped: () => false }
 assert.equal(synthesizeFactored(mixed, options), undefined)
 const wholeStats: SweepStats = { queries: 0, merges: 0, counterexamples: 0 }
-assert.equal(await sweepFactored(mixed, options, performance.now() + 30000, wholeStats), undefined)
-assert.ok(wholeStats.merges > 0 && wholeStats.rebuilds! > 0 && wholeStats.passes! > 1, 'merge, compact, and repeat even when the remaining output is cubic')
+const partial = await sweepFactored(mixed, options, performance.now() + 30000, wholeStats)
+assert.ok(partial && partial.length < mixed.length)
+equivalent(mixed, partial, 11)
+assert.ok(wholeStats.merges > 0 && wholeStats.rebuilds! > 0, 'keep proved writes even when the remaining output is cubic')
 const noisy = [...mixed, ...Array.from({ length: 10 }, (_, i) => gate(11 + i * 3, 12 + i * 3, 13 + i * 3, 1))]
 const coneStats: SweepStats = { queries: 0, merges: 0, counterexamples: 0 }
-assert.equal(await sweepFactored(noisy, options, performance.now() + 30000, coneStats), undefined)
+assert.ok((await sweepFactored(noisy, options, performance.now() + 30000, coneStats))!.length < noisy.length)
 assert.ok(coneStats.merges > 0 && coneStats.coneNodes! < analyzeFactored(noisy, options).graph.products.length, 'SAT only defines the queried cones, excluding independent nonlinear outputs')
 const index = new DependencyCutIndex(mixed), cut = index.cut(selected)!
 const solved = await sweepFactored(cut.gates, options, performance.now() + 30000)
@@ -82,7 +84,7 @@ try {
  config.search.strategyAdaptive = true
  config.search.dependencyCuts = true
  config.search.variableElimination = false
- Object.assign(config.synthesis, { templates: false, affine: false, quadratic: false, factored: false, blockCancellation: false, satSweeping: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+ Object.assign(config.synthesis, { templates: false, affine: false, quadratic: false, factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
  resetStrategyStats()
  const rewritten = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, sparse, sparse.length, false, false, true, new SubsetPreparation(sparse), { deadline: performance.now() + 10000, broad: true }, picker)
  assert.equal(rewritten.gates.length, sparse.length - 2)

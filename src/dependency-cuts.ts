@@ -96,11 +96,12 @@ export class DependencyCutIndex {
 	}
 	/** Interleave region sizes across global output cones and distributed seeds.
 	 * Batches keep the working set bounded; search continues until cancellation. */
-	*regions(offset = 0, minimum = 2): Generator<DependencyCut> {
-		if (this.gates.length < minimum || !this.predecessors.some(edges => edges.length)) return
+	*regions(offset = 0, minimum = 2, maximum = this.gates.length): Generator<DependencyCut> {
+		const limit = Math.min(maximum, this.gates.length)
+		if (limit < minimum || !this.predecessors.some(edges => edges.length)) return
 		let cursor = offset % this.gates.length
 		const widths = [minimum]
-		while (widths[widths.length - 1] < this.gates.length) widths.push(Math.min(this.gates.length, widths[widths.length - 1] * 2))
+		while (widths[widths.length - 1] < limit) widths.push(Math.min(limit, widths[widths.length - 1] * 2))
 		while (!this.stopped()) {
 			const seeds = new Set(this.outputSeeds.slice(cursor % this.outputSeeds.length).concat(this.outputSeeds.slice(0, cursor % this.outputSeeds.length)))
 			for (let i = 0; i < 32; i++) seeds.add((cursor + Math.floor(i * this.gates.length / 32)) % this.gates.length)
@@ -124,13 +125,13 @@ export class DependencyCutIndex {
 const indexes = new WeakMap<object, { key: string, index: DependencyCutIndex, regions: Generator<DependencyCut> }>()
 
 export type CutSearchStats = { regions: number, solverMs: number }
-export async function searchDependencyCuts(input: Gate[], stopped: () => boolean, solve: (cut: DependencyCut) => Promise<Gate[] | undefined>, offset = 0, stats: CutSearchStats = { regions: 0, solverMs: 0 }, cache?: object, minimum = 2): Promise<Gate[] | undefined> {
+export async function searchDependencyCuts(input: Gate[], stopped: () => boolean, solve: (cut: DependencyCut) => Promise<Gate[] | undefined>, offset = 0, stats: CutSearchStats = { regions: 0, solverMs: 0 }, cache?: object, minimum = 2, maximum = input.length): Promise<Gate[] | undefined> {
 	try {
-		const key = cache ? `${minimum}:${JSON.stringify(input)}` : ''
+		const key = cache ? `${minimum}:${maximum}:${JSON.stringify(input)}` : ''
 		let entry = cache ? indexes.get(cache) : undefined
 		if (!entry || entry.key !== key) {
 			const index = new DependencyCutIndex(input, stopped)
-			entry = { key, index, regions: index.regions(offset, minimum) }; if (cache) indexes.set(cache, entry)
+			entry = { key, index, regions: index.regions(offset, minimum, maximum) }; if (cache) indexes.set(cache, entry)
 		}
 		const { index, regions } = entry; index.setStop(stopped)
 		while (!stopped()) {

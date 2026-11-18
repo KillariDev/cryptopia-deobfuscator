@@ -36,7 +36,7 @@ const db = new sqlite3.Database(':memory:')
 const tables = new RainbowPortfolio([{ wires: 3, gates: 2, db }])
 try {
 	config.search.strategyAdaptive = true
-	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, templates: false, affine: false, quadratic: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, templates: false, affine: false, quadratic: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
 	await runSQL(db,'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
 	const cn = {a:1,b:0,target:0,gate_i:3}, not1 = {a:0,b:0,target:1,gate_i:15}
 	const input = [cn,not1,cn], expected = [not1,{...not1,target:0}]

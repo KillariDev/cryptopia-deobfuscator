@@ -150,6 +150,7 @@
   "synthesis": {
     "factored": true,
     "blockCancellation": true,
+    "mixedBasis": true,
     "satSweeping": true,
     "factoredMaximumNodes": 200000,
     "factoredMaximumEdges": 16000000,

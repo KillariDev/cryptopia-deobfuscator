@@ -23,7 +23,7 @@ try {
 	// This case isolates contiguous broad windows; global cuts have separate
 	// integration coverage and may find a smaller improvement first.
 	config.search.dependencyCuts = false
-	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, quadratic: false, affine: false, templates: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, quadratic: false, affine: false, templates: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
 	config.search.probabilistic = false
 	config.search.variableElimination = false
 	await runSQL(db, 'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')

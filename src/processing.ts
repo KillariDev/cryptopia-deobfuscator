@@ -478,7 +478,20 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		return finish({ gates: result, changed: result !== originalGates })
 	}
 	if (selected && (structuralNames as readonly string[]).includes(selected)) {
-		const result = await structuralRewrite(selected as StructuralStrategy, originalGates, synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000, () => synthesisBudget?.shouldStop?.() === true)
+		const deadline = synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000
+		const canceled = () => synthesisBudget?.shouldStop?.() === true
+		let result = await structuralRewrite(selected as StructuralStrategy, originalGates, deadline, canceled)
+		if (!result && selected === 'sat-sweeping' && synthesisBudget?.broad && !synthesisBudget.dependencyRegion && originalGates.length > 1024) {
+			const stopped = () => performance.now() >= deadline || canceled()
+			let lastProgress = performance.now()
+			result = await searchDependencyCuts(originalGates, stopped, async cut => {
+				if (performance.now() - lastProgress >= config.timing.workerReportSeconds * 1000) {
+					lastProgress = performance.now()
+					synthesisBudget.onProgress?.()
+				}
+				return structuralRewrite('sat-sweeping', cut.gates, deadline, stopped)
+			}, 0, undefined, strategyPicker, broadMinimum, 1024)
+		}
 		return finish({ gates: result ?? originalGates, changed: result !== undefined })
 	}
 	const prepared = new Map<number, PreparedWindow>()
@@ -753,6 +766,7 @@ const standaloneStructural = () => [
 	...(config.synthesis.factored ? ['factored'] : []),
 	...(config.synthesis.blockCancellation ? ['block-cancellation'] : []),
 	...(config.synthesis.satSweeping ? ['sat-sweeping'] : []),
+	...(config.synthesis.mixedBasis ? ['mixed-basis'] : []),
 ]
 const variableStrategy = () => config.search.variableElimination && config.search.sliceMaximum >= 3 ? ['variables'] : []
 const smallSynthesisStrategies = new Set(['forward-semantic-search', 'equality-saturation', 'z3', 'meet-in-the-middle'])
