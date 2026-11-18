@@ -135,3 +135,4 @@ rainbowtable.db
 /rainbow_*.db*
 *.db
 build/config.gypi
+db/rainbow_4_5.db-journal
