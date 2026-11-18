@@ -50,5 +50,7 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 }
 
 export function logJob(working: string, original: string, circuits: JobCircuits) {
-	for (const line of describeJob(working, original, circuits).split('\n')) logTimed(line)
+	for (const line of describeJob(working, original, circuits).split('\n')) {
+		if (verboseLogging() || /^(Mode|Original|Input|Latest verified circuit|Logging):/.test(line)) logTimed(line)
+	}
 }

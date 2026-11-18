@@ -173,6 +173,11 @@ Table generation shows one completion percentage and one ETA. Before all layer
 sizes are known, these are estimates. The ETA follows recent measured throughput;
 it cannot guarantee a finish time.
 
+With `logging.verbose: false`, optimization prints one compact status line per
+`timing.summarySeconds` interval, even across rapid restarts. Checkpoints are still
+saved immediately; individual save/restart messages, strategy breakdowns and the
+full startup settings dump are only printed in verbose mode.
+
 With `logging.verbose: true`, additional reports show CPU, memory, SQL costs,
 staging-writer utilization and committed work per second. Database-operation
 timings identify expensive membership checks, lookup writes or frontier cleanup.

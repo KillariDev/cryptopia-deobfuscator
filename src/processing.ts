@@ -14,7 +14,7 @@ import { templates, advancedRewrite } from './strategies.js'
 import { IncrementalEvaluator } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, createSearchArms, independentComponents } from './search.js'
 import { config } from './config.js'
-import { formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
+import { SummaryThrottle, verboseLogging, formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
 import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
 import { Gate } from './types.js'
 import { RainbowPortfolio } from './rainbow-portfolio.js'
@@ -382,7 +382,7 @@ const gateSimplifier = (gates: Gate[]) => gates.map((gate) => simplifyGate(gate)
 
 const save = (filenames: string[], gates: Gate[], wires: number, originalGates: Gate[]) => {
 	gates = gateSimplifier(gates)
-	logTimed(`Saving a version with ${ gates.length } gates to ${ filenames.join(', ') } (${ Math.floor(gates.length/originalGates.length*100) }% of original)`)
+	logVerbose(`Saving a version with ${ gates.length } gates to ${ filenames.join(', ') } (${ Math.floor(gates.length/originalGates.length*100) }% of original)`)
 	logVerbose(`Average gate complexity: ${ gates.flatMap((gate) => getVars(gate).length).reduce((a, c) => a + c, 0) / gates.length }`)
 	verifyCircuit(originalGates, gates, wires, config.validation.checkpointInputs)
 	writeCircuitCopies(filenames, wires, gates)
@@ -732,6 +732,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	let currentGates = gates.slice()
 	const wireCosts = new Map<number, number>()
 	let savedGateCount: number | undefined
+	const summaryThrottle = new SummaryThrottle(config.timing.summarySeconds * 1000)
 	try {
 		while(currentGates.length > 0) {
 			currentGates = gateSimplifier(currentGates)
@@ -752,7 +753,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			})
 			const restart = wholeCircuit ? new WholeCircuitRestart(currentGates, stopSignal, candidate => {
 				checkpoint.saveIfReduced(candidate)
-				if (Atomics.load(stopSignal, 0) === 0) logTimed(`New best: ${candidate.length} gates; stopping current searches and restarting from the verified checkpoint.`)
+				if (Atomics.load(stopSignal, 0) === 0) logVerbose(`New best: ${candidate.length} gates; stopping current searches and restarting from the verified checkpoint.`)
 			}) : undefined
 			let rejectCheckpoint!: (error: unknown) => void
 			const checkpointFailed = new Promise<never>((_, reject) => { rejectCheckpoint = reject })
@@ -764,14 +765,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				logVerbose(formatWorkerActivity(statuses, elapsed, WORKER_ROUND_MS))
 				const snapshot = roundSearchResult(restart ? [restart.best, ...snapshots] : snapshots, wholeCircuit)
 				checkpoint.saveIfReduced(snapshot)
-				logTimed(formatStrategyActivity(statuses))
-				logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate: snapshot.length, saved: savedGateCount, statuses, elapsedMs: elapsed }))
+				if (verboseLogging()) logVerbose(formatStrategyActivity(statuses))
+				if (summaryThrottle.allow(performance.now(), verboseLogging() || snapshot.length === 0)) logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate: snapshot.length, saved: savedGateCount, statuses, elapsedMs: elapsed }))
 				if ((elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, snapshot.length)) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
-					logTimed(`Round time target reached; finishing active jobs and returning queued jobs unchanged.`)
+					logVerbose(`Round time target reached; finishing active jobs and returning queued jobs unchanged.`)
 				}
 			}
-			logTimed(`Round started: ${nPrevGates} gates across ${jobCount} ${wholeCircuit ? 'whole-circuit searches' : 'chunk jobs'} on up to ${nWorkers} workers; summaries every ${config.timing.summarySeconds} seconds`)
+			logVerbose(`Round started: ${nPrevGates} gates across ${jobCount} ${wholeCircuit ? 'whole-circuit searches' : 'chunk jobs'} on up to ${nWorkers} workers; summaries every ${config.timing.summarySeconds} seconds`)
 			const summaryTimer = setInterval(() => {
 				try { report() }
 				catch (error) { clearInterval(summaryTimer); rejectCheckpoint(error) }
@@ -819,9 +820,9 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				const resources = statuses.map(status => status.activity?.resources)
 				const reason = concurrency.observe({ concurrency: nWorkers, elapsedMs: endTime - lastIterationTime, removed: gatesRemoved, databaseMs: resources.reduce((sum, value) => sum + (value?.databaseMs ?? 0), 0), workerMs: resources.reduce((sum, value) => sum + (value?.elapsedMs ?? 0), 0), memoryPressure: memoryPressure(config.workers.memoryBudgetMegabytes) })
 				if (reason === 'memory budget pressure') { pool.setConcurrency(concurrency.limit(nMaxWorkers)); await pool.trimIdle() }
-				if (reason) logTimed(`Next round worker target: ${concurrency.limit(nMaxWorkers)} (${reason})`)
+				if (reason) logVerbose(`Next round worker target: ${concurrency.limit(nMaxWorkers)} (${reason})`)
 			}
-			logTimed(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
+			logVerbose(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
 			if (!wholeCircuit) shuffleRowsWithDependentGateSwap(currentGates, config.search.roundShufflePasses)
 		}
 	} finally {

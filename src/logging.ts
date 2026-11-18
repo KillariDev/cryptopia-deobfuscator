@@ -8,6 +8,17 @@ export function logVerbose(...args: unknown[]) {
 	if (verboseLogging()) logTimed(...args)
 }
 
+/** One cadence shared across rounds, so rapid restarts do not flood quiet logs. */
+export class SummaryThrottle {
+	private last = -Infinity
+	constructor(private intervalMs: number) {}
+	allow(now: number, detailed = false) {
+		if (!detailed && now - this.last < this.intervalMs) return false
+		this.last = now
+		return true
+	}
+}
+
 export function formatProgress(initialGates: number, candidateGates: number, completed: number, workers: number, elapsedMs: number) {
 	const removed = initialGates - candidateGates
 	const elapsed = Math.max(0, elapsedMs) / 1000

@@ -476,7 +476,12 @@ try {
 } finally { await closeRainbowTable(integrationDb) }
 console.log('Solver integration regressions passed')
 
-const { formatStatus } = await import('./logging.js')
+const { formatStatus, SummaryThrottle } = await import('./logging.js')
+const summaryThrottle = new SummaryThrottle(30_000)
+assert.equal(summaryThrottle.allow(0), true)
+for (let round = 1; round < 30; round++) assert.equal(summaryThrottle.allow(round * 1000), false, 'quiet cadence survives rapid round restarts')
+assert.equal(summaryThrottle.allow(30_000), true)
+assert.equal(summaryThrottle.allow(30_001, true), true, 'verbose and final reports bypass the interval')
 const compact = formatStatus({ original: 1000, roundStart: 200, candidate: 100, saved: 100, statuses: [status, { updatedAtMs: 0, done: true }], elapsedMs: 60_000 })
 assert.match(compact, /90.00% fewer than original; 100 removed this round/)
 assert.match(compact, /Checkpoint up to date/)
