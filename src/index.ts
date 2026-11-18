@@ -4,12 +4,16 @@ import { join, parse } from 'path'
 import { splitTaskAndRun } from './processing.js'
 import { loadJob, logJob } from './job.js'
 import { RunLifecycle } from './run-lifecycle.js'
+import { memorySnapshot } from './concurrency.js'
+import { config } from './config.js'
 
 const lifecycle = new RunLifecycle()
 
 const run = async (pathToFileWithoutExt: string, original: string, startOver: boolean) => {
 	const circuits = loadJob(pathToFileWithoutExt, original, startOver)
 	logJob(pathToFileWithoutExt, original, circuits)
+	const memory = memorySnapshot(config.workers.memoryBudgetMegabytes)
+	logTimed(`Memory: ${Math.round(memory.rss / 1048576)} MB resident; ${Math.round(memory.budget / 1048576)} MB effective budget; Node ${process.versions.node}.`)
 	logTimed('Initializing rainbow table portfolio...')
 	lifecycle.setPhase('initializing rainbow table portfolio')
 	await initializeRainbowTables()

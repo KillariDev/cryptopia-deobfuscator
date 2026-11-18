@@ -29,6 +29,21 @@ export class WorkerPool {
 		this.concurrency = limit
 		this.dispatch()
 	}
+	/** Release excess isolates promptly under memory pressure. Their last
+	 * reported reductions remain in the coordinator; unfinished jobs return
+	 * their seed as an alternative and may retry at the lower concurrency. */
+	async trimForMemory(limit: number) {
+		if (!Number.isSafeInteger(limit) || limit < 1 || limit > this.size) throw new Error('Invalid worker concurrency')
+		this.concurrency = limit
+		const victims = [...this.slots].sort((a, b) => Number(!!a.job) - Number(!!b.job) || (b.job?.gates.length ?? 0) - (a.job?.gates.length ?? 0)).slice(0, Math.max(0, this.slots.length - limit))
+		for (const slot of victims) { slot.retiring = true; this.slots.splice(this.slots.indexOf(slot), 1) }
+		await Promise.all(victims.map(async slot => {
+			const job = slot.job; slot.job = undefined
+			await slot.worker.terminate()
+			job?.resolve(job.gates)
+		}))
+		this.dispatch()
+	}
 	async trimIdle() {
 		const retired: Worker[] = []
 		for (let i = this.slots.length - 1; i >= 0 && this.slots.length > this.concurrency; i--) {
@@ -64,6 +79,7 @@ export class WorkerPool {
 				const current = slot
 				this.slots.push(current)
 				worker.on('message', (message: { gates?: Gate[], error?: string, progress?: number, activity?: WorkerActivity, snapshot?: Gate[], sharedTemplates?: TemplateRule[] }) => {
+					if (current.retiring) return
 					if (config.workers.shareTemplates && message.sharedTemplates?.length) {
 						this.shared.importShared(message.sharedTemplates, config.workers.sharedTemplateBatch, true)
 						const rules = this.shared.drainShared(config.workers.sharedTemplateBatch)
@@ -83,7 +99,7 @@ export class WorkerPool {
 					const rules = this.shared.exportShared(config.workers.sharedTemplateEntries)
 					for (let i = 0; i < rules.length; i += config.workers.sharedTemplateBatch) worker.postMessage({ sharedTemplates: rules.slice(i, i + config.workers.sharedTemplateBatch) })
 				}
-				worker.on('error', error => this.fail(error))
+				worker.on('error', error => { if (!current.retiring) this.fail(error) })
 				worker.on('exit', code => {
 					if (!this.failure && !current.retiring) this.fail(new Error(`Worker exited unexpectedly (${code})`))
 				})

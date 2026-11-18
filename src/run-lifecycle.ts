@@ -7,7 +7,7 @@ export class RunLifecycle {
 		let finished = false
 		const unfinished = () => {
 			if (finished) return
-			console.error(`Optimizer stopped unexpectedly while ${this.phase}: pending work remained but no active event-loop handles were available.`)
+			console.error(`Optimizer stopped unexpectedly while ${this.phase}: pending work remained but no active event-loop handles were available. Resident memory: ${Math.round(process.memoryUsage.rss() / 1048576)} MB.`)
 			process.exitCode = 1
 		}
 		process.once('beforeExit', unfinished)

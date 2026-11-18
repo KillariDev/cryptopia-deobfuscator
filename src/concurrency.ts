@@ -1,4 +1,4 @@
-import { totalmem } from 'os'
+import { freemem, totalmem } from 'os'
 
 type Observation = { concurrency: number, elapsedMs: number, removed: number, databaseMs: number, workerMs: number, memoryPressure: number }
 /** Between-round hill climbing; resource pressure overrides throughput experiments. */
@@ -51,8 +51,32 @@ export class AdaptiveConcurrency {
 	}
 }
 
-export function memoryPressure(budgetMegabytes: number) {
+export function memorySnapshot(budgetMegabytes: number) {
 	const constrained = typeof process.constrainedMemory === 'function' ? process.constrainedMemory() : 0
-	const availableBudget = Math.min(budgetMegabytes * 1048576, totalmem() * 0.8, constrained > 0 ? constrained * 0.8 : Infinity)
-	return process.memoryUsage().rss / Math.max(1, availableBudget)
+	const rss = process.memoryUsage.rss(), free = freemem()
+	const budget = Math.min(budgetMegabytes * 1048576, totalmem() * 0.8, constrained > 0 ? constrained * 0.8 : Infinity, rss + free * 0.8)
+	return { rss, budget, free, pressure: rss / Math.max(1, budget) }
+}
+export const memoryPressure = (budgetMegabytes: number) => memorySnapshot(budgetMegabytes).pressure
+
+/** Use every slot while memory allows; pressure is a safety ceiling, not a
+ * throughput heuristic. Recovery is gradual to avoid allocation oscillation. */
+export class MemoryConcurrency {
+	private target: number
+	private nextChange = 0
+	constructor(private maximum: number, initial = maximum) { this.target = Math.max(1, Math.min(maximum, initial)) }
+	limit(requested: number) { return Math.max(1, Math.min(requested, this.target)) }
+	observe(now: number, pressure: number, activeLimit: number) {
+		if (now < this.nextChange) return undefined
+		if (pressure >= 0.9 && activeLimit > 1) {
+			this.target = Math.max(1, Math.min(this.target, Math.floor(activeLimit / 2)))
+			this.nextChange = now + 2000
+			return this.target
+		}
+		if (pressure < 0.65 && this.target < this.maximum) {
+			this.target++; this.nextChange = now + 2000
+			return this.target
+		}
+		return undefined
+	}
 }

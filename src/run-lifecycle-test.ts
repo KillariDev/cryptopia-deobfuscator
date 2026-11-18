@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { optimizerExitMessage } from './exit-status.js'
+
+assert.match(optimizerExitMessage(3221226505), /0xC0000409.*\nWindows reported a native fail-fast crash/)
+assert.equal(optimizerExitMessage(-1073740791), optimizerExitMessage(3221226505).replace('3221226505', '-1073740791'))
+assert.match(optimizerExitMessage(0xC000012D), /insufficient memory or commit capacity/)
+assert.equal(optimizerExitMessage(1), 'Optimizer process exited with code 1.')
 
 const moduleUrl = new URL('./run-lifecycle.js', import.meta.url).href
 const stalled = spawnSync(process.execPath, ['--input-type=module', '-e', `

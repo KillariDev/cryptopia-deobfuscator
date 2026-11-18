@@ -6,7 +6,7 @@ import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResu
 import { StrategySummary, StrategyWeightSummary, formatStrategyActivity } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
-import { AdaptiveConcurrency, memoryPressure } from './concurrency.js'
+import { AdaptiveConcurrency, MemoryConcurrency, memoryPressure, memorySnapshot } from './concurrency.js'
 import { lookupDatabaseTime } from './lookup-statements.js'
 import { loadSharedTables } from './shared-table.js'
 import { ChunkedSequence } from './chunked-sequence.js'
@@ -812,8 +812,33 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	onPhase('loading shared rainbow table snapshots')
 	const sharedTables = await loadSharedTables()
 	onPhase('starting optimizer workers')
-	logTimed(`Starting optimizer with ${nMaxWorkers} worker slot${nMaxWorkers === 1 ? '' : 's'}${config.workers.keepBusy ? ' (continuous scheduling)' : ''}.`)
+	const initialWorkers = Math.min(nMaxWorkers, Math.max(4, config.workers.initialConcurrency))
+	logTimed(`Starting optimizer with ${initialWorkers} workers, up to ${nMaxWorkers} as memory allows${config.workers.keepBusy ? ' (continuous scheduling)' : ''}.`)
 	const pool = new WorkerPool(nMaxWorkers, undefined, sharedTables)
+	const memoryLimit = new MemoryConcurrency(nMaxWorkers, initialWorkers)
+	let requestedConcurrency = nMaxWorkers, activeConcurrency = initialWorkers, adjustingMemory = false
+	let rejectMemory!: (error: Error) => void
+	const memoryFailure = new Promise<never>((_, reject) => { rejectMemory = reject })
+	void memoryFailure.catch(() => {})
+	const monitorMemory = async () => {
+		if (adjustingMemory) return
+		const sample = memorySnapshot(config.workers.memoryBudgetMegabytes)
+		if (activeConcurrency === 1 && sample.pressure >= 1.1) {
+			rejectMemory(new Error(`Memory budget exceeded with one worker (${Math.round(sample.rss / 1048576)} MB resident, ${Math.round(sample.budget / 1048576)} MB budget). Checkpoint retained; reduce graph limits or free memory.`))
+			return
+		}
+		const next = memoryLimit.observe(performance.now(), sample.pressure, activeConcurrency)
+		if (next === undefined) return
+		const limit = memoryLimit.limit(requestedConcurrency)
+		if (limit === activeConcurrency) return
+		adjustingMemory = true
+		const previous = activeConcurrency; activeConcurrency = limit
+		const reportMemory = limit < previous ? logTimed : logVerbose
+		reportMemory(`Memory: ${Math.round(sample.rss / 1048576)} / ${Math.round(sample.budget / 1048576)} MB; worker limit ${previous} -> ${limit}.`)
+		try { if (limit < previous) await pool.trimForMemory(limit); else pool.setConcurrency(limit) }
+		catch (error) { rejectMemory(error instanceof Error ? error : new Error(String(error))) }
+		finally { adjustingMemory = false }
+	}
 	const concurrency = new AdaptiveConcurrency(nMaxWorkers, config.workers.initialConcurrency, config.workers.concurrencySampleRounds, config.workers.concurrencyDatabaseFraction, config.workers.concurrencyRateTolerance)
 	const paths = outputPaths(pathToFileWithoutExt)
 	prepareOutputDirectories()
@@ -841,6 +866,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	beginPhase('preparing next round')
 	// One timer for the entire run; it is never reset at round boundaries.
 	const summaryTimer = setInterval(() => reportStatus(true), config.timing.summarySeconds * 1000)
+	const memoryTimer = setInterval(monitorMemory, 500)
 	try {
 		while(currentGates.length > 0) {
 			onPhase('running optimizer searches')
@@ -853,9 +879,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			let broadStarted = false
 			const plan = roundSearchPlan(currentGates.length, nMaxWorkers, workersSize, config.workers.wholeCircuitMaximumGates)
 			const wholeCircuit = plan.wholeCircuit || (config.workers.keepBusy && currentGates.length < nMaxWorkers)
-			const nWorkers = config.workers.keepBusy ? nMaxWorkers : config.workers.adaptiveConcurrency ? concurrency.limit(Math.min(nMaxWorkers, plan.capacity + Number(runBroad))) : Math.min(nMaxWorkers, plan.capacity + Number(runBroad))
+			requestedConcurrency = config.workers.keepBusy ? nMaxWorkers : config.workers.adaptiveConcurrency ? concurrency.limit(Math.min(nMaxWorkers, plan.capacity + Number(runBroad))) : Math.min(nMaxWorkers, plan.capacity + Number(runBroad))
+			const nWorkers = memoryLimit.limit(requestedConcurrency)
+			activeConcurrency = nWorkers
 			pool.setConcurrency(nWorkers)
-			const localWorkers = Math.max(1, nWorkers - Number(runBroad && nWorkers > 1))
+			// Queue enough independent lanes for the requested capacity so staged
+			// startup can fill newly available slots within this same round.
+			const queueCapacity = config.workers.keepBusy ? requestedConcurrency : nWorkers
+			const localWorkers = Math.max(1, queueCapacity - Number(runBroad && queueCapacity > 1))
 			const requestedJobs = config.workers.keepBusy ? Math.max(nWorkers, localWorkers * config.workers.jobsPerWorker) : localWorkers * config.workers.jobsPerWorker
 			const jobCount = wholeCircuit ? requestedJobs : Math.min(currentGates.length, requestedJobs)
 			const approxGates = wholeCircuit ? Array.from({ length: jobCount }, () => currentGates.slice()) : config.search.balancedWorkers ? balancedChunks(currentGates, jobCount, wireCosts) : splitArrayIntoApproximatelyChunks(currentGates, jobCount)
@@ -979,7 +1010,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 					statuses[index].done = true
 					return snapshots[index]
 				}))
-				const results = await Promise.race([checkpointFailed, Promise.all([local, broad])])
+				const results = await Promise.race([memoryFailure, checkpointFailed, Promise.all([local, broad])])
 				currentGates = roundSearchResult(snapshots, wholeCircuit)
 				if (runBroad) currentGates = roundSearchResult([currentGates, results[1]], true)
 				if (restart) currentGates = roundSearchResult([restart.best, currentGates], true)
@@ -1009,6 +1040,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			}
 		}
 	} finally {
+		clearInterval(memoryTimer)
 		clearInterval(summaryTimer)
 		await pool.close()
 	}

@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { config, configPath } from './config.js'
+import { optimizerExitMessage } from './exit-status.js'
 
 const args = process.argv.slice(2)
 const profile = args[0] === '--profile'
@@ -17,7 +18,7 @@ child.on('exit', (code, signal) => {
 		if (signal !== 'SIGINT') console.error(`Optimizer process terminated by ${signal}.`)
 		process.kill(process.pid, signal)
 	} else {
-		if (code !== 0) console.error(`Optimizer process exited with code ${code ?? 'unknown'}.`)
+		if (code !== 0) console.error(optimizerExitMessage(code))
 		process.exitCode = code ?? 1
 	}
 })
