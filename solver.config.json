@@ -25,7 +25,8 @@
     "concurrencySampleRounds": 2,
     "concurrencyDatabaseFraction": 0.6,
     "concurrencyRateTolerance": 0.05,
-    "memoryBudgetMegabytes": 8192
+    "memoryBudgetMegabytes": 8192,
+    "broadSearchSeconds": 60
   },
   "timing": {
     "roundMinutes": 25,
@@ -144,7 +145,6 @@
   "synthesis": {
     "affine": true,
     "affineMaximumWindowGates": 256,
-    "affineWholeCircuitSeconds": 60,
     "affineMaximumTerms": 100000,
     "affineMaximumOperations": 10000000,
     "templates": true,

@@ -107,17 +107,28 @@ operations per candidate), the wire limit, and the worker job deadline. Exhausti
 any limit declines that candidate without dropping terms or accepting an
 approximate equivalence.
 
-A separate broad affine search receives the complete circuit as a scheduled
-worker job, before the first local round and at subsequent round boundaries at
-most once per `synthesis.affineWholeCircuitSeconds` (default 60 seconds; 0 disables
-broad searches). It is independent of the 256-gate local window. Every strategy,
-including broad affine search, uses only the time remaining in its worker job.
-`workers.jobSeconds` is the single time limit (default 120 seconds, or two
-minutes). Strategies finish early when done and stop cooperatively
-when a better result is found. Gate copying and worker startup are outside the
-job's computation lifetime. State, memory and circuit-size bounds remain active.
-Legacy `synthesis.timeoutMs`, `synthesis.affineWholeCircuitMinutes` and
-`synthesis.attemptEvery` settings are accepted for compatibility but ignored.
+A broad worker searches alongside the chunk workers, using the same toolkit:
+templates, variable elimination, rainbow lookup and eligible synthesis solvers.
+It starts with the full circuit and scans overlapping coarse-to-fine regions.
+Variable and rainbow scans also use full-region and progressively smaller window
+sizes, rather than inheriting the local slice cap; their wire limits still apply.
+At most one broad job runs in a round, scheduled no more often than
+`workers.broadSearchSeconds` (default 60 seconds; 0 disables broad work). The broad
+job is queued first and shares the existing worker cap; with only one available
+slot, jobs run serially. It cannot be starved behind the local job queue. After an improvement, broad
+work is eligible immediately on the new baseline, rather than waiting for the
+old baseline's cadence timer.
+
+A broad improvement is a complete alternative circuit. It is never concatenated
+with old chunk results. Verified improvements stop peer work, cancel queued jobs
+and restart from the best complete candidate returned while stopping. Quiet
+summaries distinguish broad strategy timings and show a running broad worker.
+
+`workers.jobSeconds` is the only time limit (default 120 seconds, or two minutes).
+All strategies use the job's remaining time and stop cooperatively when a better
+result is found. State, memory and circuit-size bounds remain active. Legacy
+`synthesis.affineWholeCircuitSeconds` is accepted as an alias for the broad cadence;
+old per-strategy timer and attempt-cadence settings are accepted but ignored.
 
 Replacements are ordered by gate count, then used-wire count and read cost.
 Multiple workers search circuit chunks, retaining caches between jobs. For circuits

@@ -8,7 +8,7 @@ export type RainbowTableSpec = { wires: number, gates: number }
 export const defaults = {
 	runtime: { heapMegabytes: 16384 },
 	files: { dataDirectory: 'data', latestName: 'latest.json', workerDirectory: 'worker', progressDirectory: 'progress', databaseDirectory: '.' },
-	workers: { wholeCircuitMaximumGates: 2000, maximum: 24, minimumChunkGates: 100, maximumChunkFraction: 0.5, jobsPerWorker: 4, jobSeconds: 120, adaptiveConcurrency: true, initialConcurrency: 4, concurrencySampleRounds: 2, concurrencyDatabaseFraction: 0.6, concurrencyRateTolerance: 0.05, memoryBudgetMegabytes: 8192, shareTemplates: true, sharedTemplateSeconds: 15, sharedTemplateEntries: 64, sharedTemplateBatch: 16 },
+	workers: { broadSearchSeconds: 60, wholeCircuitMaximumGates: 2000, maximum: 24, minimumChunkGates: 100, maximumChunkFraction: 0.5, jobsPerWorker: 4, jobSeconds: 120, adaptiveConcurrency: true, initialConcurrency: 4, concurrencySampleRounds: 2, concurrencyDatabaseFraction: 0.6, concurrencyRateTolerance: 0.05, memoryBudgetMegabytes: 8192, shareTemplates: true, sharedTemplateSeconds: 15, sharedTemplateEntries: 64, sharedTemplateBatch: 16 },
 	timing: { roundMinutes: 25, improvedRoundMinutes: 5, summarySeconds: 30, workerReportSeconds: 5, databaseLogSeconds: 60, standaloneSaveSeconds: 60 },
 	logging: { verbose: false, generationDiagnostics: true, generationDiagnosticsMinimumSeconds: 5, eventLoopResolutionMilliseconds: 20 },
 	validation: { checkpointInputs: 20, probabilisticInputs: 202, maximumWires: 64 },
@@ -16,7 +16,7 @@ export const defaults = {
 	cache: { lookupPolicy: 'lru' as 'fifo' | 'lru', lookupEntries: 1000000, processedEntries: 1000000, shuffleEntries: 100000, subsetEntries: 100000, windowKeyBytes: 16777216 },
 	database: { tables: [{ wires: 3, gates: 6 }, { wires: 4, gates: 5 }, { wires: 5, gates: 2 }], queryBatchSize: 900, lookupBatchMilliseconds: 0, statementCacheEntries: 16, sharedTables: true, sharedTableBytes: 33554432, sharedTableMaximumRows: 100000, memoryMapBytes: 268435456, generationStates: 0, generationBatchRows: 3000, generationReadRows: 4096, generationSqlParameters: 8192, generationPreparedInserts: true, generationCompactBindings: true, generationStagingWriters: 1, generationAppendStaging: false, generationAggregateMerge: true, generationCountFinalInserts: false, generationCandidateCacheMegabytes: 32, generationStreamStaging: true, generationStagingQueueBatches: 2, generationDirectInputMerge: true, generationSortStaging: false, generationStatementCacheEntries: 8, generationCacheMegabytes: 256, generationTempStore: 'file' as 'file' | 'memory', generationJournalMode: 'wal' as 'wal' | 'delete', generationSynchronous: 'full' as 'full' | 'normal', generationWorkers: 8, generationPrefetch: true, generationPrefetchMegabytes: 16, generationQueueBatches: 2, generationMinimumWork: 100000, etaWindowSamples: 5, etaWarmupSamples: 3, etaSmoothing: 0.2, etaMaximumSlowdown: 1, etaTrendWindowSamples: 60, etaTrendMinimumSamples: 10, etaTrendMinimumWorkGrowth: 0.25 },
 	benchmark: { generationStreamingComparison: false, generationFinalComparison: false, finalLookupOutputName: 'final-lookup-benchmark.json', generationWriterComparison: false, generationPrefetchComparison: false, generationStagingComparison: false, mergeOutputName: 'merge-benchmark.json', stagingWideSqlParameters: 16384, stagingRows: 200000, stagingOutputName: 'staging-benchmark.json', dedupSeenRows: [10000, 100000, 1000000], dedupCandidateFunctions: 2000, dedupMasksPerFunction: 4, dedupOutputName: 'dedup-benchmark.json', generationTables: [{ wires: 3, gates: 3 }, { wires: 4, gates: 2 }], generationOutputName: 'generation-benchmark.json', generationTimeoutSeconds: 600, variants: [] as string[], decayFactor: 0.98, mode: 'comparison' as 'comparison' | 'ablation', caseManifest: 'benchmarks/cases.json', caseOutputDirectory: 'benchmark-cases', seconds: 10, repeats: 3, seed: 1729, workerCounts: [1, 2, 4], maximumChecks: 0, maximumOverrunSeconds: 30, outputName: 'benchmark.json' },
-	synthesis: { affine: true, affineMaximumWindowGates: 256, affineWholeCircuitSeconds: 60, affineMaximumTerms: 100000, affineMaximumOperations: 10000000, templates: true, templateEntries: 10000, maximumWires: 3, maximumWindowGates: 8, maximumReplacementGates: 3, states: 2000, forwardSemanticSearch: true, smt: true, meetInMiddle: true, equalitySaturation: true },
+	synthesis: { affine: true, affineMaximumWindowGates: 256, affineMaximumTerms: 100000, affineMaximumOperations: 10000000, templates: true, templateEntries: 10000, maximumWires: 3, maximumWindowGates: 8, maximumReplacementGates: 3, states: 2000, forwardSemanticSearch: true, smt: true, meetInMiddle: true, equalitySaturation: true },
 }
 export type SolverConfig = typeof defaults
 
@@ -27,6 +27,11 @@ export function parseConfig(value: unknown): SolverConfig {
 		if (!Object.prototype.hasOwnProperty.call(defaults, section)) throw new Error(`Unknown config section: ${section}`)
 		if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error(`Invalid config section: ${section}`)
 		for (const [key, setting] of Object.entries(values)) {
+			if (section === 'synthesis' && key === 'affineWholeCircuitSeconds') {
+				if (typeof setting !== 'number' || !Number.isFinite(setting) || setting < 0) throw new Error('Invalid broad search cadence')
+				if ((value as { workers?: Record<string, unknown> }).workers?.broadSearchSeconds === undefined) result.workers.broadSearchSeconds = setting
+				continue
+			}
 			// Legacy strategy timers/cadence are accepted but no longer affect execution.
 			if (section === 'synthesis' && ['timeoutMs', 'affineWholeCircuitMinutes', 'attemptEvery'].includes(key)) continue
 			const target = result[section as keyof SolverConfig] as Record<string, unknown>
@@ -54,7 +59,7 @@ export function parseConfig(value: unknown): SolverConfig {
 			}
 			if (typeof setting !== typeof target[key]) throw new Error(`Invalid type for ${section}.${key}`)
 			if (typeof setting === 'string' && !setting.trim()) throw new Error(`Empty config setting: ${section}.${key}`)
-			if (typeof setting === 'number' && (!Number.isFinite(setting) || (setting < 0 || (setting === 0 && !['affineWholeCircuitSeconds', 'wholeCircuitMaximumGates', 'memoryMapBytes', 'generationStates', 'generationCandidateCacheMegabytes', 'lookupBatchMilliseconds', 'maximumChecks'].includes(key))) || (key !== 'maximumChunkFraction' && key !== 'etaSmoothing' && key !== 'etaMaximumSlowdown' && key !== 'etaTrendMinimumWorkGrowth' && key !== 'schedulerDecay' && key !== 'decayFactor' && key !== 'concurrencyDatabaseFraction' && key !== 'concurrencyRateTolerance' && key !== 'seconds' && !key.endsWith('Minutes') && !key.endsWith('Seconds') && !Number.isSafeInteger(setting)))) throw new Error(`Invalid positive setting: ${section}.${key}`)
+			if (typeof setting === 'number' && (!Number.isFinite(setting) || (setting < 0 || (setting === 0 && !['broadSearchSeconds', 'wholeCircuitMaximumGates', 'memoryMapBytes', 'generationStates', 'generationCandidateCacheMegabytes', 'lookupBatchMilliseconds', 'maximumChecks'].includes(key))) || (key !== 'maximumChunkFraction' && key !== 'etaSmoothing' && key !== 'etaMaximumSlowdown' && key !== 'etaTrendMinimumWorkGrowth' && key !== 'schedulerDecay' && key !== 'decayFactor' && key !== 'concurrencyDatabaseFraction' && key !== 'concurrencyRateTolerance' && key !== 'seconds' && !key.endsWith('Minutes') && !key.endsWith('Seconds') && !Number.isSafeInteger(setting)))) throw new Error(`Invalid positive setting: ${section}.${key}`)
 			target[key] = setting
 		}
 	}

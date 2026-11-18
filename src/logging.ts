@@ -27,6 +27,7 @@ export function formatProgress(initialGates: number, candidateGates: number, com
 }
 
 export type WorkerActivity = {
+	scope?: 'broad'
 	passes: number
 	subsets: number
 	checks: number
@@ -77,9 +78,10 @@ export function formatStatus(status: SolverStatus) {
 		: `Round time: ${duration(elapsedMs)} / ${duration(targetMs)} target (${progress}% elapsed)`
 	const save = saved === undefined ? 'No checkpoint saved this run yet' : saved === candidate ? 'Checkpoint up to date' : `Checkpoint: ${saved} gates; new reductions pending save`
 	const active = statuses.filter(worker => !worker.done && worker.started !== false).length
+	const broad = statuses.filter(worker => !worker.done && worker.started !== false && worker.activity?.scope === 'broad').length
 	const queued = statuses.filter(worker => !worker.done && worker.started === false).length
 	const late = statuses.filter(worker => !worker.done && worker.started !== false && elapsedMs - worker.updatedAtMs > Math.max(config.timing.summarySeconds * 2000, config.timing.workerReportSeconds * 3000)).length
-	return `Gates: ${candidate} (${reduction.toFixed(2)}% fewer than original; ${Math.max(0, roundStart - candidate)} removed this round) | ${save} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
+	return `Gates: ${candidate} (${reduction.toFixed(2)}% fewer than original; ${Math.max(0, roundStart - candidate)} removed this round) | ${save} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
 }
 
 /** Per-job snapshots are summed once, including completed jobs in this round. */
@@ -126,7 +128,7 @@ export class StrategySummary {
 	}
 	finish(job: number) { this.jobs.delete(job) }
 	flush() {
-		const labels: Record<string, string> = { 'gate-simplification': 'simplify', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', 'gf2-affine': 'GF2 local', 'gf2-affine-whole': 'GF2 broad', z3: 'Z3' }
+		const labels: Record<string, string> = { 'gate-simplification': 'simplify', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', 'gf2-affine': 'GF2 local', 'gf2-affine-whole': 'GF2 broad', 'gf2-affine broad': 'GF2 broad window', 'forward-semantic-search broad': 'forward broad', 'meet-in-the-middle broad': 'MITM broad', 'equality-saturation broad': 'equality broad', z3: 'Z3' }
 		const parts = [...this.totals].sort((a, b) => b[1].elapsedMs - a[1].elapsedMs)
 			.map(([name, total]) => `${labels[name] ?? name} ${total.attempts}x/${(total.elapsedMs / 1000).toFixed(2)}s`)
 		this.totals.clear()

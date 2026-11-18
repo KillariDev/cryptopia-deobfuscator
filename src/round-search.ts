@@ -31,6 +31,7 @@ export class WholeCircuitRestart {
 export class PeriodicStrategy {
 	private next = -Infinity
 	constructor(private intervalMs: number) {}
+	retry() { this.next = -Infinity }
 	take(now: number) {
 		if (this.intervalMs <= 0 || now < this.next) return false
 		this.next = now + this.intervalMs

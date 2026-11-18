@@ -992,3 +992,5 @@ await import('./symbolic-affine-test.js')
 await import('./strategy-summary-test.js')
 
 await import('./strategy-picker-test.js')
+
+await import('./broad-search-test.js')
