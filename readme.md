@@ -58,9 +58,9 @@ Default output locations:
 | `data/worker/` | Worker chunk snapshots and disposable generation scratch files |
 | `rainbow_<wires>_<gates>.db` | Reusable lookup tables |
 
-Output folders are created automatically. Worker improvements are verified and
-saved when reported; periodic summaries default to every 30 seconds. Completed
-rounds can also save checkpoints. Cancellation is cooperative, so an optimization
+Output folders are created automatically. The optimizer verifies and saves the
+best available improvement at checkpoint intervals and round end. Periodic
+status summaries default to every 30 seconds. Cancellation is cooperative, so an optimization
 step may take time to finish.
 
 Latest checkpoints and progress folders are named after the input file and stored
@@ -137,8 +137,10 @@ work, and zero disables it. The value no longer sets an interval.
 The broad lane and chunk lane keep separate candidates throughout the round.
 Jobs in either lane can pick up their own lane's improvements. At round end,
 the coordinator compares the complete broad result with the assembled chunk
-result and verifies and saves the winner. Periodic checkpoints continue in
-rounds that only run local searches.
+result and verifies and saves the winner. Periodic status updates and checkpoints
+also use the best complete candidate currently available. The round summary
+reports both gate reductions, which result was kept, and each lane’s strategies
+and worker time.
 
 `workers.jobSeconds` sets the budget for an individual job. Workers stop
 cooperatively at the round boundary, with state, memory and circuit-size limits

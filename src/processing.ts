@@ -1019,18 +1019,22 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		while(currentGates.length > 0) {
 			onPhase('running optimizer searches')
 			optimizerRound++
-			const strategySummary = new StrategySummary()
-			const strategyAssignments = new Map<string, WorkerActivity>()
-			const observeStrategy = (job: number, activity?: WorkerActivity) => {
-				strategySummary.observe(job, activity?.strategies)
+			const roundStrategies = {
+				Local: { timings: new StrategySummary(), assignments: new Map<string, WorkerActivity>() },
+				Global: { timings: new StrategySummary(), assignments: new Map<string, WorkerActivity>() },
+			}
+			const observeStrategy = (side: keyof typeof roundStrategies, job: number, activity?: WorkerActivity) => {
+				const { timings, assignments } = roundStrategies[side]
+				timings.observe(job, activity?.strategies)
 				if (activity?.workerId !== undefined && activity.activeStrategy) {
-					strategyAssignments.set(`${activity.workerId}:${activity.activeStrategy}`, activity)
+					assignments.set(`${activity.workerId}:${activity.activeStrategy}`, activity)
 				}
 			}
 			beginPhase('preparing next round')
 			currentGates = gateSimplifier(currentGates)
 			let lastIterationTime = performance.now()
 			const nPrevGates = currentGates.length
+			let winner: 'local' | 'global' = 'local'
 			const workersSize = getRandomNumberInRange(Math.min(config.workers.minimumChunkGates, currentGates.length), Math.max(1, currentGates.length * config.workers.maximumChunkFraction))
 			const runBroad = nMaxWorkers > 1 && currentGates.length >= minimumBroadGates() && config.workers.broadSearchSeconds > 0
 			const plan = roundSearchPlan(currentGates.length, nMaxWorkers, workersSize, config.workers.wholeCircuitMaximumGates)
@@ -1050,7 +1054,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
 			const stopSignal = new Int32Array(new SharedArrayBuffer(4))
-			const checkpoint = new AsyncReductionCheckpoint(nPrevGates, async snapshot => {
+			const checkpoint = new AsyncReductionCheckpoint(currentGates, async snapshot => {
 				await writer.write([paths.progress(snapshot.length), paths.latest], snapshot)
 			})
 
@@ -1061,19 +1065,19 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const localCandidate = () => roundSearchResult(snapshots, wholeCircuit)
 			const localCount = () => wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)
 			let broadBest = currentGates
-			let pendingLocal = false
-			let localFlush: Promise<void> | undefined
-			const flushLocal = async (): Promise<void> => {
-				if (localFlush) return localFlush
-				if (!pendingLocal) return
-				const assembled = localCandidate()
-				pendingLocal = false
-				localFlush = checkpoint.saveIfReduced(assembled).then(() => {})
-				try { await localFlush } finally { localFlush = undefined }
+			const bestCandidate = () => roundSearchResult([localCandidate(), broadBest], true)
+			let pendingCheckpoint = false
+			let checkpointFlush: Promise<void> | undefined
+			const flushCheckpoint = async (): Promise<void> => {
+				if (checkpointFlush) return checkpointFlush
+				if (!pendingCheckpoint) return
+				const candidate = bestCandidate()
+				pendingCheckpoint = false
+				checkpointFlush = checkpoint.saveIfReduced(candidate).then(() => {})
+				try { await checkpointFlush } finally { checkpointFlush = undefined }
 			}
-			// Only a single search path can publish a provisional checkpoint.
-			const checkpointTimer = runBroad ? undefined : setInterval(() => {
-				void flushLocal().catch(error => { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) })
+			const checkpointTimer = setInterval(() => {
+				void flushCheckpoint().catch(error => { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) })
 			}, config.timing.checkpointSeconds * 1000)
 			const report = (force = false, roundResult?: number) => {
 				const elapsed = performance.now() - lastIterationTime
@@ -1114,14 +1118,16 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 						const broadJob = nextStrategyJob++
 						statuses[jobCount] = { updatedAtMs: performance.now() - lastIterationTime, done: false, started: false }
 						const accept = (candidate: Gate[]) => {
-							if (isReplacementSimpler(candidate, broadBest)) broadBest = candidate
+							if (!isReplacementSimpler(candidate, broadBest)) return
+							broadBest = candidate
+							pendingCheckpoint = true
 						}
 						const result = await pool.run(broadBest, inputCircuit.wire_count, (_, activity, snapshot) => {
-							observeStrategy(broadJob, activity)
+							observeStrategy('Global', broadJob, activity)
 							statuses[jobCount] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
 							if (snapshot) accept(snapshot)
 						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, false, 'broad', optimizerRound)
-						strategySummary.finish(broadJob)
+						roundStrategies.Global.timings.finish(broadJob)
 						statuses[jobCount].done = true
 						accept(result)
 						await yieldToCoordinator()
@@ -1147,17 +1153,17 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 							// results are alternatives, never additional chunks to concatenate.
 							if (!isReplacementSimpler(candidate, snapshots[target])) return
 							snapshots[target] = candidate; candidateCounts[target] = candidate.length
-							pendingLocal = !runBroad
+							pendingCheckpoint = true
 						}
 						const result = await pool.run(dataChunk, inputCircuit.wire_count, (_count, activity, snapshot) => {
 								executionStarted ??= performance.now()
-								observeStrategy(strategyJob, activity)
+								observeStrategy('Local', strategyJob, activity)
 								if (snapshot) {
 									try { accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
 								}
 								statuses[index] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
 							}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, false, 'local', optimizerRound)
-						strategySummary.finish(strategyJob)
+						roundStrategies.Local.timings.finish(strategyJob)
 						if (executionStarted !== undefined) {
 							const cost = (performance.now() - executionStarted) / Math.max(1, dataChunk.length)
 							for (const wire of new Set(dataChunk.flatMap(getVars))) wireCosts.set(wire, ((wireCosts.get(wire) ?? cost) + cost) / 2)
@@ -1174,11 +1180,13 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 					return snapshots[index]
 				}))
 				await Promise.race([memoryFailure, checkpointFailed, Promise.all([local, broad])])
-				currentGates = roundSearchResult([localCandidate(), broadBest], true)
+				const localBest = localCandidate()
+				currentGates = roundSearchResult([localBest, broadBest], true)
+				winner = currentGates === localBest ? 'local' : 'global'
 			} finally {
 				clearInterval(checkpointTimer)
 				Atomics.store(stopSignal, 0, 1)
-				await localFlush
+				await checkpointFlush
 				beginPhase('finishing round')
 			}
 			report(false, currentGates.length)
@@ -1199,13 +1207,19 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			if (!config.workers.keepBusy && !wholeCircuit && !(runBroad && currentGates.length < nPrevGates)) {
 				beginPhase('shuffling next round')
 				const job = nextStrategyJob++
-				try { currentGates = await pool.run(currentGates, inputCircuit.wire_count, (_, activity) => strategySummary.observe(job, activity?.strategies), undefined, config.workers.jobSeconds * 1000, false, 'shuffle') }
-				finally { strategySummary.finish(job) }
+				try { currentGates = await pool.run(currentGates, inputCircuit.wire_count, (_, activity) => roundStrategies.Local.timings.observe(job, activity?.strategies), undefined, config.workers.jobSeconds * 1000, false, 'shuffle') }
+				finally { roundStrategies.Local.timings.finish(job) }
 			}
-			const counts = formatRoundStrategies(strategyAssignments.values())
-			if (counts) logTimed(counts)
-			const timings = strategySummary.flush()
-			if (timings) logTimed(timings)
+			const localRemoved = nPrevGates - localCount()
+			const globalReduction = runBroad ? ` | Global: ${nPrevGates - broadBest.length} gates removed` : ''
+			logTimed(`Round winner: ${winner} | Local: ${localRemoved} gates removed${globalReduction}`)
+			for (const side of ['Local', 'Global'] as const) {
+				const { assignments, timings } = roundStrategies[side]
+				const counts = formatRoundStrategies(assignments.values(), side)
+				if (counts) logTimed(counts)
+				const summary = timings.flush(side)
+				if (summary) logTimed(summary)
+			}
 		}
 	} finally {
 		clearInterval(memoryTimer)

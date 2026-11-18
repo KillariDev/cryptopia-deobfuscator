@@ -46,8 +46,8 @@ try {
 	await assert.rejects(splitTaskAndRun(join(directory, 'early'), 'unused', { originalCircuit: circuit, inputCircuit: circuit }), error => error === done)
 	assert.equal(shuffleCalls, 0, 'large circuits restart immediately after an improvement instead of running 2000 shuffle passes')
 
-	const counts = reports.filter(line => line.includes('Round strategies:'))
-	const timings = reports.filter(line => line.includes('Tried (worker time):'))
+	const counts = reports.filter(line => line.includes('Global strategies:'))
+	const timings = reports.filter(line => line.includes('Global tried (worker time):'))
 	assert.equal(counts.length, 1)
 	assert.match(counts[0], /SAT sweep:1/)
 	assert.equal(timings.length, 1)

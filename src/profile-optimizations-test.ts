@@ -41,6 +41,9 @@ try{
  const checkpoint=new AsyncReductionCheckpoint(10,async()=>{persisted++;await new Promise(r=>setTimeout(r,5))})
  assert.deepEqual(await Promise.all([checkpoint.saveIfReduced([cn,cn]),checkpoint.saveIfReduced([cn,cn,cn])]),[true,false])
  assert.equal(persisted,1,'stale requests cannot regress the saved count')
+ const simpler={a:0,b:0,target:0,gate_i:15}
+ const tied=new AsyncReductionCheckpoint([cn],async()=>{})
+ assert.deepEqual(await Promise.all([tied.saveIfReduced([simpler]),tied.saveIfReduced([cn])]),[true,false],'same-size checkpoints retain the simpler circuit')
  let fail=true
  const retry=new AsyncReductionCheckpoint(10,async()=>{if(fail)throw new Error('disk failure')})
  await assert.rejects(retry.saveIfReduced([]),/disk failure/);assert.equal(retry.hasSaved,false)

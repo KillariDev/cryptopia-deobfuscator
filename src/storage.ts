@@ -2,7 +2,7 @@ import { config } from './config.js'
 import { mkdirSync, writeFileSync } from 'fs'
 import { basename, dirname, join } from 'path'
 import { Gate } from './types.js'
-import { convertToOriginal } from './utils.js'
+import { convertToOriginal, isReplacementSimpler } from './utils.js'
 
 export const outputPaths = (problemName: string, dataDirectory = config.files.dataDirectory) => {
 	const name = basename(problemName)
@@ -45,18 +45,22 @@ export class ReductionCheckpoint {
 }
 
 /** Serialized persistence advances the count only after verification and writes.
- * The count is rechecked when dequeued, so stale requests cannot regress disk. */
+ * The best circuit is rechecked when dequeued, so stale requests cannot regress disk. */
 export class AsyncReductionCheckpoint {
- private savedCount:number
- private tail:Promise<unknown>=Promise.resolve()
- hasSaved=false
- constructor(initial:number,private persist:(gates:Gate[])=>Promise<void>){this.savedCount=initial}
- saveIfReduced(gates:Gate[]){
-  const work=this.tail.then(async()=>{
-   if(gates.length>=this.savedCount)return false
-   await this.persist(gates);this.savedCount=gates.length;this.hasSaved=true;return true
-  })
-  this.tail=work.catch(()=>{})
-  return work
- }
+	private tail: Promise<unknown> = Promise.resolve()
+	hasSaved = false
+	constructor(private best: Gate[] | number, private persist: (gates: Gate[]) => Promise<void>) {}
+
+	saveIfReduced(gates: Gate[]) {
+		const work = this.tail.then(async () => {
+			const better = typeof this.best === 'number' ? gates.length < this.best : isReplacementSimpler(gates, this.best)
+			if (!better) return false
+			await this.persist(gates)
+			this.best = gates
+			this.hasSaved = true
+			return true
+		})
+		this.tail = work.catch(() => {})
+		return work
+	}
 }

@@ -109,7 +109,7 @@ export function formatStrategyActivity(statuses: WorkerStatus[]) {
 }
 
 /** Count each worker once per strategy it was assigned during the round. */
-export function formatRoundStrategies(activities: Iterable<WorkerActivity>): string | undefined {
+export function formatRoundStrategies(activities: Iterable<WorkerActivity>, side?: 'Local' | 'Global'): string | undefined {
 	const workers = new Map<string, Set<number>>()
 	for (const { workerId, activeStrategy } of activities) {
 		if (workerId === undefined || !activeStrategy) continue
@@ -121,7 +121,7 @@ export function formatRoundStrategies(activities: Iterable<WorkerActivity>): str
 	const labels: Record<string, string> = { 'dependency-cuts': 'cuts', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', z3: 'Z3' }
 	const summary = [...counts].sort(([a, countA], [b, countB]) => countB - countA || a.localeCompare(b))
 		.map(([strategy, count]) => `${labels[strategy] ?? strategy}:${count}`).join(', ')
-	return summary ? `Round strategies: ${summary}` : undefined
+	return summary ? `${side ?? 'Round'} strategies: ${summary}` : undefined
 }
 
 /** Round totals from cumulative job reports. */
@@ -143,12 +143,12 @@ export class StrategySummary {
 		}
 	}
 	finish(job: number) { this.jobs.delete(job) }
-	flush() {
+	flush(side?: 'Local' | 'Global') {
 		const labels: Record<string, string> = { 'dependency-cuts': 'cuts', 'dependency-cuts broad': 'cuts broad', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'block-cancellation broad': 'blocks broad', 'sat-sweeping broad': 'SAT sweep broad', 'gate-simplification': 'simplify', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', 'gf2-affine': 'GF2 local', 'gf2-affine-whole': 'GF2 broad', 'symbolic-whole': 'symbolic broad', 'quadratic broad': 'quadratic broad', 'gf2-affine broad': 'GF2 broad window', 'forward-semantic-search broad': 'forward broad', 'meet-in-the-middle broad': 'MITM broad', 'equality-saturation broad': 'equality broad', z3: 'Z3' }
 		const parts = [...this.totals].sort((a, b) => b[1].elapsedMs - a[1].elapsedMs)
 			.map(([name, total]) => `${labels[name] ?? name} ${total.attempts}x/${(total.elapsedMs / 1000).toFixed(2)}s`)
 		this.totals.clear()
-		return parts.length ? `Tried (worker time): ${parts.join(', ')}` : undefined
+		return parts.length ? `${side ? side + ' tried' : 'Tried'} (worker time): ${parts.join(', ')}` : undefined
 	}
 }
 
