@@ -738,7 +738,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	try {
 		while(currentGates.length > 0) {
 			if (config.synthesis.affine && wholeAffine.take(performance.now())) {
-				const result = await pool.run(currentGates, inputCircuit.wire_count, undefined, undefined, config.synthesis.timeoutMs, false, 'affine')
+				const result = await pool.run(currentGates, inputCircuit.wire_count, undefined, undefined, config.synthesis.affineWholeCircuitMinutes * 60_000, false, 'affine')
 				if (result.length < currentGates.length) {
 					save([paths.progress(result.length), paths.latest], result, inputCircuit.wire_count, originalGates)
 					currentGates = result

@@ -104,7 +104,9 @@ A separate broad affine search receives the complete circuit as a scheduled
 worker job, before the first local round and at subsequent round boundaries at
 most once per `synthesis.affineWholeCircuitSeconds` (default 60 seconds; 0 disables
 broad searches). It is independent of the 256-gate local window and uses
-`synthesis.timeoutMs` as a computation budget (default 100 ms). Scanning, matrix
+`synthesis.affineWholeCircuitMinutes` as a computation budget (default 2 minutes).
+The search returns as soon as it finishes; this is a maximum duration, not a
+minimum runtime. Local synthesis still uses `synthesis.timeoutMs` (100 ms). Scanning, matrix
 composition and elimination check deadlines and cancellation cooperatively; only
 fully verified region improvements are retained. Gate copying and worker startup
 are outside this computation budget. This is linear scanning plus bounded matrix
