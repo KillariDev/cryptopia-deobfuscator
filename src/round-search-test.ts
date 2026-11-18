@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { roundSearchPlan, roundSearchResult } from './round-search.js'
+import { WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { parseConfig } from './config.js'
 import { evalCircuit, generateCombinations } from './utils.js'
 import { Gate } from './types.js'
@@ -28,3 +28,24 @@ for (const input of generateCombinations(3)) {
 }
 assert.deepEqual(roundSearchResult([[cn], [not], [cn]], false), original)
 console.log('Small-circuit full-context capacity, winner selection, equivalence and chunk assembly passed')
+
+const stop = new Int32Array(new SharedArrayBuffer(4))
+const saved: Gate[][] = []
+const restart = new WholeCircuitRestart(original, stop, candidate => {
+	if (!saved.length) assert.equal(Atomics.load(stop, 0), 0, 'persist and verify before signaling peers')
+	saved.push(candidate)
+})
+assert.equal(restart.accept(original.slice()), false, 'equal results do not interrupt searches')
+assert.equal(Atomics.load(stop, 0), 0)
+assert.equal(restart.accept([not]), true)
+assert.equal(Atomics.load(stop, 0), 1)
+assert.equal(restart.accept(original), false, 'late stale results cannot replace the new best')
+assert.equal(restart.accept([]), true, 'a better result arriving while peers stop is retained')
+assert.deepEqual(restart.best, [])
+assert.deepEqual(saved, [[not], []])
+const failedStop = new Int32Array(new SharedArrayBuffer(4))
+const failed = new WholeCircuitRestart(original, failedStop, () => { throw new Error('verification failed') })
+assert.throws(() => failed.accept([not]), /verification failed/)
+assert.equal(Atomics.load(failedStop, 0), 0)
+assert.deepEqual(failed.best, original)
+console.log('Verified improvement restart, late winner retention, stale result rejection and failed-save safety passed')

@@ -1,4 +1,4 @@
-import { roundSearchPlan, roundSearchResult } from './round-search.js'
+import { WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { formatStrategyActivity } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
@@ -579,7 +579,7 @@ export const createOptimizerCaches = () => ({
 	methodCaches: new Map<string, LimitedMap<string, boolean>>(),
 })
 
-export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number) => boolean) => {
+export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number) => boolean, reportOnImprovement = false) => {
 	resetStrategyStats()
 	const jobStarted = performance.now(), databaseStarted = lookupDatabaseTime()
 	let optimizedVersion = originalGates.slice()
@@ -610,7 +610,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	}
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
-		if (onProgress && endTime - lastProgress >= config.timing.workerReportSeconds * 1000) {
+		if (onProgress && ((reportOnImprovement && wantsSnapshot?.(candidateParts.length)) || endTime - lastProgress >= config.timing.workerReportSeconds * 1000)) {
 			onProgress(candidateParts.length, progressActivity(), wantsSnapshot && !wantsSnapshot(candidateParts.length) ? undefined : candidateParts.materialize())
 			lastProgress = endTime
 		}
@@ -750,6 +750,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				save([paths.progress(snapshot.length), paths.latest], snapshot, inputCircuit.wire_count, originalGates)
 				savedGateCount = snapshot.length
 			})
+			const restart = wholeCircuit ? new WholeCircuitRestart(currentGates, stopSignal, candidate => {
+				checkpoint.saveIfReduced(candidate)
+				if (Atomics.load(stopSignal, 0) === 0) logTimed(`New best: ${candidate.length} gates; stopping current searches and restarting from the verified checkpoint.`)
+			}) : undefined
 			let rejectCheckpoint!: (error: unknown) => void
 			const checkpointFailed = new Promise<never>((_, reject) => { rejectCheckpoint = reject })
 			let completed = 0
@@ -758,7 +762,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				const elapsed = performance.now() - lastIterationTime
 				logVerbose(formatProgress(nPrevGates, (wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)), completed, jobCount, elapsed))
 				logVerbose(formatWorkerActivity(statuses, elapsed, WORKER_ROUND_MS))
-				const snapshot = roundSearchResult(snapshots, wholeCircuit)
+				const snapshot = roundSearchResult(restart ? [restart.best, ...snapshots] : snapshots, wholeCircuit)
 				checkpoint.saveIfReduced(snapshot)
 				logTimed(formatStrategyActivity(statuses))
 				logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate: snapshot.length, saved: savedGateCount, statuses, elapsedMs: elapsed }))
@@ -779,21 +783,26 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 					let executionStarted: number | undefined
 					const result = await pool.run(dataChunk, inputCircuit.wire_count, (count, activity, snapshot) => {
 							executionStarted ??= performance.now()
-							if (snapshot) snapshots[index] = snapshot
+							if (snapshot) {
+								snapshots[index] = snapshot
+								try { restart?.accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
+							}
 							candidateCounts[index] = count
 							statuses[index] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
-						}, stopSignal.buffer as SharedArrayBuffer)
+						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, wholeCircuit)
 					if (executionStarted !== undefined) {
 						const cost = (performance.now() - executionStarted) / Math.max(1, dataChunk.length)
 						for (const wire of new Set(dataChunk.flatMap(getVars))) wireCosts.set(wire, ((wireCosts.get(wire) ?? cost) + cost) / 2)
 					}
 					candidateCounts[index] = result.length
 					snapshots[index] = result
+					restart?.accept(result)
 					completed++
 					statuses[index].done = true
 					writeCircuit(workerFile, inputCircuit.wire_count, result)
 					return result
 				}))]), wholeCircuit)
+				if (restart) currentGates = roundSearchResult([restart.best, currentGates], true)
 			} finally {
 				clearInterval(summaryTimer)
 			}
@@ -813,7 +822,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				if (reason) logTimed(`Next round worker target: ${concurrency.limit(nMaxWorkers)} (${reason})`)
 			}
 			logTimed(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
-			shuffleRowsWithDependentGateSwap(currentGates, config.search.roundShufflePasses)
+			if (!wholeCircuit) shuffleRowsWithDependentGateSwap(currentGates, config.search.roundShufflePasses)
 		}
 	} finally {
 		await pool.close()

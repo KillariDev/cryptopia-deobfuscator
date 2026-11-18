@@ -13,3 +13,16 @@ export function roundSearchResult(candidates: Gate[][], wholeCircuit: boolean): 
 	if (!candidates.length) throw new Error('No whole-circuit search candidates')
 	return candidates.reduce((best, candidate) => improving(best)(candidate) ? candidate : best)
 }
+
+/** Verify/persist before stopping peers, and keep better results returned while draining. */
+export class WholeCircuitRestart {
+	best: Gate[]
+	constructor(initial: Gate[], private stop: Int32Array, private persist: (candidate: Gate[]) => void) { this.best = initial }
+	accept(candidate: Gate[]) {
+		if (candidate.length >= this.best.length) return false
+		this.persist(candidate)
+		this.best = candidate
+		Atomics.store(this.stop, 0, 1)
+		return true
+	}
+}

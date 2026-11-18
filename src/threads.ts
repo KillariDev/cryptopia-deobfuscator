@@ -13,7 +13,7 @@ export function configuredWorkerCount() {
 	return count
 }
 
-type Job = { budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
+type Job = { restartOnImprovement: boolean, budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
 export class WorkerPool {
 	private slots: { worker: Worker, job?: Job, retiring?: boolean }[] = []
 	private queue: Job[] = []
@@ -38,11 +38,11 @@ export class WorkerPool {
 		}
 		await Promise.all(retired.map(worker => worker.terminate()))
 	}
-	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000): Promise<Gate[]> {
+	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000, restartOnImprovement = false): Promise<Gate[]> {
 		if (this.failure) return Promise.reject(this.failure)
 		if (!Number.isFinite(budgetMs) || budgetMs <= 0) return Promise.reject(new Error('Invalid job budget'))
 		return new Promise((resolve, reject) => {
-			this.queue.push({ budgetMs, gates, wires, stopSignal, onProgress, resolve, reject })
+			this.queue.push({ restartOnImprovement, budgetMs, gates, wires, stopSignal, onProgress, resolve, reject })
 			this.dispatch()
 		})
 	}
@@ -85,7 +85,7 @@ export class WorkerPool {
 				})
 			}
 			slot.job = this.queue.shift()!
-			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs })
+			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs, restartOnImprovement: slot.job.restartOnImprovement })
 		}
 	}
 	private fail(error: Error) {

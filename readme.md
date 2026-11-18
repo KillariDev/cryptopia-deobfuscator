@@ -93,7 +93,10 @@ The solver combines several approaches:
 Replacements are ordered by gate count, then used-wire count and read cost.
 Multiple workers search circuit chunks, retaining caches between jobs. For circuits
 with at most 2,000 gates, workers instead run independent whole-circuit searches
-and keep the best result, preserving opportunities across chunk boundaries. The
+and keep the best result, preserving opportunities across chunk boundaries. Each
+strict gate-count improvement is immediately verified and saved, then active
+searches stop cooperatively and queued jobs are discarded. The next round starts
+from the new best; any better result returned while stopping is retained. The
 coordinator verifies combined results before saving them. By default, improving
 rounds aim to finish after five minutes; rounds without reductions retain a
 25-minute budget. Later rounds repartition and shuffle the circuit.

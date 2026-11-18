@@ -10,7 +10,7 @@ import { WORKER_ROUND_MS } from './job.js'
 let portfolio: ReturnType<typeof openRainbowPortfolio> | undefined
 const caches = createOptimizerCaches()
 let lastShared = performance.now()
-parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, sharedTemplates }: { sharedTemplates?: TemplateRule[], gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number }) => {
+parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, restartOnImprovement = false, sharedTemplates }: { sharedTemplates?: TemplateRule[], gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, restartOnImprovement?: boolean }) => {
 	try {
 		if (sharedTemplates !== undefined) {
 			if (config.workers.shareTemplates) templates.importShared(sharedTemplates, config.workers.sharedTemplateBatch)
@@ -27,7 +27,7 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, sharedTem
 			const sharedTemplates = config.workers.shareTemplates && now - lastShared >= config.workers.sharedTemplateSeconds * 1000 ? templates.drainShared(config.workers.sharedTemplateBatch) : []
 			if (sharedTemplates.length) lastShared = now
 			parentPort!.postMessage({ progress: count, activity, snapshot, sharedTemplates })
-		}, activity => (stop !== undefined && Atomics.load(stop, 0) !== 0) || (workerData?.maximumChecks > 0 && (activity?.checks ?? 0) >= workerData.maximumChecks), count => count < lastSnapshotCount)
+		}, activity => (restartOnImprovement && lastSnapshotCount < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0) || (workerData?.maximumChecks > 0 && (activity?.checks ?? 0) >= workerData.maximumChecks), count => count < lastSnapshotCount, restartOnImprovement)
 		parentPort!.postMessage({ gates: result, sharedTemplates: config.workers.shareTemplates ? templates.drainShared(config.workers.sharedTemplateBatch) : [] })
 	} catch (error) {
 		parentPort!.postMessage({ error: String(error) })
