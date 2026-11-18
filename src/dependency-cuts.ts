@@ -29,6 +29,7 @@ export class DependencyCutIndex {
 		}
 		this.outputSeeds = [...new Set(writers.values())].sort((a, b) => b - a)
 	}
+	setStop(stopped: () => boolean) { this.stopped = stopped }
 	private check() { if (this.stopped()) throw new CutCancelled('Dependency cut canceled') }
 	/** A right-closed region can move to its final selected gate without
 	 * crossing any conflicting unselected operation. */
@@ -120,11 +121,20 @@ export class DependencyCutIndex {
 	}
 }
 
+const indexes = new WeakMap<object, { key: string, index: DependencyCutIndex, regions: Generator<DependencyCut> }>()
+
 export type CutSearchStats = { regions: number, solverMs: number }
-export async function searchDependencyCuts(input: Gate[], stopped: () => boolean, solve: (cut: DependencyCut) => Promise<Gate[] | undefined>, offset = 0, stats: CutSearchStats = { regions: 0, solverMs: 0 }): Promise<Gate[] | undefined> {
+export async function searchDependencyCuts(input: Gate[], stopped: () => boolean, solve: (cut: DependencyCut) => Promise<Gate[] | undefined>, offset = 0, stats: CutSearchStats = { regions: 0, solverMs: 0 }, cache?: object): Promise<Gate[] | undefined> {
 	try {
-		const index = new DependencyCutIndex(input, stopped)
-		for (const cut of index.regions(offset)) {
+		const key = cache ? JSON.stringify(input) : ''
+		let entry = cache ? indexes.get(cache) : undefined
+		if (!entry || entry.key !== key) {
+			const index = new DependencyCutIndex(input, stopped)
+			entry = { key, index, regions: index.regions(offset) }; if (cache) indexes.set(cache, entry)
+		}
+		const { index, regions } = entry; index.setStop(stopped)
+		while (!stopped()) {
+			const next = regions.next(); if(next.done) { if(cache) indexes.delete(cache); break }; const cut = next.value
 			stats.regions++
 			const started = performance.now(), result = await solve(cut)
 			stats.solverMs += performance.now() - started

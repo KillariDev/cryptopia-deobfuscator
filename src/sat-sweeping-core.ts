@@ -32,7 +32,7 @@ function simulate(graph: FactoredGraph, assignment: bigint): boolean[] {
 
 /** Simulation suggests identities; only UNSAT miters authorize a merge.
  * Rebuild congruence after each batch and repeat on the compact live cone. */
-export async function sweepFactored(gates: Gate[], options: FactoredOptions, deadline: number, stats: SweepStats = { queries: 0, merges: 0, counterexamples: 0 }): Promise<Gate[] | undefined> {
+export async function sweepFactored(gates: Gate[], options: FactoredOptions, deadline: number, stats: SweepStats = { queries: 0, merges: 0, counterexamples: 0 }, engine?: Awaited<ReturnType<typeof import('z3-solver').init>>): Promise<Gate[] | undefined> {
 	try {
 		const stopped = () => options.stopped() || performance.now() >= deadline
 		let working = analyzeFactored(gates, { ...options, stopped })
@@ -49,7 +49,7 @@ export async function sweepFactored(gates: Gate[], options: FactoredOptions, dea
 		if (!hasCandidates) return undefined
 		const samples: bigint[] = []
 		const { init, killThreads } = await import('z3-solver')
-		const api = await init({ printErr: reportSmtDiagnostic })
+		const api = engine ?? await init({ printErr: reportSmtDiagnostic })
 		try {
 			const { Solver, Bool, Xor, And, isTrue } = new api.Context('sweeping')
 			while (!stopped()) {
@@ -139,6 +139,6 @@ export async function sweepFactored(gates: Gate[], options: FactoredOptions, dea
 				if (result) return result
 			}
 			return undefined
-		} finally { await killThreads(api.em) }
+		} finally { if (!engine) await killThreads(api.em) }
 	} catch (error) { if (error instanceof FactoredLimit) return undefined; throw error }
 }

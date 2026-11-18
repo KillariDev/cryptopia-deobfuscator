@@ -1,3 +1,4 @@
+import { SearchProgress } from './search-progress.js'
 import { config } from './config.js'
 import { Gate } from './types.js'
 import { WorkerActivity } from './logging.js'
@@ -23,6 +24,8 @@ export function* broadRegions(length: number): Generator<{ start: number, end: n
 	}
 }
 
+const cursors = new WeakMap<object, SearchProgress>()
+
 /** Same toolkit as local search, with larger contexts and scan widths. */
 export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires: number, caches: ReturnType<typeof createOptimizerCaches>, budgetMs: number, shouldStop: () => boolean, onProgress: (count: number, activity: WorkerActivity, snapshot?: Gate[]) => void): Promise<Gate[]> {
 	const deadline = performance.now() + budgetMs
@@ -30,7 +33,13 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 	const activity: WorkerActivity = { scope: 'broad', passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
 	const report = (snapshot?: Gate[]) => onProgress(snapshot?.length ?? input.length, { ...activity, strategyWeights: config.search.strategyAdaptive ? caches.broadStrategyPicker.weights() : undefined, strategies: strategySnapshot().map(stat => ({ ...stat, strategy: ['gf2-affine-whole', 'symbolic-whole'].includes(stat.strategy) ? stat.strategy : `${stat.strategy} broad` })) }, snapshot)
 	report()
-	for (const { start, end } of broadRegions(input.length)) {
+	let cursor = cursors.get(caches)
+	if (!cursor) { cursor = new SearchProgress(); cursors.set(caches, cursor) }
+	cursor.reset(input, () => broadRegions(input.length))
+	while (!stopped()) {
+		const task = cursor.next(config.search.sliceMinimum)
+		if (!task) break
+		const { start, end, slice } = task
 		if (stopped()) break
 		activity.subsets++
 		const region = input.slice(start, end)
@@ -56,7 +65,7 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 		const preparation = new SubsetPreparation(region)
 		// Large windows first: variables and rainbow lookup get the full region,
 		// then progressively smaller scans, rather than the local slice cap.
-		for (let slice = region.length; slice >= config.search.sliceMinimum; slice = Math.floor(slice / 2)) {
+		{
 			if (stopped()) break
 			activity.passes++; activity.checks++
 			const next = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, slice, config.search.probabilistic, config.search.variableElimination, true, preparation, { deadline, shouldStop, broad: true, onProgress: () => report() }, caches.broadStrategyPicker)

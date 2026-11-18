@@ -1,3 +1,4 @@
+import { learningBytes } from './shared-learning.js'
 import type { SharedTable } from './shared-table.js'
 import { TemplateLibrary, TemplateRule } from './templates.js'
 import { config } from './config.js'
@@ -17,6 +18,7 @@ type Job = { solver: 'local' | 'affine' | 'broad' | 'shuffle', restartOnImprovem
 export class WorkerPool {
 	private slots: { worker: Worker, job?: Job, retiring?: boolean }[] = []
 	private queue: Job[] = []
+	private strategyLearning = new SharedArrayBuffer(learningBytes)
 	private failure?: Error
 	private concurrency: number
 	private shared = new TemplateLibrary(config.workers.sharedTemplateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates)
@@ -74,7 +76,7 @@ export class WorkerPool {
 			let slot = this.slots.find(slot => !slot.job)
 			if (!slot) {
 				if (this.slots.length >= this.size) return
-				const worker = new Worker(this.workerUrl, { workerData: { solverConfig: config, sharedTables: this.sharedTables, solverSeed: this.seed === undefined ? undefined : this.seed + this.slots.length, maximumChecks: this.maximumChecks } })
+				const worker = new Worker(this.workerUrl, { workerData: { solverConfig: config, strategyLearning: this.strategyLearning, sharedTables: this.sharedTables, solverSeed: this.seed === undefined ? undefined : this.seed + this.slots.length, maximumChecks: this.maximumChecks } })
 				slot = { worker }
 				const current = slot
 				this.slots.push(current)
