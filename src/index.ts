@@ -13,6 +13,7 @@ const run = async (pathToFileWithoutExt: string, original: string, startOver: bo
 		await splitTaskAndRun(pathToFileWithoutExt, original, circuits)
 	} catch(e: unknown) {
 		console.error(e)
+		process.exitCode = 1
 	}
 }
 const args = process.argv.slice(2)

@@ -1000,3 +1000,5 @@ await import('./polynomial-synthesis-test.js')
 await import('./coordinator-status-test.js')
 
 await import('./adaptive-strategy-test.js')
+
+await import('./probabilistic-rewrite-test.js')

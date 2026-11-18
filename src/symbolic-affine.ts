@@ -50,6 +50,31 @@ function composePolynomials(input: Gate[], wires: number[], maximumTerms: number
 	return rows
 }
 
+/** Exact admission check after sampling. Inconclusive/resource-limited checks
+ * return undefined, never permission to rewrite. Cache the original ANF only
+ * for this candidate search, and compute it lazily after samples agree. */
+export function createPolynomialEquivalenceChecker(input: Gate[], nVariables: number, maximumTerms: number, maximumOperations: number, shouldStop: () => boolean = () => false) {
+	const wires = Array.from({ length: nVariables }, (_, i) => i)
+	let attempted = false, expected: Set<bigint>[] | undefined
+	return (candidate: Gate[]): boolean | undefined => {
+		if (shouldStop()) return undefined
+		let operations = 0
+		const spend = () => ++operations > maximumOperations || (operations % 256 === 0 && shouldStop())
+		if (!attempted) {
+			attempted = true
+			expected = composePolynomials(input, wires, maximumTerms, shouldStop, spend)
+		}
+		if (!expected) return undefined
+		for (let i = 0; i < candidate.length; i++) {
+			if (i % 256 === 0 && shouldStop()) return undefined
+			if (getVars(candidate[i]).some(wire => !Number.isInteger(wire) || wire < 0 || wire >= nVariables)) return false
+		}
+		const actual = composePolynomials(candidate, wires, maximumTerms, shouldStop, spend)
+		if (!actual) return undefined
+		return actual.every((row, i) => row.size === expected![i].size && [...row].every(term => expected![i].has(term)))
+	}
+}
+
 /** Exact Boolean-polynomial composition, including nonlinear intermediates.
  * Resource exhaustion declines the rewrite; it never guesses affine behavior. */
 export function synthesizeMixedAffine(input: Gate[], maximumWires: number, maximumTerms: number, maximumOperations: number, deadline = Infinity, shouldStop: () => boolean = () => false, allowQuadratic = false): Gate[] | undefined {

@@ -131,9 +131,20 @@ export function formatStrategyWeights(statuses: WorkerStatus[]): string[] {
 		const parts = [...totals].filter(([, total]) => total.attempts > 0)
 			.sort((a, b) => b[1].weight / b[1].workers - a[1].weight / a[1].workers)
 			.map(([name, total]) => `${labels[name] ?? name} ${(total.weight / total.workers).toFixed(2)}x`)
-		if (parts.length) lines.push(`Strategy weights (${scope}, ${workers.size} worker${workers.size === 1 ? '' : 's'} averaged; untried=1.00x): ${parts.join(', ')}`)
+		if (parts.length) lines.push(`Strategy weights (${scope}): ${parts.join(', ')}`)
 	}
 	return lines
+}
+
+/** Keep weights available to summaries during restarts and between rounds. */
+export class StrategyWeightSummary {
+	private latest = new Map<string, WorkerStatus>()
+	private revision = 0
+	observe(activity?: WorkerActivity) {
+		if (!activity?.strategyWeights || activity.workerId === undefined) return
+		this.latest.set(`${activity.scope ?? 'local'}:${activity.workerId}`, { activity, updatedAtMs: ++this.revision, done: true })
+	}
+	format() { return formatStrategyWeights([...this.latest.values()]) }
 }
 
 /** Interval deltas from cumulative job reports, retained across round restarts. */

@@ -1,6 +1,7 @@
 import { AdaptiveStrategyPicker } from './strategy-picker.js'
+import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
-import { StrategySummary, formatStrategyActivity, formatStrategyWeights } from './logging.js'
+import { StrategySummary, StrategyWeightSummary, formatStrategyActivity } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
 import { AdaptiveConcurrency, memoryPressure } from './concurrency.js'
@@ -164,11 +165,13 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 	const cachedOutputs: boolean[][] = []
 	const canImprove = improving(mappedGates)
 	if (nVariables < MAX_DETERMINISTIC_USELESS_VARS) return undefined // no need to do this approach for less than 8 vars as we have exact way already
-	if (areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, [], INPUTS, nVariables)) return []
+	const proveEquivalent = createPolynomialEquivalenceChecker(mappedGates, nVariables, config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, shouldStop)
+	const accepted = (candidate: Gate[]) => areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, candidate, INPUTS, nVariables) && proveEquivalent(candidate) === true
+	if (accepted([])) return []
 	
 	const combined = combineGates(mappedGates, shouldStop)
 	if (combined.combined) {
-		if (canImprove(combined.gates) && areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, combined.gates, INPUTS, nVariables)) {
+		if (canImprove(combined.gates) && accepted(combined.gates)) {
 			return reverseMapCircuit(combined.gates, variableIndexMapping)
 		}
 	}
@@ -176,7 +179,7 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 	for (let variableIndex = 0; variableIndex < nVariables; variableIndex++) {
 		if (shouldStop()) return undefined
 		const newRemovedCircuit = removeVariable(mappedGates, variableIndex)
-		if (canImprove(newRemovedCircuit) && areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newRemovedCircuit, INPUTS, nVariables)) {
+		if (canImprove(newRemovedCircuit) && accepted(newRemovedCircuit)) {
 			return reverseMapCircuit(newRemovedCircuit, variableIndexMapping)
 		}
 		const hasVariableIndexAsNontarget = mappedGates.find((x) => {
@@ -185,7 +188,7 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 		}) !== undefined
 		if (hasVariableIndexAsNontarget) {
 			const newRemovedCircuitNontarget = removeNonTargetVariable(mappedGates, variableIndex)
-			if (canImprove(newRemovedCircuitNontarget) && areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newRemovedCircuitNontarget, INPUTS, nVariables)) {
+			if (canImprove(newRemovedCircuitNontarget) && accepted(newRemovedCircuitNontarget)) {
 				return reverseMapCircuit(newRemovedCircuitNontarget, variableIndexMapping)
 			}
 		}
@@ -193,13 +196,13 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 			if (shouldStop()) return undefined
 			if (variableIndexMapping[variableIndex] <= variableIndexMapping[newVar]) continue
 			const newCircuit = mappedGates.map((gate) => replaceVar(gate, variableIndex, newVar))
-			if (canImprove(newCircuit) && areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newCircuit, INPUTS, nVariables)) {
+			if (canImprove(newCircuit) && accepted(newCircuit)) {
 				return reverseMapCircuit(newCircuit, variableIndexMapping)
 			}
 			
 			if (hasVariableIndexAsNontarget) {
 				const newCircuit2 = mappedGates.map((gate) => replaceNonTargetVar(gate, variableIndex, newVar))
-				if (canImprove(newCircuit2) && areCircuitsProbabilisticallyTheSame(cachedOutputs, mappedGates, newCircuit2, INPUTS, nVariables)) {
+				if (canImprove(newCircuit2) && accepted(newCircuit2)) {
 					return reverseMapCircuit(newCircuit2, variableIndexMapping)
 				}
 			}
@@ -807,6 +810,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	const wireCosts = new Map<number, number>()
 	let savedGateCount: number | undefined
 	const strategySummary = new StrategySummary()
+	const strategyWeights = new StrategyWeightSummary()
 	let nextStrategyJob = 0
 	const broadSchedule = new PeriodicStrategy(config.workers.broadSearchSeconds * 1000)
 	const summaryThrottle = new SummaryThrottle(config.timing.summarySeconds * 1000)
@@ -820,6 +824,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				const summary = strategySummary.flush()
 				if (summary) logTimed(summary)
 			}
+			for (const weights of strategyWeights.format()) logTimed(weights)
 		}
 	}
 	beginPhase('preparing next round')
@@ -868,6 +873,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 						const summary = strategySummary.flush()
 						if (summary) logTimed(summary)
 					}
+					for (const weights of strategyWeights.format()) logTimed(weights)
 				}
 				if ((elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, snapshot.length)) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
@@ -884,6 +890,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				const broadJob = nextStrategyJob++
 				const broad = runBroad ? pool.run(currentGates, inputCircuit.wire_count, (_, activity, snapshot) => {
 					strategySummary.observe(broadJob, activity?.strategies)
+					strategyWeights.observe(activity)
 					statuses[jobCount] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
 					if (snapshot) try { restart!.accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
 				}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, true, 'broad').then(result => {
@@ -899,6 +906,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 					const result = await pool.run(dataChunk, inputCircuit.wire_count, (count, activity, snapshot) => {
 							executionStarted ??= performance.now()
 							strategySummary.observe(strategyJob, activity?.strategies)
+							strategyWeights.observe(activity)
 							if (snapshot) {
 								snapshots[index] = snapshot
 								try { restart?.accept(wholeCircuit ? snapshot : localCandidate()) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
@@ -926,7 +934,6 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			} finally { beginPhase('finishing round') }
 			if (runBroad && currentGates.length < nPrevGates) broadSchedule.retry()
 			report()
-			for (const weights of formatStrategyWeights(statuses)) logTimed(weights)
 			const filename = paths.progress(currentGates.length)
 			if (!checkpoint.hasSaved) {
 				save([filename, paths.latest], currentGates, inputCircuit.wire_count, originalGates)
