@@ -146,6 +146,8 @@
     "affineMaximumWindowGates": 256,
     "affineWholeCircuitSeconds": 60,
     "affineWholeCircuitMinutes": 2,
+    "affineMaximumTerms": 100000,
+    "affineMaximumOperations": 10000000,
     "templates": true,
     "templateEntries": 10000,
     "maximumWires": 3,

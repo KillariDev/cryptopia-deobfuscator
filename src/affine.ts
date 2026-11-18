@@ -45,6 +45,11 @@ export function synthesizeAffine(input: Gate[], maximumWires = 64, deadline = In
 	const wires = [...used].sort((a, b) => a - b)
 	const original = expressions(gates, wires, stopped)
 	if (!original) return undefined
+	return synthesizeAffineMap(original, wires, input.length, stopped)
+}
+
+/** Synthesize a matrix established by an exact symbolic analysis. */
+export function synthesizeAffineMap(original: bigint[], wires: number[], maximumGates: number, stopped: () => boolean): Gate[] | undefined {
 	const rows = original.slice()
 	const bits = wires.map((_, index) => 1n << BigInt(index))
 	const constant = 1n << BigInt(wires.length)
@@ -61,12 +66,12 @@ export function synthesizeAffine(input: Gate[], maximumWires = 64, deadline = In
 			addRow(pivot, column); addRow(column, pivot); addRow(pivot, column)
 		}
 		for (let row = 0; row < wires.length; row++) if (row !== column && (rows[row] & bits[column]) !== 0n) addRow(column, row)
-		if (operations.length >= input.length) return undefined
+		if (operations.length >= maximumGates) return undefined
 	}
 	// Row operations reduce M to I. Their reverse therefore synthesizes M.
 	const result = operations.reverse()
 	for (let index = 0; index < wires.length; index++) if ((original[index] & constant) !== 0n) result.push({ a: 0, b: 0, target: wires[index], gate_i: 15 })
-	if (result.length >= input.length) return undefined
+	if (result.length >= maximumGates) return undefined
 	const actual = expressions(result, wires, stopped)
 	if (!actual) return undefined
 	if (actual.some((row, index) => row !== original[index])) throw new Error('Affine synthesis failed exact symbolic verification')

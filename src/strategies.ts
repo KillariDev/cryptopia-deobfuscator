@@ -1,4 +1,4 @@
-import { simplifyAffineRegions } from './affine.js'
+import { searchAffineRegions } from './symbolic-affine.js'
 import { synthesizeSMT } from './smt.js'
 import { recordStrategy } from './strategy-stats.js'
 import { config } from './config.js'
@@ -30,7 +30,7 @@ export async function advancedRewrite(gates: Gate[], random = Math.random): Prom
 		if (small && options.meetInMiddle) choices.push({ name: 'meet-in-the-middle', run: () => meetInMiddle(normalized, wires.length, [...generateAllGates(wires.length)], Math.min(options.maximumReplacementGates, gates.length - 1), options.states, options.timeoutMs) })
 		if (small && options.equalitySaturation) choices.push({ name: 'equality-saturation', run: () => saturateCircuit(normalized, wires.length, templates, options.states, options.timeoutMs) })
 		if (affine) choices.push({ name: 'gf2-affine', run: () => {
-			const result = simplifyAffineRegions(normalized, config.validation.maximumWires, performance.now() + options.timeoutMs)
+			const result = searchAffineRegions(normalized, config.validation.maximumWires, options.affineMaximumTerms, options.affineMaximumOperations, performance.now() + options.timeoutMs)
 			return result === normalized ? undefined : result
 		} })
 		// Cache failures per strategy: a capped forward semantic search must not exclude Z3.
@@ -56,7 +56,7 @@ export async function advancedRewrite(gates: Gate[], random = Math.random): Prom
 export function wholeCircuitAffineSearch(gates: Gate[], budgetMs: number, shouldStop: () => boolean) {
 	if (!config.synthesis.affine) return gates
 	const started = performance.now()
-	const result = simplifyAffineRegions(gates, config.validation.maximumWires, started + budgetMs, shouldStop)
+	const result = searchAffineRegions(gates, config.validation.maximumWires, config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, started + budgetMs, shouldStop)
 	recordStrategy('gf2-affine-whole', { maximumWires: config.validation.maximumWires, timeoutMs: budgetMs }, started, gates.length, result.length, result !== gates)
 	return result
 }

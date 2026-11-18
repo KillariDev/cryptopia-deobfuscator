@@ -96,9 +96,17 @@ the bounded synthesis strategies after local rewrites stall, at the shared
 prepass. It searches affine runs and smaller subwindows inside the selected
 region, using its own `synthesis.affineMaximumWindowGates` bound (default 256) and
 `validation.maximumWires`, independently of the tiny SMT/template limits.
-Exact symbolic verification is required for every accepted reduction. Nonlinear
-boundaries and singular affine maps are preserved, and the search respects the
-synthesis time budget.
+Exact symbolic verification is required for every accepted reduction. The solver
+also composes Boolean polynomials through mixed gates: nonlinear intermediates
+may cancel to an affine map. It can rewrite that map directly, or find smaller
+mixed subwindows whose final transformation is affine. Truly nonlinear maps and
+singular affine maps are preserved.
+
+Mixed symbolic analysis is bounded by `synthesis.affineMaximumTerms` (default
+100,000 stored monomials), `synthesis.affineMaximumOperations` (10,000,000 symbolic
+operations per candidate), the wire limit, and the synthesis deadline. Exhausting
+any limit declines that candidate without dropping terms or accepting an
+approximate equivalence.
 
 A separate broad affine search receives the complete circuit as a scheduled
 worker job, before the first local round and at subsequent round boundaries at
