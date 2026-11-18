@@ -20,6 +20,7 @@ try {
 	config.workers.keepBusy = false // Exercise the optional legacy between-round shuffle.
 	config.workers.adaptiveConcurrency = false
 	config.workers.broadSearchSeconds = 60
+	config.workers.broadSearchIdleSeconds = 0 // Isolate global-win reporting without the idle delay.
 	config.timing.summarySeconds = 0.02
 	config.logging.verbose = false
 	process.env.OPTIMIZER_VERBOSE = '0'

@@ -878,6 +878,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	const strategySummary = new StrategySummary()
 	const strategyWeights = new StrategyWeightSummary()
 	let nextStrategyJob = 0
+	let lastImprovementTime = performance.now()
 	const broadSchedule = new PeriodicStrategy(config.workers.broadSearchSeconds * 1000)
 	const summaryThrottle = new SummaryThrottle(config.timing.summarySeconds * 1000)
 	let reportStatus: (force?: boolean) => void = () => {}
@@ -923,13 +924,15 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
 			const stopSignal = new Int32Array(new SharedArrayBuffer(4))
+			let broadStop: Int32Array | undefined
 			const checkpoint = new ReductionCheckpoint(nPrevGates, snapshot => {
 				save([paths.progress(snapshot.length), paths.latest], snapshot, inputCircuit.wire_count, originalGates)
 				savedGateCount = snapshot.length
 			})
 			const restart = wholeCircuit || runBroad ? new WholeCircuitRestart(currentGates, stopSignal, candidate => {
 				checkpoint.saveIfReduced(candidate)
-				if (Atomics.load(stopSignal, 0) === 0) logVerbose(`New best: ${candidate.length} gates; stopping current searches and restarting from the verified checkpoint.`)
+				lastImprovementTime = performance.now()
+				logVerbose(`New best checkpoint: ${candidate.length} gates.`)
 			}) : undefined
 			let rejectCheckpoint!: (error: unknown) => void
 			const checkpointFailed = new Promise<never>((_, reject) => { rejectCheckpoint = reject })
@@ -964,30 +967,33 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			}
 			try {
 				const canContinue = () => {
-					if (!config.workers.keepBusy || Atomics.load(stopSignal, 0) !== 0) return false
+					if (!config.workers.keepBusy || Atomics.load(stopSignal, 0) !== 0) { if (broadStop) Atomics.store(broadStop, 0, 1); return false }
 					const count = wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, value) => sum + value, 0)
 					const elapsed = performance.now() - lastIterationTime
-					if (!count || elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, count)) { Atomics.store(stopSignal, 0, 1); return false }
+					if (!count || elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, count)) { Atomics.store(stopSignal, 0, 1); if (broadStop) Atomics.store(broadStop, 0, 1); return false }
 					return true
 				}
 				// Broad work has priority in the pool, and can recur during long
 				// rounds. Local jobs fill its slot while it waits for its cadence.
 				const broad = runBroad ? (async () => {
 					let best = currentGates
+					if (!config.workers.keepBusy && performance.now() - lastImprovementTime < config.workers.broadSearchIdleSeconds * 1000) return best
 					do {
 						if (config.workers.keepBusy) {
-							while (canContinue() && !broadSchedule.take(performance.now())) await waitForWork(Math.min(250, config.workers.broadSearchSeconds * 1000))
+							while (canContinue() && (performance.now() - lastImprovementTime < config.workers.broadSearchIdleSeconds * 1000 || !broadSchedule.take(performance.now()))) await waitForWork(Math.min(250, config.workers.broadSearchSeconds * 1000))
 							if (!canContinue()) break
 						}
+						broadStop = new Int32Array(new SharedArrayBuffer(4))
+						const jobStop = broadStop
 						const broadJob = nextStrategyJob++
 						statuses[jobCount] = { updatedAtMs: performance.now() - lastIterationTime, done: false, started: false }
 						broadStarted = true
-						const result = await pool.run(currentGates, inputCircuit.wire_count, (_, activity, snapshot) => {
+						const result = await pool.run(roundSearchResult([restart!.best, localCandidate()], true), inputCircuit.wire_count, (_, activity, snapshot) => {
 							strategySummary.observe(broadJob, activity?.strategies)
 							strategyWeights.observe(activity)
 							statuses[jobCount] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
 							if (snapshot) try { restart!.accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
-						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, true, 'broad')
+						}, jobStop.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, true, 'broad')
 						strategySummary.finish(broadJob); statuses[jobCount].done = true
 						restart!.accept(result)
 						best = roundSearchResult([best, result], true)
@@ -1013,7 +1019,12 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 							// results are alternatives, never additional chunks to concatenate.
 							if (!isReplacementSimpler(candidate, snapshots[target])) return
 							snapshots[target] = candidate; candidateCounts[target] = candidate.length
-							restart?.accept(wholeCircuit ? candidate : localCandidate())
+							const assembled = wholeCircuit ? candidate : localCandidate()
+							if (restart) restart.accept(assembled, false)
+							else checkpoint.saveIfReduced(assembled)
+							lastImprovementTime = performance.now()
+							if (broadStop) Atomics.store(broadStop, 0, 1)
+							broadSchedule.retry()
 						}
 						const result = await pool.run(dataChunk, inputCircuit.wire_count, (_count, activity, snapshot) => {
 								executionStarted ??= performance.now()
@@ -1023,7 +1034,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 									try { accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
 								}
 								statuses[index] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
-							}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, wholeCircuit)
+							}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, false)
 						strategySummary.finish(strategyJob)
 						if (executionStarted !== undefined) {
 							const cost = (performance.now() - executionStarted) / Math.max(1, dataChunk.length)
@@ -1044,7 +1055,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				currentGates = roundSearchResult(snapshots, wholeCircuit)
 				if (runBroad) currentGates = roundSearchResult([currentGates, results[1]], true)
 				if (restart) currentGates = roundSearchResult([restart.best, currentGates], true)
-			} finally { Atomics.store(stopSignal, 0, 1); beginPhase('finishing round') }
+			} finally { Atomics.store(stopSignal, 0, 1); if (broadStop) Atomics.store(broadStop, 0, 1); beginPhase('finishing round') }
 			if (broadStarted && currentGates.length < nPrevGates) broadSchedule.retry()
 			report()
 			const filename = paths.progress(currentGates.length)

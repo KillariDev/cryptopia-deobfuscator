@@ -64,3 +64,9 @@ assert.equal(parseConfig({ workers: { broadSearchSeconds: 5 }, synthesis: { affi
 
 assert.deepEqual(parseConfig({ synthesis: { affineWholeCircuitMinutes: 3, timeoutMs: 1, attemptEvery: 999 } }), parseConfig({}), 'legacy strategy timing settings are accepted but ignored')
 assert.equal(parseConfig({ workers: { jobSeconds: 120 } }).workers.jobSeconds, 120)
+
+const localStop = new Int32Array(new SharedArrayBuffer(4))
+const localBest = new WholeCircuitRestart(original, localStop, () => {})
+assert.equal(localBest.accept(original.slice(0, 1), false), true)
+assert.equal(Atomics.load(localStop, 0), 0, 'a local checkpoint must not cancel peers')
+assert.equal(localBest.accept(original, true), false, 'an obsolete global result cannot restart newer local progress')

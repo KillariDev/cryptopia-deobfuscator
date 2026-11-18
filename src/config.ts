@@ -8,7 +8,7 @@ export type RainbowTableSpec = { wires: number, gates: number }
 export const defaults = {
 	runtime: { heapMegabytes: 16384 },
 	files: { dataDirectory: 'data', latestName: 'latest.json', workerDirectory: 'worker', progressDirectory: 'progress', databaseDirectory: '.' },
-	workers: { keepBusy: true, broadSearchSeconds: 60, wholeCircuitMaximumGates: 2000, maximum: 24, minimumChunkGates: 100, maximumChunkFraction: 0.5, jobsPerWorker: 4, jobSeconds: 120, adaptiveConcurrency: true, initialConcurrency: 4, concurrencySampleRounds: 2, concurrencyDatabaseFraction: 0.6, concurrencyRateTolerance: 0.05, memoryBudgetMegabytes: 8192, shareTemplates: true, sharedTemplateSeconds: 15, sharedTemplateEntries: 64, sharedTemplateBatch: 16 },
+	workers: { broadSearchIdleSeconds: 30, keepBusy: true, broadSearchSeconds: 60, wholeCircuitMaximumGates: 2000, maximum: 24, minimumChunkGates: 100, maximumChunkFraction: 0.5, jobsPerWorker: 4, jobSeconds: 120, adaptiveConcurrency: true, initialConcurrency: 4, concurrencySampleRounds: 2, concurrencyDatabaseFraction: 0.6, concurrencyRateTolerance: 0.05, memoryBudgetMegabytes: 8192, shareTemplates: true, sharedTemplateSeconds: 15, sharedTemplateEntries: 64, sharedTemplateBatch: 16 },
 	timing: { roundMinutes: 25, improvedRoundMinutes: 5, summarySeconds: 30, workerReportSeconds: 5, databaseLogSeconds: 60, standaloneSaveSeconds: 60 },
 	logging: { verbose: false, generationDiagnostics: true, generationDiagnosticsMinimumSeconds: 5, eventLoopResolutionMilliseconds: 20 },
 	validation: { checkpointInputs: 20, probabilisticInputs: 202, maximumWires: 64 },
@@ -59,7 +59,7 @@ export function parseConfig(value: unknown): SolverConfig {
 			}
 			if (typeof setting !== typeof target[key]) throw new Error(`Invalid type for ${section}.${key}`)
 			if (typeof setting === 'string' && !setting.trim()) throw new Error(`Empty config setting: ${section}.${key}`)
-			if (typeof setting === 'number' && (!Number.isFinite(setting) || (setting < 0 || (setting === 0 && !['broadSearchSeconds', 'wholeCircuitMaximumGates', 'memoryMapBytes', 'generationStates', 'generationCandidateCacheMegabytes', 'lookupBatchMilliseconds', 'maximumChecks'].includes(key))) || (key !== 'strategyExplorationProbability' && key !== 'maximumChunkFraction' && key !== 'etaSmoothing' && key !== 'etaMaximumSlowdown' && key !== 'etaTrendMinimumWorkGrowth' && key !== 'schedulerDecay' && key !== 'decayFactor' && key !== 'concurrencyDatabaseFraction' && key !== 'concurrencyRateTolerance' && key !== 'seconds' && !key.endsWith('Minutes') && !key.endsWith('Seconds') && !Number.isSafeInteger(setting)))) throw new Error(`Invalid positive setting: ${section}.${key}`)
+			if (typeof setting === 'number' && (!Number.isFinite(setting) || (setting < 0 || (setting === 0 && !['broadSearchIdleSeconds', 'broadSearchSeconds', 'wholeCircuitMaximumGates', 'memoryMapBytes', 'generationStates', 'generationCandidateCacheMegabytes', 'lookupBatchMilliseconds', 'maximumChecks'].includes(key))) || (key !== 'strategyExplorationProbability' && key !== 'maximumChunkFraction' && key !== 'etaSmoothing' && key !== 'etaMaximumSlowdown' && key !== 'etaTrendMinimumWorkGrowth' && key !== 'schedulerDecay' && key !== 'decayFactor' && key !== 'concurrencyDatabaseFraction' && key !== 'concurrencyRateTolerance' && key !== 'seconds' && !key.endsWith('Minutes') && !key.endsWith('Seconds') && !Number.isSafeInteger(setting)))) throw new Error(`Invalid positive setting: ${section}.${key}`)
 			target[key] = setting
 		}
 	}

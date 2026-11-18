@@ -1014,3 +1014,5 @@ await import('./memory-concurrency-test.js')
 await import('./dependency-cuts-test.js')
 
 await import('./checkpoint-progress-test.js')
+
+await import('./local-global-scheduling-test.js')

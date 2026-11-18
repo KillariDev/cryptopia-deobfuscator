@@ -10,6 +10,7 @@
     "databaseDirectory": "."
   },
   "workers": {
+    "broadSearchIdleSeconds": 30,
     "keepBusy": true,
     "wholeCircuitMaximumGates": 2000,
     "maximum": 24,
