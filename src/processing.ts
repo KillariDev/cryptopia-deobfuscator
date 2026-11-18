@@ -10,7 +10,7 @@ import { SlidingWindowWires } from './window-wires.js'
 import { LazyCircuit } from './circuit-edit.js'
 import { IncrementalGraph } from './incremental-graph.js'
 import { WindowFingerprints } from './fingerprints.js'
-import { templates, advancedRewrite } from './strategies.js'
+import { templates, advancedRewrite, SynthesisBudget } from './strategies.js'
 import { IncrementalEvaluator } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, createSearchArms, independentComponents } from './search.js'
 import { config } from './config.js'
@@ -318,7 +318,7 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 	return { gates: newCircuit, changed: true }
 }
 
-export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, lookup = true, preparation = new SubsetPreparation(originalGates)): Promise<{ gates: Gate[], changed: boolean }> => {
+export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, lookup = true, preparation = new SubsetPreparation(originalGates), synthesisBudget?: SynthesisBudget): Promise<{ gates: Gate[], changed: boolean }> => {
 	const finish = (result: { gates: Gate[], changed: boolean }) => {
 		if (result.changed && config.synthesis.templates) templates.learn(originalGates, result.gates)
 		return result
@@ -333,7 +333,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	if (findUselessVarsSetting && sliceSize > 2) recordStrategy('variables', { slice: sliceSize, probabilistic: useProbabilistically, exactMaximumWires: config.search.exactMaximumWires }, strategyStarted, templateResult.length, changes.gates.length, changes.changed)
 	changes.changed ||= templateResult !== originalGates
 	if (!lookup) {
-		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return finish({ gates: candidate, changed: true }) }
+		if (!changes.changed) { const candidate = await advancedRewrite(originalGates, synthesisBudget); if (candidate) return finish({ gates: candidate, changed: true }) }
 		return finish(changes)
 	}
 	const gates = changes.gates
@@ -369,7 +369,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	}
 	recordStrategy('rainbow', { slice: sliceSize, maximumWires: tables.maximumWires }, strategyStarted, gates.length, gates.length - replacements.reduce((sum, entry) => sum + entry.end - entry.start + 1 - entry.replacement.length, 0), replacements.length > 0)
 	if (replacements.length === 0) {
-		if (!changes.changed) { const candidate = await advancedRewrite(originalGates); if (candidate) return finish({ gates: candidate, changed: true }) }
+		if (!changes.changed) { const candidate = await advancedRewrite(originalGates, synthesisBudget); if (candidate) return finish({ gates: candidate, changed: true }) }
 		return finish(changes)
 	}
 	const newCircuit = replace(gates, replacements)
@@ -520,7 +520,7 @@ function appendMissingNumbers(arr: number[], n: number): number[] {
 	return [...Array.from(allNumbers), ...arr]
 }
 
-export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method'], onLazyCandidate?: (gates: ChunkedSequence<Gate>) => void): Promise<Gate[]> => {
+export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method'], onLazyCandidate?: (gates: ChunkedSequence<Gate>) => void, synthesisBudget?: SynthesisBudget): Promise<Gate[]> => {
 	const useProbabilistically = method !== 'rainbow' && phase === 'heavy' && config.search.probabilistic
 	const findUselessVarsSetting = method !== 'rainbow' && config.search.variableElimination
 	let regenerateGraph = false
@@ -543,7 +543,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 				for (let slice = config.search.sliceMinimum; slice <= Math.min(maxSlice, lines.length); slice++) {
 					if (timeToEndWorker()) return circuit.toArray()
 					activity.checks++
-					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables', preparation)
+					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables', preparation, synthesisBudget)
 					if (!optimizationOutput.changed) continue
 					subsetChanged = true; changed = true; activity.improvements++
 					changedWires = new Set([...inGates, ...optimizationOutput.gates].flatMap(getVars))
@@ -581,7 +581,7 @@ export const createOptimizerCaches = () => ({
 
 export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number) => boolean, reportOnImprovement = false) => {
 	resetStrategyStats()
-	const jobStarted = performance.now(), databaseStarted = lookupDatabaseTime()
+	const jobStarted = performance.now(), jobDeadline = jobStarted + roundDurationMs, databaseStarted = lookupDatabaseTime()
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	const simplifyStarted = performance.now()
@@ -595,7 +595,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	let subsetSize = getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1)
 	let maxSlice = getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1)
 	let phase: 'simplest' | 'heavy' = 'heavy'
-	const arms = config.search.stableSearchArms ? caches.arms : createSearchArms(config.search.searchArms, config.search.subsetMinimum, config.search.subsetMaximum, config.search.sliceMinimum, config.search.sliceMaximum).map(arm => ({ ...arm, subset: getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1), slice: getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1) }))
+	const arms = !config.search.adaptive ? [] : config.search.stableSearchArms ? caches.arms : createSearchArms(config.search.searchArms, config.search.subsetMinimum, config.search.subsetMaximum, config.search.sliceMinimum, config.search.sliceMaximum).map(arm => ({ ...arm, subset: getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1), slice: getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1) }))
 	//logTimed(`optimizer started with subset ${subsetSize}`)
 	const activity: WorkerActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
 	const progressActivity = (): WorkerActivity => ({ ...activity, strategies: strategySnapshot(), rainbowTables: tables.statistics(), resources: { databaseMs: lookupDatabaseTime() - databaseStarted, elapsedMs: performance.now() - jobStarted, heapUsedBytes: process.memoryUsage().heapUsed } })
@@ -614,7 +614,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 			onProgress(candidateParts.length, progressActivity(), wantsSnapshot && !wantsSnapshot(candidateParts.length) ? undefined : candidateParts.materialize())
 			lastProgress = endTime
 		}
-		return shouldFinish?.(activity) === true || endTime - lastSaved >= roundDurationMs
+		return shouldFinish?.(activity) === true || endTime >= jobDeadline
 	}
 	while (true) {
 		if (workerMode && optimizedVersion.length === 0) return finishWorker()
@@ -645,7 +645,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 			const result = await optimizeSubset(tables, data, ioIdentifierCache, methodCache!, subsetSize, maxSlice, phase, timeToEndWorker, activity, () => {}, caches.testedSubsets, method, gates => {
 				candidateParts.update(index, gates)
 				timeToEndWorker()
-			})
+			}, { deadline: jobDeadline, shouldStop: () => shouldFinish?.(activity) === true })
 			candidateParts.update(index, result)
 			return result
 		}))
@@ -743,12 +743,12 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				const job = nextStrategyJob++, started = performance.now()
 				const timer = setInterval(() => {
 					if (summaryThrottle.allow(performance.now())) {
-						logTimed(`Searching: GF2 broad | ${Math.floor((performance.now() - started) / 1000)}s elapsed | ${config.synthesis.affineWholeCircuitMinutes}m budget`)
+						logTimed(`Searching: GF2 broad | ${Math.floor((performance.now() - started) / 1000)}s elapsed | ${config.workers.jobSeconds}s job limit`)
 					}
 				}, config.timing.summarySeconds * 1000)
 				let result: Gate[]
 				try {
-					result = await pool.run(currentGates, inputCircuit.wire_count, (_, activity) => strategySummary.observe(job, activity?.strategies), undefined, config.synthesis.affineWholeCircuitMinutes * 60_000, false, 'affine')
+					result = await pool.run(currentGates, inputCircuit.wire_count, (_, activity) => strategySummary.observe(job, activity?.strategies), undefined, config.workers.jobSeconds * 1000, false, 'affine')
 				} finally { clearInterval(timer); strategySummary.finish(job) }
 				if (result.length < currentGates.length) {
 					save([paths.progress(result.length), paths.latest], result, inputCircuit.wire_count, originalGates)

@@ -19,23 +19,25 @@ export class CircuitEqualityGraph {
 		return parent
 	}
 }
-export function saturateCircuit(original: Gate[], wires: number, templates: TemplateLibrary, nodes: number, timeoutMs: number) {
+export function saturateCircuit(original: Gate[], wires: number, templates: TemplateLibrary, nodes: number, timeoutMs: number, shouldStop: () => boolean = () => false) {
+	if (shouldStop()) return undefined
 	const graph = new CircuitEqualityGraph()
 	const target = graph.add(original, wires)
 	const seen = new Set<string>([hashGates(original)])
 	const queue = [original]
 	let best = original
 	const end = performance.now() + timeoutMs
-	for (let head = 0; head < queue.length && performance.now() < end && seen.size < nodes; head++) {
+	for (let head = 0; head < queue.length && performance.now() < end && !shouldStop() && seen.size < nodes; head++) {
 		const current = queue[head]
 		const alternatives: Gate[][] = [templates.rewrite(current)]
 		for (let i = 0; i < current.length - 1; i++) {
+			if (shouldStop() || performance.now() >= end) break
 			const pair = current.slice(i, i + 2)
 			if (functionKey(pair, wires) !== functionKey(pair.slice().reverse(), wires)) continue
 			alternatives.push([...current.slice(0, i), ...pair.reverse(), ...current.slice(i + 2)])
 		}
 		for (const candidate of alternatives) {
-			if (performance.now() >= end || seen.size >= nodes) break
+			if (performance.now() >= end || shouldStop() || seen.size >= nodes) break
 			const key = hashGates(candidate)
 			if (seen.has(key)) continue
 			seen.add(key)

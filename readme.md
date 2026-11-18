@@ -83,16 +83,15 @@ The solver combines several approaches:
 - **Dependency-aware search and shuffling:** choose regions using gate
   dependencies and reorder gates when that preserves behavior. Reordering can
   expose simplifications that were not adjacent before.
-- **Adaptive local search:** prioritize recently changed regions and methods
-  that have found useful reductions, while continuing to explore other regions.
-- **Bounded synthesis:** select randomly among enabled forward semantic search,
-  Z3/SMT synthesis, meet-in-the-middle search and equality saturation on small
-  regions. These methods are enabled by default, with limits on circuit size,
-  search effort and time; each can be disabled in `synthesis`.
+- **Local search:** prioritize recently changed regions. Adaptive search modes
+  remain available through `search.adaptive`, but are off by default.
+- **Synthesis rotation:** after cheap template, variable and rainbow rewrites
+  stall, take turns in a fixed order: GF(2), forward search, Z3, meet-in-the-middle,
+  equality saturation. Disabled, ineligible and cached failures are skipped.
+  Region sizes still vary so persistent workers explore different candidates.
 
 Local GF(2) affine synthesis (`synthesis.affine`, enabled by default) is selected among
-the bounded synthesis strategies after local rewrites stall, at the shared
-`synthesis.attemptEvery` cadence. It is not an unconditional startup or worker
+the synthesis rotation after local rewrites stall. It is not an unconditional startup or worker
 prepass. It searches affine runs and smaller subwindows inside the selected
 region, using its own `synthesis.affineMaximumWindowGates` bound (default 256) and
 `validation.maximumWires`, independently of the tiny SMT/template limits.
@@ -104,22 +103,21 @@ singular affine maps are preserved.
 
 Mixed symbolic analysis is bounded by `synthesis.affineMaximumTerms` (default
 100,000 stored monomials), `synthesis.affineMaximumOperations` (10,000,000 symbolic
-operations per candidate), the wire limit, and the synthesis deadline. Exhausting
+operations per candidate), the wire limit, and the worker job deadline. Exhausting
 any limit declines that candidate without dropping terms or accepting an
 approximate equivalence.
 
 A separate broad affine search receives the complete circuit as a scheduled
 worker job, before the first local round and at subsequent round boundaries at
 most once per `synthesis.affineWholeCircuitSeconds` (default 60 seconds; 0 disables
-broad searches). It is independent of the 256-gate local window and uses
-`synthesis.affineWholeCircuitMinutes` as a computation budget (default 2 minutes).
-The search returns as soon as it finishes; this is a maximum duration, not a
-minimum runtime. Local synthesis still uses `synthesis.timeoutMs` (100 ms). Scanning, matrix
-composition and elimination check deadlines and cancellation cooperatively; only
-fully verified region improvements are retained. Gate copying and worker startup
-are outside this computation budget. This is linear scanning plus bounded matrix
-work, not enumeration of input states. It does not repeat on every worker job or
-rapid restart.
+broad searches). It is independent of the 256-gate local window. Every strategy,
+including broad affine search, uses only the time remaining in its worker job.
+`workers.jobSeconds` is the single time limit (default 120 seconds, or two
+minutes). Strategies finish early when done and stop cooperatively
+when a better result is found. Gate copying and worker startup are outside the
+job's computation lifetime. State, memory and circuit-size bounds remain active.
+Legacy `synthesis.timeoutMs`, `synthesis.affineWholeCircuitMinutes` and
+`synthesis.attemptEvery` settings are accepted for compatibility but ignored.
 
 Replacements are ordered by gate count, then used-wire count and read cost.
 Multiple workers search circuit chunks, retaining caches between jobs. For circuits

@@ -58,20 +58,18 @@ equivalent(local, localResult, 6)
 assert.equal(simplifyAffineRegions(local, 64, -Infinity), local, 'respect exhausted synthesis budgets')
 const saved = { ...config.synthesis }
 try {
-	Object.assign(config.synthesis, { affine: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false, attemptEvery: 1, maximumWindowGates: 1, maximumWires: 1 })
+	Object.assign(config.synthesis, { affine: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false, maximumWindowGates: 1, maximumWires: 1 })
 	assert.equal(await advancedRewrite(local), undefined, 'disabled affine strategy is not selected')
 	config.synthesis.affine = true
-	const selected = await advancedRewrite(local, () => 0)
+	const selected = await advancedRewrite(local)
 	assert.ok(selected && selected.length === 2, 'affine selection is independent of SMT and template size limits')
 	equivalent(local, selected, 6)
-	const mixedSelected = await advancedRewrite(mixed, () => 0)
+	const mixedSelected = await advancedRewrite(mixed)
 	assert.ok(mixedSelected && mixedSelected.length === 2, 'select affine rewrites within mixed regions')
 	equivalent(mixed, mixedSelected, 3)
-	config.synthesis.attemptEvery = 2
 	let selections = 0
-	for (let attempt = 0; attempt < 6; attempt++) if (await advancedRewrite(local, () => 0)) selections++
-	assert.equal(selections, 3, 'affine synthesis follows the shared cadence rather than running each time')
-	config.synthesis.attemptEvery = 1
+	for (let attempt = 0; attempt < 6; attempt++) if (await advancedRewrite(local)) selections++
+	assert.equal(selections, 6, 'eligible solvers take turns without a separate attempt counter')
 	config.synthesis.affineMaximumWindowGates = 2
 	assert.equal(await advancedRewrite(mixed), undefined, 'respect the affine strategy gate bound')
 } finally { Object.assign(config.synthesis, saved) }

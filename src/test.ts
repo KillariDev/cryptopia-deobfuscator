@@ -592,19 +592,19 @@ assert.equal(parseConfig({ synthesis: { forwardSemanticSearch: true } }).synthes
 const { advancedRewrite } = await import('./strategies.js')
 const synthesisOptions = { ...config.synthesis }
 try {
-	Object.assign(config.synthesis, { affine: false, forwardSemanticSearch: true, smt: true, meetInMiddle: false, equalitySaturation: false, attemptEvery: 1, maximumWires: 3, timeoutMs: 5000, states: 2000, maximumReplacementGates: 0 })
+	Object.assign(config.synthesis, { affine: false, forwardSemanticSearch: true, smt: true, meetInMiddle: false, equalitySaturation: false, maximumWires: 3, states: 2000, maximumReplacementGates: 0 })
 	const input = [singleGate[0], singleGate[0], singleGate[0]]
 	resetStrategyStats()
-	assert.equal(await advancedRewrite(input, () => 0), undefined)
+	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
 	assert.deepEqual(strategySnapshot().map(stat => stat.strategy), ['forward-semantic-search'])
-	assert.equal(await advancedRewrite(input, () => 0), undefined)
+	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
 	assert.deepEqual(strategySnapshot().map(stat => stat.strategy), ['forward-semantic-search', 'z3'])
 	const count = strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0)
-	assert.equal(await advancedRewrite(input, () => 0), undefined)
+	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
 	assert.equal(strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0), count)
-	// A different window chooses Z3 directly when the random draw selects it.
+	// Rotation continues predictably on a different window.
 	config.synthesis.maximumReplacementGates = 1
-	const recovered = await advancedRewrite([not0, not0, not0], () => 0.75)
+	const recovered = await advancedRewrite([not0, not0, not0], { deadline: performance.now() + 5000 })
 	assert.ok(recovered && recovered.length === 1)
 	assert.equal(functionKey(recovered!, 2), functionKey([not0], 2))
 	assert.equal(strategySnapshot()[strategySnapshot().length - 1].strategy, 'z3')
@@ -990,3 +990,5 @@ await import('./affine-test.js')
 await import('./symbolic-affine-test.js')
 
 await import('./strategy-summary-test.js')
+
+await import('./strategy-picker-test.js')
