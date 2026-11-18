@@ -68,9 +68,10 @@ export class WorkerPool {
 						if (rules.length) for (const peer of this.slots) if (peer !== current) peer.worker.postMessage({ sharedTemplates: rules })
 					}
 					const job = current.job
-					if (message.progress !== undefined) { job?.onProgress?.(message.progress, message.activity, message.snapshot); return }
+					const activity = message.activity ? { ...message.activity, workerId: current.worker.threadId } : undefined
+					if (message.progress !== undefined) { job?.onProgress?.(message.progress, activity, message.snapshot); return }
 					if (message.gates === undefined && message.error === undefined) return
-					if (message.gates !== undefined && message.activity) job?.onProgress?.(message.gates.length, message.activity)
+					if (message.gates !== undefined && activity) job?.onProgress?.(message.gates.length, activity)
 					current.job = undefined
 					if (message.error) { this.fail(new Error(message.error)); job?.reject(this.failure!); return }
 					job?.resolve(message.gates!)

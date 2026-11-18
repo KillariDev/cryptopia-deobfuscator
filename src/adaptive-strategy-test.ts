@@ -7,6 +7,7 @@ const names = ['variables', 'rainbow', 'synthesis']
 const choices = names.map(name => ({ name }))
 const picker = new AdaptiveStrategyPicker(names, options, () => draw, () => now)
 assert.deepEqual(picker.probabilities(names), [1/3, 1/3, 1/3])
+assert.deepEqual(picker.weights(), names.map(strategy => ({ strategy, weight: 1, attempts: 0 })))
 picker.observe('rainbow', 100, 100)
 const warmup = picker.probabilities(names)
 assert.ok(warmup[0] > warmup[1] && warmup[2] > warmup[1])
@@ -16,11 +17,14 @@ picker.observe('synthesis', 0, 100)
 const learned = picker.probabilities(names)
 assert.ok(learned[1] > learned[0] && learned[1] > learned[2])
 assert.ok(learned.every(p => p >= 0.2/3))
+assert.ok(picker.weights()[1].weight > picker.weights()[0].weight)
+assert.equal(picker.weights()[1].attempts, 1)
 const counts = [0,0,0]
 for(let i=0;i<10000;i++) { draw=(i+0.5)/10000; counts[names.indexOf(picker.pick(choices)!.name)]++ }
 assert.ok(counts[1] > counts[0] && counts[0] >= 666 && counts[2] >= 666)
 now=60*1000*40
 assert.ok(picker.probabilities(names).every(p => Math.abs(p-1/3)<1e-6), 'wall-clock decay removes stale preferences')
+assert.ok(picker.weights().every(entry => Math.abs(entry.weight - 1) < 1e-6), 'reported weights include wall-clock decay')
 for(let i=0;i<30;i++) { picker.observe('rainbow',0,100); picker.observe('variables',100,100) }
 assert.ok(picker.probabilities(names)[0] > picker.probabilities(names)[1], 'change preference when productivity changes')
 assert.equal(picker.pick([]), undefined)

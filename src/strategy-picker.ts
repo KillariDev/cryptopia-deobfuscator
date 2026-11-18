@@ -13,6 +13,7 @@ export class StrategyPicker {
 }
 
 export type AdaptivePickerOptions = { enabled: boolean, exploration: number, halfLifeSeconds: number }
+export type StrategyWeight = { strategy: string, weight: number, attempts: number }
 /** Equal initial sampling, decaying productivity weights, and uniform exploration. */
 export class AdaptiveStrategyPicker {
 	private scores = new Map<string, { value: number, updated: number, attempts: number }>()
@@ -21,6 +22,9 @@ export class AdaptiveStrategyPicker {
 	private score(name: string, now: number) {
 		const score = this.scores.get(name)
 		return score ? score.value * 2 ** (-(now - score.updated) / (this.options().halfLifeSeconds * 1000)) : 0
+	}
+	weights(now = this.clock()): StrategyWeight[] {
+		return this.order.map(strategy => ({ strategy, weight: 1 + Math.log1p(this.score(strategy, now)), attempts: this.scores.get(strategy)?.attempts ?? 0 }))
 	}
 	probabilities(names: string[], now = this.clock()) {
 		if (!names.length) return []

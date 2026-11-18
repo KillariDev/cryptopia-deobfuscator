@@ -27,7 +27,7 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 	const deadline = performance.now() + budgetMs
 	const stopped = () => shouldStop() || performance.now() >= deadline
 	const activity: WorkerActivity = { scope: 'broad', passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
-	const report = (snapshot?: Gate[]) => onProgress(snapshot?.length ?? input.length, { ...activity, strategies: strategySnapshot().map(stat => ({ ...stat, strategy: ['gf2-affine-whole', 'symbolic-whole'].includes(stat.strategy) ? stat.strategy : `${stat.strategy} broad` })) }, snapshot)
+	const report = (snapshot?: Gate[]) => onProgress(snapshot?.length ?? input.length, { ...activity, strategyWeights: config.search.strategyAdaptive ? caches.broadStrategyPicker.weights() : undefined, strategies: strategySnapshot().map(stat => ({ ...stat, strategy: ['gf2-affine-whole', 'symbolic-whole'].includes(stat.strategy) ? stat.strategy : `${stat.strategy} broad` })) }, snapshot)
 	report()
 	for (const { start, end } of broadRegions(input.length)) {
 		if (stopped()) break
@@ -57,5 +57,6 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 			}
 		}
 	}
+	report()
 	return input
 }

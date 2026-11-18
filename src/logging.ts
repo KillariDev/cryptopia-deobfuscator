@@ -2,6 +2,7 @@ import type { StrategyStat } from './strategy-stats.js'
 import { config } from './config.js'
 import { logTimed } from './utils.js'
 import type { RainbowTableStats } from './rainbow-portfolio.js'
+import type { StrategyWeight } from './strategy-picker.js'
 
 export const verboseLogging = () => process.env.OPTIMIZER_VERBOSE === undefined ? config.logging.verbose : process.env.OPTIMIZER_VERBOSE === '1'
 export function logVerbose(...args: unknown[]) {
@@ -28,6 +29,8 @@ export function formatProgress(initialGates: number, candidateGates: number, com
 
 export type WorkerActivity = {
 	scope?: 'broad'
+	workerId?: number
+	strategyWeights?: StrategyWeight[]
 	passes: number
 	subsets: number
 	checks: number
@@ -108,6 +111,31 @@ export function formatStrategyActivity(statuses: WorkerStatus[]) {
 	return 'Strategies this round: ' + ([...totals.values()].sort((a, b) => b.gatesRemoved - a.gatesRemoved).map(stat => `${stat.strategy} ${stat.settings}: ${stat.gatesRemoved} gates removed, ${stat.rewrites}/${stat.attempts} improving attempts, ${(stat.elapsedMs / 1000).toFixed(3)} worker-seconds`).join('; ') || 'awaiting worker reports') + '.'
 }
 
+/** Persistent worker policies: count each worker's latest policy once per scope. */
+export function formatStrategyWeights(statuses: WorkerStatus[]): string[] {
+	const labels: Record<string, string> = { 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', z3: 'Z3' }
+	const lines: string[] = []
+	for (const scope of ['local', 'broad'] as const) {
+		const workers = new Map<number, WorkerStatus>()
+		for (const status of statuses) {
+			if (!status.activity?.strategyWeights || status.activity.workerId === undefined || (status.activity.scope ?? 'local') !== scope) continue
+			const previous = workers.get(status.activity.workerId)
+			if (!previous || status.updatedAtMs >= previous.updatedAtMs) workers.set(status.activity.workerId, status)
+		}
+		const totals = new Map<string, { weight: number, attempts: number, workers: number }>()
+		for (const status of workers.values()) for (const entry of status.activity!.strategyWeights!) {
+			const total = totals.get(entry.strategy) ?? { weight: 0, attempts: 0, workers: 0 }
+			total.weight += entry.weight; total.attempts += entry.attempts; total.workers++
+			totals.set(entry.strategy, total)
+		}
+		const parts = [...totals].filter(([, total]) => total.attempts > 0)
+			.sort((a, b) => b[1].weight / b[1].workers - a[1].weight / a[1].workers)
+			.map(([name, total]) => `${labels[name] ?? name} ${(total.weight / total.workers).toFixed(2)}x`)
+		if (parts.length) lines.push(`Strategy weights (${scope}, ${workers.size} worker${workers.size === 1 ? '' : 's'} averaged; untried=1.00x): ${parts.join(', ')}`)
+	}
+	return lines
+}
+
 /** Interval deltas from cumulative job reports, retained across round restarts. */
 export class StrategySummary {
 	private jobs = new Map<number, Map<string, { attempts: number, elapsedMs: number }>>()
@@ -132,7 +160,7 @@ export class StrategySummary {
 		const parts = [...this.totals].sort((a, b) => b[1].elapsedMs - a[1].elapsedMs)
 			.map(([name, total]) => `${labels[name] ?? name} ${total.attempts}x/${(total.elapsedMs / 1000).toFixed(2)}s`)
 		this.totals.clear()
-		return parts.length ? `Tried (worker time): ${parts.join(', ')}` : 'Tried: no new strategy timings reported'
+		return parts.length ? `Tried (worker time): ${parts.join(', ')}` : undefined
 	}
 }
 

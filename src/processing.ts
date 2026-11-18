@@ -1,6 +1,6 @@
 import { AdaptiveStrategyPicker } from './strategy-picker.js'
 import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
-import { StrategySummary, formatStrategyActivity } from './logging.js'
+import { StrategySummary, formatStrategyActivity, formatStrategyWeights } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
 import { AdaptiveConcurrency, memoryPressure } from './concurrency.js'
@@ -671,7 +671,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	const arms = !config.search.adaptive ? [] : config.search.stableSearchArms ? caches.arms : createSearchArms(config.search.searchArms, config.search.subsetMinimum, config.search.subsetMaximum, config.search.sliceMinimum, config.search.sliceMaximum).map(arm => ({ ...arm, subset: getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1), slice: getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1) }))
 	//logTimed(`optimizer started with subset ${subsetSize}`)
 	const activity: WorkerActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
-	const progressActivity = (): WorkerActivity => ({ ...activity, strategies: strategySnapshot(), rainbowTables: tables.statistics(), resources: { databaseMs: lookupDatabaseTime() - databaseStarted, elapsedMs: performance.now() - jobStarted, heapUsedBytes: process.memoryUsage().heapUsed } })
+	const progressActivity = (): WorkerActivity => ({ ...activity, strategyWeights: config.search.strategyAdaptive ? caches.strategyPicker.weights() : undefined, strategies: strategySnapshot(), rainbowTables: tables.statistics(), resources: { databaseMs: lookupDatabaseTime() - databaseStarted, elapsedMs: performance.now() - jobStarted, heapUsedBytes: process.memoryUsage().heapUsed } })
 	let lastProgress = performance.now()
 	let candidateParts = new LazyCircuit([optimizedVersion])
 	onProgress?.(optimizedVersion.length, progressActivity(), optimizedVersion)
@@ -816,7 +816,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		reportStatus = (force = false) => {
 			if (!summaryThrottle.allow(performance.now(), force || verboseLogging())) return
 			logTimed(formatCoordinatorPhase(currentGates.length, originalGates.length, savedGateCount, phase, performance.now() - started))
-			if (!verboseLogging()) logTimed(strategySummary.flush())
+			if (!verboseLogging()) {
+				const summary = strategySummary.flush()
+				if (summary) logTimed(summary)
+			}
 		}
 	}
 	beginPhase('preparing next round')
@@ -861,7 +864,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				if (verboseLogging()) logVerbose(formatStrategyActivity(statuses))
 				if (summaryThrottle.allow(performance.now(), force || verboseLogging() || snapshot.length === 0)) {
 					logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate: snapshot.length, saved: savedGateCount, statuses, elapsedMs: elapsed }))
-					if (!verboseLogging()) logTimed(strategySummary.flush())
+					if (!verboseLogging()) {
+						const summary = strategySummary.flush()
+						if (summary) logTimed(summary)
+					}
 				}
 				if ((elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, snapshot.length)) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
@@ -920,6 +926,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			} finally { beginPhase('finishing round') }
 			if (runBroad && currentGates.length < nPrevGates) broadSchedule.retry()
 			report()
+			for (const weights of formatStrategyWeights(statuses)) logTimed(weights)
 			const filename = paths.progress(currentGates.length)
 			if (!checkpoint.hasSaved) {
 				save([filename, paths.latest], currentGates, inputCircuit.wire_count, originalGates)
