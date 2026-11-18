@@ -773,7 +773,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	}
 }
 
-export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: string, circuits: JobCircuits = loadJob(pathToFileWithoutExt, original)) => {
+export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: string, circuits: JobCircuits = loadJob(pathToFileWithoutExt, original), onPhase: (phase: string) => void = () => {}) => {
 	const splitArrayIntoApproximatelyChunks = (arr: Gate[], n: number): Gate[][] => {
 		if (n <= 0) throw new Error('Number of chunks must be greater than 0')
 		if (n > arr.length) throw new Error('Number of chunks cannot exceed array length')
@@ -804,11 +804,15 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	const gates: Gate[] = inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
 	if (originalCircuit.wire_count !== inputCircuit.wire_count) throw new Error('Latest circuit wire count differs from original')
 	if (originalGates.length < gates.length) throw new Error('Latest circuit has more gates than original')
+	onPhase('verifying input checkpoint')
 	verifyCircuit(originalGates, gates, originalCircuit.wire_count, config.validation.checkpointInputs)
 	writeCircuit(outputPaths(pathToFileWithoutExt).latest, inputCircuit.wire_count, gates)
 	if (!gates.length) return
 	const nMaxWorkers = configuredWorkerCount()
+	onPhase('loading shared rainbow table snapshots')
 	const sharedTables = await loadSharedTables()
+	onPhase('starting optimizer workers')
+	logTimed(`Starting optimizer with ${nMaxWorkers} worker slot${nMaxWorkers === 1 ? '' : 's'}${config.workers.keepBusy ? ' (continuous scheduling)' : ''}.`)
 	const pool = new WorkerPool(nMaxWorkers, undefined, sharedTables)
 	const concurrency = new AdaptiveConcurrency(nMaxWorkers, config.workers.initialConcurrency, config.workers.concurrencySampleRounds, config.workers.concurrencyDatabaseFraction, config.workers.concurrencyRateTolerance)
 	const paths = outputPaths(pathToFileWithoutExt)
@@ -839,6 +843,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	const summaryTimer = setInterval(() => reportStatus(true), config.timing.summarySeconds * 1000)
 	try {
 		while(currentGates.length > 0) {
+			onPhase('running optimizer searches')
 			beginPhase('preparing next round')
 			currentGates = gateSimplifier(currentGates)
 			let lastIterationTime = performance.now()

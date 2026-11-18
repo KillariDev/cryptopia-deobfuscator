@@ -3,14 +3,19 @@ import { initializeRainbowTables } from './rainbow-portfolio.js'
 import { join, parse } from 'path'
 import { splitTaskAndRun } from './processing.js'
 import { loadJob, logJob } from './job.js'
+import { RunLifecycle } from './run-lifecycle.js'
+
+const lifecycle = new RunLifecycle()
 
 const run = async (pathToFileWithoutExt: string, original: string, startOver: boolean) => {
 	const circuits = loadJob(pathToFileWithoutExt, original, startOver)
 	logJob(pathToFileWithoutExt, original, circuits)
 	logTimed('Initializing rainbow table portfolio...')
+	lifecycle.setPhase('initializing rainbow table portfolio')
 	await initializeRainbowTables()
 	try {
-		await splitTaskAndRun(pathToFileWithoutExt, original, circuits)
+		await splitTaskAndRun(pathToFileWithoutExt, original, circuits, lifecycle.setPhase)
+		logTimed('Optimization complete: no gates remain.')
 	} catch(e: unknown) {
 		console.error(e)
 		process.exitCode = 1
@@ -23,4 +28,4 @@ if (files.length !== 1 || files[0].startsWith('--')) throw new Error('Usage: npm
 const originalFile = parse(files[0])
 if (originalFile.ext !== '.json') throw new Error('Input must be a .json circuit file')
 const original = join(originalFile.dir, originalFile.name)
-run(original, original, startOver).catch(error => { console.error(error); process.exitCode = 1 })
+await lifecycle.run(() => run(original, original, startOver)).catch(error => { console.error(error); process.exitCode = 1 })
