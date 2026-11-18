@@ -128,29 +128,55 @@ export class IncrementalGraph {
 		}
 	}
 
+	private updateWireLists(
+		index: Map<number, number[]>, edits: Map<number, number[]>, removed: Set<number>,
+	) {
+		for (const [wire, incoming] of edits) {
+			const list = index.get(wire) ?? []
+			let kept = 0
+			for (let i = 0; i < list.length; i++) {
+				const id = list[i]
+				if (!removed.has(id)) list[kept++] = id
+			}
+			list.length = kept
+			if (incoming.length) {
+				const start = this.lowerBound(list, this.order.indexOf(incoming[0])!)
+				for (let i = kept - 1; i >= start; i--) list[i + incoming.length] = list[i]
+				for (let i = 0; i < incoming.length; i++) list[start + i] = incoming[i]
+			}
+			if (list.length) index.set(wire, list)
+			else index.delete(wire)
+		}
+	}
+
 	replace(selected: number[], replacement: Gate[]) {
 		const oldIds = selected.map(index => this.order.at(index))
-		const touched = new Set([...oldIds.flatMap(id => this.records.get(id)!.wires), ...replacement.flatMap(getVars)])
 		const affected = new Set<number>()
 		this.collectAffected(oldIds, affected)
 		const newIds = replacement.map(gate => this.add(gate))
+		const accessEdits = new Map<number, number[]>(), writeEdits = new Map<number, number[]>()
+		const track = (index: Map<number, number[]>, wire: number, incoming?: number) => {
+			let ids = index.get(wire)
+			if (!ids) { ids = []; index.set(wire, ids) }
+			if (incoming !== undefined && ids[ids.length - 1] !== incoming) ids.push(incoming)
+		}
+		for (const id of oldIds) {
+			const { gate, wires } = this.records.get(id)!
+			for (const wire of wires) track(accessEdits, wire)
+			track(writeEdits, gate.target)
+		}
+		for (const id of newIds) {
+			const { gate, wires } = this.records.get(id)!
+			for (const wire of wires) track(accessEdits, wire, id)
+			track(writeEdits, gate.target, id)
+			affected.add(id)
+		}
 		this.order.replace(selected, newIds)
 		for (const id of oldIds) this.records.delete(id)
 		this.cached = undefined
 		const removed = new Set(oldIds)
-		for (const wire of touched) {
-			const merge = (source: Map<number, number[]>, writes: boolean) => {
-				const existing = (source.get(wire) ?? []).filter(id => !removed.has(id))
-				const incoming = newIds.filter(id => writes ? this.records.get(id)!.gate.target === wire : this.records.get(id)!.wires.includes(wire))
-				if (!incoming.length) { source.set(wire, existing); return }
-				const position = this.order.indexOf(incoming[0])!
-				let low = 0, high = existing.length
-				while (low < high) { const mid = (low + high) >>> 1; if (this.order.indexOf(existing[mid])! < position) low = mid + 1; else high = mid }
-				source.set(wire, [...existing.slice(0, low), ...incoming, ...existing.slice(low)])
-			}
-			merge(this.accesses, false); merge(this.writes, true)
-		}
-		for (const id of newIds) affected.add(id)
+		this.updateWireLists(this.accesses, accessEdits, removed)
+		this.updateWireLists(this.writes, writeEdits, removed)
 		this.collectAffected(newIds, affected)
 		this.recompute(affected)
 	}
