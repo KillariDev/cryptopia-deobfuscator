@@ -1,4 +1,3 @@
-import { learningBytes } from './shared-learning.js'
 import type { SharedTable } from './shared-table.js'
 import { TemplateLibrary, TemplateRule } from './templates.js'
 import { config } from './config.js'
@@ -14,11 +13,10 @@ export function configuredWorkerCount() {
 	return count
 }
 
-type Job = { solver: 'local' | 'affine' | 'broad' | 'shuffle', restartOnImprovement: boolean, budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
+type Job = { solver: 'local' | 'affine' | 'broad' | 'shuffle', restartOnImprovement: boolean, round: number, budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
 export class WorkerPool {
-	private slots: { worker: Worker, job?: Job, retiring?: boolean }[] = []
+	private slots: { worker: Worker, index: number, job?: Job, retiring?: boolean }[] = []
 	private queue: Job[] = []
-	private strategyLearning = new SharedArrayBuffer(learningBytes)
 	private failure?: Error
 	private concurrency: number
 	private shared = new TemplateLibrary(config.workers.sharedTemplateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates)
@@ -55,11 +53,11 @@ export class WorkerPool {
 		}
 		await Promise.all(retired.map(worker => worker.terminate()))
 	}
-	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000, restartOnImprovement = false, solver: 'local' | 'affine' | 'broad' | 'shuffle' = 'local'): Promise<Gate[]> {
+	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000, restartOnImprovement = false, solver: 'local' | 'affine' | 'broad' | 'shuffle' = 'local', round = 0): Promise<Gate[]> {
 		if (this.failure) return Promise.reject(this.failure)
 		if (!Number.isFinite(budgetMs) || budgetMs <= 0) return Promise.reject(new Error('Invalid job budget'))
 		return new Promise((resolve, reject) => {
-			const job = { solver, restartOnImprovement, budgetMs, gates, wires, stopSignal, onProgress, resolve, reject }
+			const job = { solver, restartOnImprovement, round, budgetMs, gates, wires, stopSignal, onProgress, resolve, reject }
 			if (solver === 'broad') this.queue.unshift(job)
 			else this.queue.push(job)
 			this.dispatch()
@@ -76,8 +74,10 @@ export class WorkerPool {
 			let slot = this.slots.find(slot => !slot.job)
 			if (!slot) {
 				if (this.slots.length >= this.size) return
-				const worker = new Worker(this.workerUrl, { workerData: { solverConfig: config, strategyLearning: this.strategyLearning, sharedTables: this.sharedTables, solverSeed: this.seed === undefined ? undefined : this.seed + this.slots.length, maximumChecks: this.maximumChecks } })
-				slot = { worker }
+				let index = 0
+				while (this.slots.some(slot => slot.index === index)) index++
+				const worker = new Worker(this.workerUrl, { workerData: { solverConfig: config, workerIndex: index, sharedTables: this.sharedTables, solverSeed: this.seed === undefined ? undefined : this.seed + index, maximumChecks: this.maximumChecks } })
+				slot = { worker, index }
 				const current = slot
 				this.slots.push(current)
 				worker.on('message', (message: { gates?: Gate[], error?: string, progress?: number, activity?: WorkerActivity, snapshot?: Gate[], sharedTemplates?: TemplateRule[] }) => {
@@ -107,7 +107,7 @@ export class WorkerPool {
 				})
 			}
 			slot.job = this.queue.shift()!
-			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs, restartOnImprovement: slot.job.restartOnImprovement, solver: slot.job.solver })
+			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs, restartOnImprovement: slot.job.restartOnImprovement, solver: slot.job.solver, round: slot.job.round })
 		}
 	}
 	private fail(error: Error) {

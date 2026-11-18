@@ -1,4 +1,4 @@
-import { AdaptiveStrategyPicker } from './strategy-picker.js'
+import { StrategyPicker } from './strategy-picker.js'
 import { searchAffineRegions, searchPolynomialRegions } from './symbolic-affine.js'
 import { synthesizeSMT } from './smt.js'
 import { recordStrategy } from './strategy-stats.js'
@@ -15,7 +15,7 @@ import { structuralNames, structuralChoices, structuralRewrite } from './structu
 
 export const templates = new TemplateLibrary(config.synthesis.templateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates, config.workers.sharedTemplateEntries)
 const failed = new LimitedMap<string, boolean>(config.synthesis.templateEntries)
-const picker = new AdaptiveStrategyPicker(['gf2-affine', 'quadratic', ...structuralNames, 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'], () => ({ enabled: config.search.strategyAdaptive, exploration: config.search.strategyExplorationProbability, specialize: config.search.strategySpecialization, halfLifeSeconds: config.search.strategyDecayHalfLifeSeconds }))
+const picker = new StrategyPicker(['gf2-affine', 'quadratic', ...structuralNames, 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'])
 export type SynthesisBudget = { deadline: number, shouldStop?: () => boolean, broad?: boolean, minimumBroadGates?: number, dependencyRegion?: boolean, onProgress?: () => void, selectedStrategy?: string }
 // Serialize synthesis so Z3 initialization and cleanup cannot overlap.
 let pending: Promise<unknown> = Promise.resolve()
@@ -59,7 +59,6 @@ export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = {
 			? { maximumWires: config.validation.maximumWires, maximumWindowGates: options.affineMaximumWindowGates, workerJobSeconds: config.workers.jobSeconds }
 			: { maximumWires: options.maximumWires, maximumWindowGates: options.maximumWindowGates, maximumReplacementGates: options.maximumReplacementGates, ...(choice.name !== 'z3' ? { states: options.states } : {}), workerJobSeconds: config.workers.jobSeconds }
 		if (!isStructural) recordStrategy(choice.name, settings, started, normalized.length, accepted ? result!.length : normalized.length, accepted)
-		picker.observe(choice.name, accepted ? normalized.length - result!.length : 0, performance.now() - started)
 		if (accepted) return reverseMapCircuit(result!, wires)
 		if (!stopped()) failed.set(`${choice.name}:${key}`, true)
 		return undefined

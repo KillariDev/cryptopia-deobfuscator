@@ -10,9 +10,9 @@ import { Gate } from './types.js'
 import { WORKER_ROUND_MS } from './job.js'
 
 let portfolio: ReturnType<typeof openRainbowPortfolio> | undefined
-const caches = createOptimizerCaches()
+const caches = createOptimizerCaches(workerData?.workerIndex ?? 0)
 let lastShared = performance.now()
-parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, solver = 'local', restartOnImprovement = false, sharedTemplates }: { sharedTemplates?: TemplateRule[], gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, restartOnImprovement?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
+parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, solver = 'local', restartOnImprovement = false, sharedTemplates }: { sharedTemplates?: TemplateRule[], gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, restartOnImprovement?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
 	try {
 		if (sharedTemplates !== undefined) {
 			if (config.workers.shareTemplates) templates.importShared(sharedTemplates, config.workers.sharedTemplateBatch)
@@ -37,12 +37,14 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, solver = 
 		// Open once per persistent worker and wait for every connection to be ready.
 		const tables = await (portfolio ??= openRainbowPortfolio(config.database.tables, workerData?.sharedTables ?? []))
 		if (solver === 'broad') {
+			caches.broadStrategyPicker.beginRound(round)
 			resetStrategyStats()
 			const stop = stopSignal ? new Int32Array(stopSignal) : undefined
 			const result = await broadSearch(tables, gates, wires, caches, budgetMs, () => stop !== undefined && Atomics.load(stop, 0) !== 0, (progress, activity, snapshot) => parentPort!.postMessage({ progress, activity, snapshot }))
 			parentPort!.postMessage({ gates: result })
 			return
 		}
+		caches.strategyPicker.beginRound(round)
 		let lastSnapshotCount = gates.length
 		const stop = stopSignal ? new Int32Array(stopSignal) : undefined
 		const result = await optimize(tables, gates, wires, 'worker', true, caches, Math.min(budgetMs, WORKER_ROUND_MS), (count, activity, candidate) => {

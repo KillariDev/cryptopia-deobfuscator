@@ -7,7 +7,7 @@ import { DependencyCutIndex, CutCancelled, searchDependencyCuts } from './depend
 import { config } from './config.js'
 import { createRainbowTable } from './rainbowtable.js'
 import { RainbowPortfolio } from './rainbow-portfolio.js'
-import { AdaptiveStrategyPicker } from './strategy-picker.js'
+import { RoundStrategyPicker } from './strategy-picker.js'
 import { createOptimizerCaches, massOptimizeStep, SubsetPreparation } from './processing.js'
 import { analyzeFactored, synthesizeFactored } from './factored.js'
 import { sweepFactored, SweepStats } from './sat-sweeping-core.js'
@@ -78,7 +78,7 @@ try {
  assert.equal(opaque?.length, 1, 'lookup uses three live values despite a fourth restored workspace wire')
  equivalent(scratch, opaque!, 4)
  const caches = createOptimizerCaches()
- const picker = new AdaptiveStrategyPicker(['dependency-cuts'], () => ({ enabled: true, exploration: 0.2, halfLifeSeconds: 300 }))
+ const picker = new RoundStrategyPicker(['dependency-cuts'])
  config.search.strategyAdaptive = true
  config.search.dependencyCuts = true
  config.search.variableElimination = false
@@ -88,7 +88,6 @@ try {
  assert.equal(rewritten.gates.length, sparse.length - 2)
  equivalent(sparse, rewritten.gates, 6)
  assert.ok(strategySnapshot().some(stat => stat.strategy === 'rainbow' && stat.gatesRemoved === 2), 'reuse rainbow lookup on distant live values')
- assert.equal(picker.weights()[0].attempts, 1)
  config.synthesis.satSweeping = true
  resetStrategyStats()
 	let patched = mixed

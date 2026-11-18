@@ -85,20 +85,15 @@ The solver combines several approaches:
   expose simplifications that were not adjacent before.
 - **Local search:** prioritize recently changed regions. Adaptive search modes
   remain available through `search.adaptive`, but are off by default.
-- **Adaptive strategy selection:** start with equal chances, favor approaches
-  that remove gates per worker-second, and decay stale preferences. Uniform
-  exploration keeps every eligible approach reachable. Templates, variables,
-  rainbow lookup and each individual synthesis solver receive their own weights.
+- **Strategy rotation:** each worker starts at a different point in the solver order.
+  It keeps that strategy for the entire optimizer round and keeps it for the next
+  round if it removed any gates. After a round without a reduction it moves to
+  the next strategy. Local and broad searches have separate strategy orders.
 
-The default exploration probability is 20% of selection decisions
-(`search.strategyExplorationProbability`). Learned rewards have a five-minute
-half-life (`search.strategyDecayHalfLifeSeconds`), and unsuccessful attempts
-reduce a strategy's learned score. Histories persist across worker jobs and rapid
-restarts; local and broad search learn separate preferences. These are
-selection probabilities, not guarantees of equal wall-clock time: a selected
-strategy can use the remaining worker lifetime. Set `search.strategyAdaptive` to
-false to restore the fixed pipeline and synthesis rotation. Failed-region caches
-are separate by strategy so trying one method cannot suppress another.
+The summary reports active worker counts by strategy and worker time spent per
+pass. Set `search.strategyAdaptive` to false to use the fixed pipeline and
+synthesis rotation. Failed-region caches are separate by strategy so each method
+can try the same region.
 
 Local GF(2) affine synthesis (`synthesis.affine`, enabled by default) is selected among
 the eligible synthesis choices. It is not an unconditional startup or worker

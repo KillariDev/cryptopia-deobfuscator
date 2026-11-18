@@ -2,7 +2,6 @@ import type { StrategyStat } from './strategy-stats.js'
 import { config } from './config.js'
 import { logTimed } from './utils.js'
 import type { RainbowTableStats } from './rainbow-portfolio.js'
-import type { StrategyWeight } from './strategy-picker.js'
 
 export const verboseLogging = () => process.env.OPTIMIZER_VERBOSE === undefined ? config.logging.verbose : process.env.OPTIMIZER_VERBOSE === '1'
 export function logVerbose(...args: unknown[]) {
@@ -30,7 +29,7 @@ export function formatProgress(initialGates: number, candidateGates: number, com
 export type WorkerActivity = {
 	scope?: 'broad'
 	workerId?: number
-	strategyWeights?: StrategyWeight[]
+	activeStrategy?: string
 	passes: number
 	subsets: number
 	checks: number
@@ -112,40 +111,25 @@ export function formatStrategyActivity(statuses: WorkerStatus[]) {
 	return 'Strategies this round: ' + ([...totals.values()].sort((a, b) => b.gatesRemoved - a.gatesRemoved).map(stat => `${stat.strategy} ${stat.settings}: ${stat.gatesRemoved} gates removed, ${stat.rewrites}/${stat.attempts} improving attempts, ${(stat.elapsedMs / 1000).toFixed(3)} worker-seconds`).join('; ') || 'awaiting worker reports') + '.'
 }
 
-/** Persistent worker policies: count each worker's latest policy once per scope. */
-export function formatStrategyWeights(statuses: WorkerStatus[]): string[] {
-	const labels: Record<string, string> = { 'dependency-cuts': 'cuts', 'dependency-cuts broad': 'cuts broad', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'block-cancellation broad': 'blocks broad', 'sat-sweeping broad': 'SAT sweep broad', 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', z3: 'Z3' }
-	const lines: string[] = []
-	for (const scope of ['local', 'broad'] as const) {
-		const workers = new Map<number, WorkerStatus>()
-		for (const status of statuses) {
-			if (!status.activity?.strategyWeights || status.activity.workerId === undefined || (status.activity.scope ?? 'local') !== scope) continue
-			const previous = workers.get(status.activity.workerId)
-			if (!previous || status.updatedAtMs >= previous.updatedAtMs) workers.set(status.activity.workerId, status)
-		}
-		const totals = new Map<string, { weight: number, attempts: number, workers: number }>()
-		for (const status of workers.values()) for (const entry of status.activity!.strategyWeights!) {
-			const total = totals.get(entry.strategy) ?? { weight: 0, attempts: 0, workers: 0 }
-			total.weight += entry.weight; total.attempts += entry.attempts; total.workers++
-			totals.set(entry.strategy, total)
-		}
-		const parts = [...totals].filter(([, total]) => total.attempts > 0)
-			.sort((a, b) => b[1].weight / b[1].workers - a[1].weight / a[1].workers)
-			.map(([name, total]) => `${labels[name] ?? name} ${(total.weight / total.workers).toFixed(2)}x`)
-		if (parts.length) lines.push(`Strategy weights (${scope}): ${parts.join(', ')}`)
+/** Count each active worker once, using its latest job report. */
+export function formatRunningStrategies(statuses: WorkerStatus[]): string | undefined {
+	const workers = new Map<number, WorkerStatus>()
+	for (const status of statuses) {
+		const id = status.activity?.workerId
+		if (id === undefined) continue
+		const previous = workers.get(id)
+		if (!previous || status.updatedAtMs >= previous.updatedAtMs) workers.set(id, status)
 	}
-	return lines
-}
-
-/** Keep weights available to summaries during restarts and between rounds. */
-export class StrategyWeightSummary {
-	private latest = new Map<string, WorkerStatus>()
-	private revision = 0
-	observe(activity?: WorkerActivity) {
-		if (!activity?.strategyWeights || activity.workerId === undefined) return
-		this.latest.set(`${activity.scope ?? 'local'}:${activity.workerId}`, { activity, updatedAtMs: ++this.revision, done: true })
+	const counts = new Map<string, number>()
+	for (const { activity, done } of workers.values()) {
+		const strategy = activity?.activeStrategy
+		if (!strategy || done) continue
+		counts.set(strategy, (counts.get(strategy) ?? 0) + 1)
 	}
-	format() { return formatStrategyWeights([...this.latest.values()]) }
+	const labels: Record<string, string> = { 'dependency-cuts': 'cuts', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', z3: 'Z3' }
+	const summary = [...counts].sort(([a, countA], [b, countB]) => countB - countA || a.localeCompare(b))
+		.map(([strategy, count]) => `${labels[strategy] ?? strategy}:${count}`).join(', ')
+	return summary ? `Running strategies: ${summary}` : undefined
 }
 
 /** Interval deltas from cumulative job reports, retained across round restarts. */

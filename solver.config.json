@@ -51,11 +51,8 @@
     "maximumWires": 64
   },
   "search": {
-    "strategySpecialization": true,
     "dependencyCuts": true,
     "strategyAdaptive": true,
-    "strategyExplorationProbability": 0.2,
-    "strategyDecayHalfLifeSeconds": 300,
     "probabilistic": true,
     "variableElimination": true,
     "exactMaximumWires": 7,

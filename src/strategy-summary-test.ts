@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { StrategySummary, StrategyWeightSummary, formatStrategyWeights, WorkerStatus } from './logging.js'
+import { StrategySummary, formatRunningStrategies, WorkerStatus } from './logging.js'
 import { StrategyStat } from './strategy-stats.js'
 const stat = (strategy: string, settings: string, attempts: number, elapsedMs: number): StrategyStat => ({ strategy, settings, attempts, elapsedMs, rewrites: 0, gatesRemoved: 0 })
 const summary = new StrategySummary()
@@ -19,18 +19,13 @@ summary.finish(3)
 assert.equal(summary.flush(), undefined)
 console.log('Compact strategy summaries: settings aggregation, interval deltas, repeated snapshots and restarted jobs passed')
 
-const policy = (workerId: number, updatedAtMs: number, weight: number, scope?: 'broad'): WorkerStatus => ({ updatedAtMs, done: true, activity: { workerId, scope, passes: 1, subsets: 1, checks: 1, improvements: 1, stage: 'verifying', strategyWeights: [{ strategy: 'rainbow', weight, attempts: 1 }, { strategy: 'variables', weight: 1, attempts: 0 }] } })
-assert.deepEqual(formatStrategyWeights([policy(1, 1, 9), policy(1, 2, 3), policy(2, 1, 1), policy(1, 3, 5, 'broad')]), [
-	'Strategy weights (local): rainbow 2.00x',
-	'Strategy weights (broad): rainbow 5.00x',
-], 'use each persistent worker once per scope, taking its most recent job')
-assert.deepEqual(formatStrategyWeights([]), [])
-assert.deepEqual(formatStrategyWeights([{ updatedAtMs: 1, done: true }]), [])
-const weightSummary = new StrategyWeightSummary()
-weightSummary.observe(policy(1, 1, 9).activity)
-weightSummary.observe(undefined)
-weightSummary.observe(policy(1, 2, 3).activity)
-weightSummary.observe(policy(2, 1, 1).activity)
-assert.deepEqual(weightSummary.format(), ['Strategy weights (local): rainbow 2.00x'])
-assert.deepEqual(weightSummary.format(), ['Strategy weights (local): rainbow 2.00x'], 'retain weights across summary intervals and round restarts')
-console.log('Round strategy weights: worker deduplication, latest snapshots, separate broad policies and missing reports passed')
+const status = (workerId: number, updatedAtMs: number, activeStrategy: string, done = false): WorkerStatus => ({
+	updatedAtMs, done,
+	activity: { workerId, activeStrategy, passes: 1, subsets: 1, checks: 1, improvements: 0, stage: 'searching' },
+})
+assert.equal(formatRunningStrategies([
+	status(1, 1, 'variables'), status(1, 2, 'rainbow'), status(2, 1, 'rainbow'),
+	status(3, 1, 'rainbow'), status(4, 1, 'rainbow'), status(5, 1, 'sat-sweeping'),
+	status(6, 1, 'variables'), status(6, 2, 'variables', true),
+]), 'Running strategies: rainbow:4, SAT sweep:1')
+assert.equal(formatRunningStrategies([]), undefined)

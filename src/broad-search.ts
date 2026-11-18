@@ -24,19 +24,24 @@ export function* broadRegions(length: number, minimum = 2): Generator<{ start: n
 	}
 }
 
-const cursors = new WeakMap<object, SearchProgress>()
+const cursors = new WeakMap<object, { strategy: string, cursor: SearchProgress }>()
 
 /** Search windows larger than the local search limits. */
 export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires: number, caches: ReturnType<typeof createOptimizerCaches>, budgetMs: number, shouldStop: () => boolean, onProgress: (count: number, activity: WorkerActivity, snapshot?: Gate[]) => void): Promise<Gate[]> {
 	const deadline = performance.now() + budgetMs
 	const stopped = () => shouldStop() || performance.now() >= deadline
 	const activity: WorkerActivity = { scope: 'broad', passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
-	const report = (snapshot?: Gate[]) => onProgress(snapshot?.length ?? input.length, { ...activity, strategyWeights: config.search.strategyAdaptive ? caches.broadStrategyPicker.weights() : undefined, strategies: strategySnapshot().map(stat => ({ ...stat, strategy: ['gf2-affine-whole', 'symbolic-whole'].includes(stat.strategy) ? stat.strategy : `${stat.strategy} broad` })) }, snapshot)
+	const report = (snapshot?: Gate[]) => onProgress(snapshot?.length ?? input.length, { ...activity, activeStrategy: config.search.strategyAdaptive ? caches.broadStrategyPicker.activeStrategy : undefined, strategies: strategySnapshot().map(stat => ({ ...stat, strategy: ['gf2-affine-whole', 'symbolic-whole'].includes(stat.strategy) ? stat.strategy : `${stat.strategy} broad` })) }, snapshot)
 	const minimum = minimumBroadGates()
 	if (input.length < minimum || stopped()) return input
 	report()
-	let cursor = cursors.get(caches)
-	if (!cursor) { cursor = new SearchProgress(); cursors.set(caches, cursor) }
+	const strategy = config.search.strategyAdaptive ? caches.broadStrategyPicker.activeStrategy ?? '' : ''
+	let state = cursors.get(caches)
+	if (!state || state.strategy !== strategy) {
+		state = { strategy, cursor: new SearchProgress() }
+		cursors.set(caches, state)
+	}
+	const { cursor } = state
 	cursor.reset(input, () => broadRegions(input.length, minimum))
 	while (!stopped()) {
 		const task = cursor.next(minimum)
@@ -47,7 +52,7 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 		activity.subsets++
 		const region = input.slice(start, end)
 		if (!config.search.strategyAdaptive) {
-			const selected = caches.broadStrategyPicker.pick([...structuralChoices(), ...(config.search.dependencyCuts ? ['dependency-cuts'] : [])].map(name => ({ name })))
+			const selected = caches.broadFallbackPicker.pick([...structuralChoices(), ...(config.search.dependencyCuts ? ['dependency-cuts'] : [])].map(name => ({ name })))
 			if (selected) {
 				const next = selected.name === 'dependency-cuts'
 					? (await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, region.length, config.search.probabilistic, config.search.variableElimination, true, new SubsetPreparation(region), { deadline, shouldStop, broad: true, minimumBroadGates: minimum, selectedStrategy: selected.name, onProgress: () => report() }, caches.broadStrategyPicker)).gates

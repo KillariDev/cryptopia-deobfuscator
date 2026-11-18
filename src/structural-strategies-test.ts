@@ -8,7 +8,7 @@ import { structuralRewrite, structuralNames } from './structural-strategies.js'
 import { evalCircuit, generateCombinations, verifyCircuit } from './utils.js'
 import { seededRandom } from './random.js'
 import { config } from './config.js'
-import { AdaptiveStrategyPicker } from './strategy-picker.js'
+import { RoundStrategyPicker } from './strategy-picker.js'
 import { createOptimizerCaches, massOptimizeStep, SubsetPreparation } from './processing.js'
 import { RainbowPortfolio } from './rainbow-portfolio.js'
 import { LimitedMap } from './limitedMap.js'
@@ -92,15 +92,13 @@ try {
 	const cases = { factored: [t, t, t], 'block-cancellation': blockInput, 'sat-sweeping': distributed }
 	for (const name of structuralNames) {
 		resetStrategyStats()
-		const input = cases[name], picker = new AdaptiveStrategyPicker([name], () => ({ enabled: true, exploration: 0.2, halfLifeSeconds: 300 }))
+		const input = cases[name], picker = new RoundStrategyPicker([name])
 		const result = await massOptimizeStep(tables, new LimitedMap(100), new LimitedMap(100), input, input.length, false, false, false, new SubsetPreparation(input), { deadline: performance.now() + 30000 }, picker)
 		assert.equal(result.changed, true)
 		equivalent(input, result.gates, 6)
 		assert.equal(strategySnapshot().filter(stat => stat.strategy === name).reduce((sum, stat) => sum + stat.attempts, 0), 1)
-		assert.equal(picker.weights()[0].attempts, 1)
 	}
 	const caches = createOptimizerCaches()
-	for (const picker of [caches.strategyPicker, caches.broadStrategyPicker]) for (const name of structuralNames) assert.ok(picker.weights().some(weight => weight.strategy === name))
 } finally { Object.assign(config, saved); await tables.close() }
 
 // Full-size challenge: no seed, partition, proof, or solution file is supplied.
