@@ -21,6 +21,13 @@ export class LookupFunction {
 			this.values[offset + gate.target] ^= control
 		}
 	}
+ static fromOutputs(outputs: boolean[][], wires: number) {
+  if(outputs.length!==2**wires || outputs.some(row=>row.length!==wires))throw new Error('Invalid truth table')
+  const fn=new LookupFunction([],wires)
+  fn.values.fill(0)
+  outputs.forEach((row,input)=>row.forEach((value,wire)=>{if(value)fn.values[Math.floor(input/32)*wires+wire]|=1<<(input&31)}))
+  return fn
+ }
 	key(tableWires: number) {
 		if (!Number.isInteger(tableWires) || tableWires < this.wires || tableWires > 8) throw new Error('Invalid lookup table width')
 		const cached = this.keys.get(tableWires)

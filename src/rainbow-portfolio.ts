@@ -8,7 +8,7 @@ import { getVars, isReplacementSimpler } from './utils.js'
 import { createRainbowTable, databaseReady, getRainbowTable, getReplacersByIds, closeRainbowTable, hasCanonicalCoverage } from './rainbowtable.js'
 
 export type RainbowTableStats = RainbowTableSpec & { windows: number, matches: number, rewrites: number, gatesRemoved: number, lookupMs: number }
-export type RainbowWindow = { mappedGates: Gate[], wires: number }
+export type RainbowWindow = { mappedGates: Gate[], wires: number, fn?: LookupFunction }
 export type RainbowMatch = { gates: Gate[], table: string }
 type OpenTable = RainbowTableSpec & { db?: sqlite3.Database, shared?: SharedTableReader, canonicalCoverage?: boolean }
 const tableId = (table: RainbowTableSpec) => `${table.wires}/${table.gates}`
@@ -45,7 +45,7 @@ export class RainbowPortfolio {
 			const started = performance.now()
 			const ids = pending.map(({ window, index }) => {
 				let fn = functions.get(index)
-				if (!fn) { fn = new LookupFunction(window.mappedGates, window.wires); functions.set(index, fn) }
+				if (!fn) { fn = window.fn ?? new LookupFunction(window.mappedGates, window.wires); functions.set(index, fn) }
 				return fn.key(table.wires)
 			})
 			const rows = table.shared ? [...new Set(ids)].flatMap(ioIdentifier => {

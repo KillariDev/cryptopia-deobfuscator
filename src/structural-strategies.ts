@@ -3,7 +3,7 @@ import { Gate } from './types.js'
 import { analyzeFactored, FactoredLimit, synthesizeFactored } from './factored.js'
 import type { FactoredOptions } from './factored.js'
 import { cancelBlocks } from './block-cancellation.js'
-import { runSolverWorker } from './solver-worker.js'
+import { SolverService } from './solver-worker.js'
 import { recordStrategy } from './strategy-stats.js'
 
 export const structuralNames = ['factored', 'block-cancellation', 'sat-sweeping'] as const
@@ -11,6 +11,8 @@ export type StructuralStrategy = typeof structuralNames[number]
 export function structuralChoices() {
 	return structuralNames.filter(name => name === 'factored' ? config.synthesis.factored : name === 'block-cancellation' ? config.synthesis.blockCancellation : config.synthesis.satSweeping)
 }
+
+const satService = new SolverService()
 
 async function satRewrite(gates: Gate[], options: FactoredOptions, deadline: number) {
 	// Most small windows have no equivalent expressions to sweep. Avoid an
@@ -26,7 +28,7 @@ async function satRewrite(gates: Gate[], options: FactoredOptions, deadline: num
 			if (!candidate) return undefined
 		} catch (error) { if (error instanceof FactoredLimit) return undefined; throw error }
 	}
-	return runSolverWorker(new URL('./sat-sweeping-worker.js', import.meta.url), { gates, maximumWires: options.maximumWires, maximumNodes: options.maximumNodes, maximumEdges: options.maximumEdges, budgetMs: Math.max(0, deadline - performance.now()) }, Math.max(0, deadline - performance.now()), options.stopped)
+	return satService.run(new URL('./sat-sweeping-worker.js', import.meta.url), { gates, maximumWires: options.maximumWires, maximumNodes: options.maximumNodes, maximumEdges: options.maximumEdges, budgetMs: Math.max(0, deadline - performance.now()) }, Math.max(0, deadline - performance.now()), options.stopped)
 }
 
 export async function structuralRewrite(name: StructuralStrategy, gates: Gate[], deadline: number, shouldStop: () => boolean = () => false): Promise<Gate[] | undefined> {

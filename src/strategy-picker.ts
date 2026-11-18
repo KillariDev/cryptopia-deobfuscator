@@ -1,3 +1,4 @@
+import { workerLearning } from './shared-learning.js'
 /** Predictable rotation for each eligible solver group, independent of region sizes. */
 export class StrategyPicker {
 	private next = new Map<string, number>()
@@ -21,6 +22,8 @@ export class AdaptiveStrategyPicker {
 	constructor(private order: string[], private options: () => AdaptivePickerOptions, private random = Math.random, private clock = () => performance.now()) { this.fallback = new StrategyPicker(order) }
 	private score(name: string, now: number) {
 		const score = this.scores.get(name)
+		const shared = workerLearning?.rate(name, this.options().halfLifeSeconds)
+		if (shared !== undefined) return shared
 		return score ? score.value * 2 ** (-(now - score.updated) / (this.options().halfLifeSeconds * 1000)) : 0
 	}
 	weights(now = this.clock()): StrategyWeight[] {
@@ -28,7 +31,7 @@ export class AdaptiveStrategyPicker {
 	}
 	probabilities(names: string[], now = this.clock()) {
 		if (!names.length) return []
-		const untried = names.filter(name => !this.scores.get(name)?.attempts)
+		const untried = names.filter(name => !this.scores.get(name)?.attempts && workerLearning?.rate(name, this.options().halfLifeSeconds) === undefined)
 		const epsilon = this.options().exploration
 		if (untried.length) return names.map(name => epsilon / names.length + (untried.includes(name) ? (1 - epsilon) / untried.length : 0))
 		const weights = names.map(name => 1 + Math.log1p(this.score(name, now)))
@@ -44,6 +47,7 @@ export class AdaptiveStrategyPicker {
 		return choices.at(-1)
 	}
 	observe(name: string, removed: number, elapsedMs: number) {
+		workerLearning?.observe(name, removed, elapsedMs)
 		const now = this.clock(), old = this.scores.get(name)
 		const rate = Math.max(0, removed) * 1000 / Math.max(1, elapsedMs)
 		this.scores.set(name, { value: old ? this.score(name, now) * 0.7 + rate * 0.3 : rate, updated: now, attempts: (old?.attempts ?? 0) + 1 })
