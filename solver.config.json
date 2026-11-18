@@ -97,10 +97,6 @@
   },
   "database": {
     "tables": [
-	  {
-        "wires": 8,
-        "gates": 3
-      },
       {
         "wires": 5,
         "gates": 2
