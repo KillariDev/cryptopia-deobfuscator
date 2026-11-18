@@ -1,10 +1,10 @@
 import { broadSearch } from './broad-search.js'
-import { resetStrategyStats, strategySnapshot } from './strategy-stats.js'
+import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { config } from './config.js'
 import { templates, wholeCircuitAffineSearch } from './strategies.js'
 import { TemplateRule } from './templates.js'
 import { parentPort, workerData } from 'worker_threads'
-import { createOptimizerCaches, optimize } from './processing.js'
+import { createOptimizerCaches, optimize, shuffleRowsWithDependentGateSwap } from './processing.js'
 import { openRainbowPortfolio } from './rainbow-portfolio.js'
 import { Gate } from './types.js'
 import { WORKER_ROUND_MS } from './job.js'
@@ -12,10 +12,19 @@ import { WORKER_ROUND_MS } from './job.js'
 let portfolio: ReturnType<typeof openRainbowPortfolio> | undefined
 const caches = createOptimizerCaches()
 let lastShared = performance.now()
-parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, solver = 'local', restartOnImprovement = false, sharedTemplates }: { sharedTemplates?: TemplateRule[], gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, restartOnImprovement?: boolean, solver?: 'local' | 'affine' | 'broad' }) => {
+parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, solver = 'local', restartOnImprovement = false, sharedTemplates }: { sharedTemplates?: TemplateRule[], gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, restartOnImprovement?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
 	try {
 		if (sharedTemplates !== undefined) {
 			if (config.workers.shareTemplates) templates.importShared(sharedTemplates, config.workers.sharedTemplateBatch)
+			return
+		}
+		if (solver === 'shuffle') {
+			resetStrategyStats()
+			const started = performance.now(), deadline = started + budgetMs
+			const stop = stopSignal ? new Int32Array(stopSignal) : undefined
+			shuffleRowsWithDependentGateSwap(gates, config.search.roundShufflePasses, () => performance.now() >= deadline || (stop !== undefined && Atomics.load(stop, 0) !== 0))
+			recordStrategy('shuffle', { passes: config.search.roundShufflePasses }, started, gates.length, gates.length, false)
+			parentPort!.postMessage({ gates, activity: { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'shuffling', strategies: strategySnapshot() } })
 			return
 		}
 		if (solver === 'affine') {

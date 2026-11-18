@@ -135,3 +135,8 @@ export class StrategySummary {
 		return parts.length ? `Tried (worker time): ${parts.join(', ')}` : 'Tried: no new strategy timings reported'
 	}
 }
+
+export function formatCoordinatorPhase(gates: number, original: number, saved: number | undefined, phase: string, elapsedMs: number) {
+	const reduction = original ? (original - gates) / original * 100 : 0
+	return `Gates: ${gates} (${reduction.toFixed(2)}% fewer than original) | ${saved === gates ? 'Checkpoint up to date' : 'Preparing current circuit'} | ${phase} | ${duration(elapsedMs)} elapsed`
+}

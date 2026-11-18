@@ -996,3 +996,5 @@ await import('./strategy-picker-test.js')
 await import('./broad-search-test.js')
 
 await import('./polynomial-synthesis-test.js')
+
+await import('./coordinator-status-test.js')

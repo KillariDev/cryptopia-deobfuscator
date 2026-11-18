@@ -58,10 +58,10 @@ Default output locations:
 | `data/worker/` | Worker chunk snapshots and disposable generation scratch files |
 | `rainbow_<wires>_<gates>.db` | Reusable lookup tables |
 
-Output folders are created automatically. Every 30 seconds, the solver checks
-for gate reductions and saves a verified improvement if one is available.
-Completed rounds can also save checkpoints. These intervals are cooperative;
-an optimization step may take time to finish.
+Output folders are created automatically. Worker improvements are verified and
+saved when reported; periodic summaries default to every 30 seconds. Completed
+rounds can also save checkpoints. Cancellation is cooperative, so an optimization
+step may take time to finish.
 
 Latest checkpoints and progress folders are named after the input file and stored
 beside it, so each puzzle keeps its own saved work.
@@ -225,7 +225,9 @@ sizes are known, these are estimates. The ETA follows recent measured throughput
 it cannot guarantee a finish time.
 
 With `logging.verbose: false`, optimization prints a compact status and one short strategy/timing line per
-`timing.summarySeconds` interval, even across rapid restarts. Checkpoints are still
+`timing.summarySeconds` interval, even across rapid restarts. One run-wide timer also reports preparation and
+between-round shuffling phases. Shuffling runs in a worker with the same job
+lifetime; improvement-triggered restarts skip that shuffle. Checkpoints are still
 saved immediately. Strategy summaries aggregate completed attempts since the last
 summary across rapid restarts; times are summed per-strategy worker elapsed time,
 not wall-clock time or CPU time. Broad GF(2) jobs also show elapsed time while

@@ -14,7 +14,7 @@ import { templates, advancedRewrite, SynthesisBudget } from './strategies.js'
 import { IncrementalEvaluator } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, createSearchArms, independentComponents } from './search.js'
 import { config } from './config.js'
-import { SummaryThrottle, verboseLogging, formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
+import { formatCoordinatorPhase, SummaryThrottle, verboseLogging, formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
 import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
 import { Gate } from './types.js'
 import { RainbowPortfolio, RainbowMatch } from './rainbow-portfolio.js'
@@ -477,7 +477,7 @@ function* allGatesWithTarget(target: number, wires: number) {
 }
 
 const shuffleCache = new LimitedMap<string, Gate[]>(config.cache.shuffleEntries)
-export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number) {
+export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number, shouldStop: () => boolean = () => false) {
 	const hasCommonNumber = (arr1: number, arr2: number[]): boolean => {
 		return arr2.includes(arr1)
 	}
@@ -502,6 +502,7 @@ export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number) {
 		const target1Gates = !thisDependsOnPrevious ? [swappedGates[0]] : Array.from(allGatesWithTarget(swappedGates[0].target, nVariables))
 		const target2Gates = !previousDependsOnThis ? [swappedGates[1]] : Array.from(allGatesWithTarget(swappedGates[1].target, nVariables))
 		for (const one of target1Gates) for (const two of target2Gates) {
+			if (shouldStop()) return
 			const pair = [one, two]
 			if (areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(pair, allInputs))) {
 				const correctVars = gateSimplifier(reverseMapCircuit(pair, variableIndexMapping))
@@ -515,6 +516,7 @@ export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number) {
 	}
 	for (let time = 0; time < times; time++) {
 		for (let gateI = 1; gateI < gates.length; gateI++) {
+			if (shouldStop()) return
 			if (Math.random() < 0.5) continue
 			const [thisAssigned, ...thisOthers] = getVars(gates[gateI])
 			const [previousAssigned, ...previousOthers] = getVars(gates[gateI - 1])
@@ -762,8 +764,21 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	let nextStrategyJob = 0
 	const broadSchedule = new PeriodicStrategy(config.workers.broadSearchSeconds * 1000)
 	const summaryThrottle = new SummaryThrottle(config.timing.summarySeconds * 1000)
+	let reportStatus: (force?: boolean) => void = () => {}
+	const beginPhase = (phase: string) => {
+		const started = performance.now()
+		reportStatus = (force = false) => {
+			if (!summaryThrottle.allow(performance.now(), force || verboseLogging())) return
+			logTimed(formatCoordinatorPhase(currentGates.length, originalGates.length, savedGateCount, phase, performance.now() - started))
+			if (!verboseLogging()) logTimed(strategySummary.flush())
+		}
+	}
+	beginPhase('preparing next round')
+	// One timer for the entire run; it is never reset at round boundaries.
+	const summaryTimer = setInterval(() => reportStatus(true), config.timing.summarySeconds * 1000)
 	try {
 		while(currentGates.length > 0) {
+			beginPhase('preparing next round')
 			currentGates = gateSimplifier(currentGates)
 			let lastIterationTime = performance.now()
 			const nPrevGates = currentGates.length
@@ -791,14 +806,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			let completed = 0
 			const statuses: WorkerStatus[] = Array.from({ length: jobCount + Number(runBroad) }, () => ({ updatedAtMs: 0, done: false, started: false }))
 			const localCandidate = () => roundSearchResult(snapshots, wholeCircuit)
-			const report = () => {
+			const report = (force = false) => {
 				const elapsed = performance.now() - lastIterationTime
 				logVerbose(formatProgress(nPrevGates, (wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)), completed, jobCount, elapsed))
 				logVerbose(formatWorkerActivity(statuses, elapsed, WORKER_ROUND_MS))
 				const snapshot = restart ? roundSearchResult([restart.best, localCandidate()], true) : localCandidate()
 				checkpoint.saveIfReduced(snapshot)
 				if (verboseLogging()) logVerbose(formatStrategyActivity(statuses))
-				if (summaryThrottle.allow(performance.now(), verboseLogging() || snapshot.length === 0)) {
+				if (summaryThrottle.allow(performance.now(), force || verboseLogging() || snapshot.length === 0)) {
 					logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate: snapshot.length, saved: savedGateCount, statuses, elapsedMs: elapsed }))
 					if (!verboseLogging()) logTimed(strategySummary.flush())
 				}
@@ -808,10 +823,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				}
 			}
 			logVerbose(`Round started: ${nPrevGates} gates across ${jobCount} ${wholeCircuit ? 'whole-circuit searches' : 'chunk jobs'}${runBroad ? ' plus one broad search' : ''} on up to ${nWorkers} workers; summaries every ${config.timing.summarySeconds} seconds`)
-			const summaryTimer = setInterval(() => {
-				try { report() }
-				catch (error) { clearInterval(summaryTimer); rejectCheckpoint(error) }
-			}, config.timing.summarySeconds * 1000)
+			reportStatus = (force = false) => {
+				try { report(force) }
+				catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
+			}
 			try {
 				// Queue broad work before local jobs so it cannot sit behind the chunk queue.
 				const broadJob = nextStrategyJob++
@@ -856,9 +871,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				currentGates = roundSearchResult(results[0], wholeCircuit)
 				if (runBroad) currentGates = roundSearchResult([currentGates, results[1]], true)
 				if (restart) currentGates = roundSearchResult([restart.best, currentGates], true)
-			} finally {
-				clearInterval(summaryTimer)
-			}
+			} finally { beginPhase('finishing round') }
 			if (runBroad && currentGates.length < nPrevGates) broadSchedule.retry()
 			report()
 			const filename = paths.progress(currentGates.length)
@@ -876,9 +889,15 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				if (reason) logVerbose(`Next round worker target: ${concurrency.limit(nMaxWorkers)} (${reason})`)
 			}
 			logVerbose(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
-			if (!wholeCircuit) shuffleRowsWithDependentGateSwap(currentGates, config.search.roundShufflePasses)
+			if (!wholeCircuit && !(restart && currentGates.length < nPrevGates)) {
+				beginPhase('shuffling next round')
+				const job = nextStrategyJob++
+				try { currentGates = await pool.run(currentGates, inputCircuit.wire_count, (_, activity) => strategySummary.observe(job, activity?.strategies), undefined, config.workers.jobSeconds * 1000, false, 'shuffle') }
+				finally { strategySummary.finish(job) }
+			}
 		}
 	} finally {
+		clearInterval(summaryTimer)
 		await pool.close()
 	}
 }
