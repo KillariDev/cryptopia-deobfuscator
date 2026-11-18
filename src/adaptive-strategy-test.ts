@@ -23,6 +23,13 @@ assert.equal(first.pick(choices)?.name, 'variables', 'another solver cannot cred
 second.beginRound(3)
 assert.equal(second.pick(choices)?.name, 'rainbow', 'the last strategy wraps to the first')
 
+const broadRefill = new RoundStrategyPicker(choices.map(choice => choice.name), 2)
+broadRefill.beginRound(1, 'rainbow')
+assert.equal(broadRefill.pick(choices)?.name, 'rainbow', 'a worker uses the coordinator assignment regardless of its slot')
+broadRefill.observe('rainbow', 4)
+broadRefill.beginRound(2, 'variables')
+assert.equal(broadRefill.pick(choices)?.name, 'variables', 'the assigned rotation takes precedence over local observations')
+
 // Trying one method must not hide the same region from another method's cache.
 const { config } = await import('./config.js')
 const { massOptimizeStep, SubsetPreparation } = await import('./processing.js')

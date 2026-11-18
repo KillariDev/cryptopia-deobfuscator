@@ -89,6 +89,7 @@ The solver combines several approaches:
   It keeps that strategy for the entire optimizer round and keeps it for the next
   round if it removed any gates. After a round without a reduction it moves to
   the next strategy. Local and broad searches have separate strategy orders.
+  The broad lane also advances when the local result wins the round.
 
 The summary reports active worker counts by strategy and worker time spent per
 pass. Set `search.strategyAdaptive` to false to use the fixed pipeline and

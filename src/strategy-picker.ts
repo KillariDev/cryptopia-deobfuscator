@@ -21,9 +21,15 @@ export class RoundStrategyPicker {
 		this.index = order.length ? offset % order.length : 0
 	}
 	get activeStrategy() { return this.order[this.index] }
-	beginRound(round: number) {
+	beginRound(round: number, assignedStrategy?: string) {
 		if (round === this.round) return
-		if (this.round !== undefined && !this.reduced && this.order.length) this.index = (this.index + 1) % this.order.length
+		if (assignedStrategy !== undefined) {
+			const index = this.order.indexOf(assignedStrategy)
+			if (index < 0) throw new Error(`Unknown assigned strategy: ${assignedStrategy}`)
+			this.index = index
+		} else if (this.round !== undefined && !this.reduced && this.order.length) {
+			this.index = (this.index + 1) % this.order.length
+		}
 		this.round = round
 		this.reduced = false
 	}

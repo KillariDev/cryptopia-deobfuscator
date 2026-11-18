@@ -34,13 +34,21 @@ try {
 			}
 			assert.fail(`Expected checkpoint and status ${expectedStatus}`)
 		}
-		let round = 0, broadJobs = 0, localImproved = false
+		let broadJobs = 0, localImproved = false
 		let releaseBroad!: () => void
 		const localReported = new Promise<void>(resolve => { releaseBroad = resolve })
-		WorkerPool.prototype.run = async function(gates, wires, progress, signal, budget, restart, solver) {
+		WorkerPool.prototype.run = async function(gates, wires, progress, signal, budget, restart, solver, jobRound, broadStrategy) {
 			const stop = new Int32Array(signal!)
 			assert.equal(restart, false)
+			if (jobRound === 2) {
+				if (solver === 'broad') {
+					assert.equal(broadStrategy, broadRemoved > 4 ? 'rainbow' : 'variables')
+					throw done
+				}
+				return gates
+			}
 			if (solver === 'broad') {
+				assert.equal(broadStrategy, 'rainbow', 'broad refills keep the round strategy')
 				if (++broadJobs === 1) {
 					const candidate = gates.slice(broadRemoved)
 					progress?.(candidate.length, {
@@ -73,9 +81,7 @@ try {
 			await new Promise(resolve => setTimeout(resolve, 2))
 			return gates
 		}
-		await assert.rejects(splitTaskAndRun(path, 'unused', { originalCircuit: circuit, inputCircuit: circuit }, phase => {
-			if (phase === 'running optimizer searches' && ++round === 2) throw done
-		}), error => error === done)
+		await assert.rejects(splitTaskAndRun(path, 'unused', { originalCircuit: circuit, inputCircuit: circuit }), error => error === done)
 		const latest = JSON.parse(await readFile(path + '-latest.json', 'utf8'))
 		assert.equal(latest.gates.length, circuit.gates.length - Math.max(broadRemoved, 4))
 		assert.ok(reports.some(line => line.includes(`Round winner: ${broadRemoved > 4 ? 'global' : 'local'} | Local: 4 gates removed | Global: ${broadRemoved} gates removed`)))

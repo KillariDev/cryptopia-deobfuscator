@@ -1001,6 +1001,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	let lastReportedGates = currentGates.length
 	let nextStrategyJob = 0
 	let optimizerRound = 0
+	const globalStrategyPicker = new RoundStrategyPicker(broadStrategyOrder())
 	const summaryThrottle = new SummaryThrottle(config.timing.summarySeconds * 1000)
 	let reportStatus: (force?: boolean) => void = () => {}
 	const beginPhase = (phase: string) => {
@@ -1037,6 +1038,8 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			let winner: 'local' | 'global' = 'local'
 			const workersSize = getRandomNumberInRange(Math.min(config.workers.minimumChunkGates, currentGates.length), Math.max(1, currentGates.length * config.workers.maximumChunkFraction))
 			const runBroad = nMaxWorkers > 1 && currentGates.length >= minimumBroadGates() && config.workers.broadSearchSeconds > 0
+			if (runBroad) globalStrategyPicker.beginRound(optimizerRound)
+			const globalStrategy = config.search.strategyAdaptive ? globalStrategyPicker.activeStrategy : undefined
 			const plan = roundSearchPlan(currentGates.length, nMaxWorkers, workersSize, config.workers.wholeCircuitMaximumGates)
 			const wholeCircuit = plan.wholeCircuit || (config.workers.keepBusy && currentGates.length < nMaxWorkers)
 			requestedConcurrency = config.workers.keepBusy ? nMaxWorkers : config.workers.adaptiveConcurrency ? Math.max(runBroad ? 2 : 1, concurrency.limit(Math.min(nMaxWorkers, plan.capacity + Number(runBroad)))) : Math.min(nMaxWorkers, plan.capacity + Number(runBroad))
@@ -1126,7 +1129,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 							observeStrategy('Global', broadJob, activity)
 							statuses[jobCount] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
 							if (snapshot) accept(snapshot)
-						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, false, 'broad', optimizerRound)
+						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, false, 'broad', optimizerRound, globalStrategy)
 						roundStrategies.Global.timings.finish(broadJob)
 						statuses[jobCount].done = true
 						accept(result)
@@ -1183,6 +1186,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				const localBest = localCandidate()
 				currentGates = roundSearchResult([localBest, broadBest], true)
 				winner = currentGates === localBest ? 'local' : 'global'
+				if (winner === 'global' && globalStrategy) globalStrategyPicker.observe(globalStrategy, nPrevGates - broadBest.length)
 			} finally {
 				clearInterval(checkpointTimer)
 				Atomics.store(stopSignal, 0, 1)
