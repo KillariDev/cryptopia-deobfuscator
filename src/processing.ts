@@ -1,3 +1,4 @@
+import { roundSearchPlan, roundSearchResult } from './round-search.js'
 import { formatStrategyActivity } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
@@ -737,11 +738,11 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			let lastIterationTime = performance.now()
 			const nPrevGates = currentGates.length
 			const workersSize = getRandomNumberInRange(Math.min(config.workers.minimumChunkGates, currentGates.length), Math.max(1, currentGates.length * config.workers.maximumChunkFraction))
-			const capacity = Math.max(1, Math.min(Math.floor(currentGates.length / workersSize), nMaxWorkers, currentGates.length || 1))
+			const { wholeCircuit, capacity } = roundSearchPlan(currentGates.length, nMaxWorkers, workersSize, config.workers.wholeCircuitMaximumGates)
 			const nWorkers = config.workers.adaptiveConcurrency ? concurrency.limit(capacity) : capacity
 			pool.setConcurrency(nWorkers)
-			const jobCount = Math.min(currentGates.length, nWorkers * config.workers.jobsPerWorker)
-			const approxGates = config.search.balancedWorkers ? balancedChunks(currentGates, jobCount, wireCosts) : splitArrayIntoApproximatelyChunks(currentGates, jobCount)
+			const jobCount = wholeCircuit ? nWorkers * config.workers.jobsPerWorker : Math.min(currentGates.length, nWorkers * config.workers.jobsPerWorker)
+			const approxGates = wholeCircuit ? Array.from({ length: jobCount }, () => currentGates.slice()) : config.search.balancedWorkers ? balancedChunks(currentGates, jobCount, wireCosts) : splitArrayIntoApproximatelyChunks(currentGates, jobCount)
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
 			const stopSignal = new Int32Array(new SharedArrayBuffer(4))
@@ -755,9 +756,9 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const statuses: WorkerStatus[] = approxGates.map(() => ({ updatedAtMs: 0, done: false, started: false }))
 			const report = () => {
 				const elapsed = performance.now() - lastIterationTime
-				logVerbose(formatProgress(nPrevGates, candidateCounts.reduce((sum, count) => sum + count, 0), completed, jobCount, elapsed))
+				logVerbose(formatProgress(nPrevGates, (wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)), completed, jobCount, elapsed))
 				logVerbose(formatWorkerActivity(statuses, elapsed, WORKER_ROUND_MS))
-				const snapshot = snapshots.flat()
+				const snapshot = roundSearchResult(snapshots, wholeCircuit)
 				checkpoint.saveIfReduced(snapshot)
 				logTimed(formatStrategyActivity(statuses))
 				logTimed(formatStatus({ original: originalGates.length, roundStart: nPrevGates, candidate: snapshot.length, saved: savedGateCount, statuses, elapsedMs: elapsed }))
@@ -766,13 +767,13 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 					logTimed(`Round time target reached; finishing active jobs and returning queued jobs unchanged.`)
 				}
 			}
-			logTimed(`Round started: ${nPrevGates} gates across ${jobCount} jobs on up to ${nWorkers} workers; summaries every ${config.timing.summarySeconds} seconds`)
+			logTimed(`Round started: ${nPrevGates} gates across ${jobCount} ${wholeCircuit ? 'whole-circuit searches' : 'chunk jobs'} on up to ${nWorkers} workers; summaries every ${config.timing.summarySeconds} seconds`)
 			const summaryTimer = setInterval(() => {
 				try { report() }
 				catch (error) { clearInterval(summaryTimer); rejectCheckpoint(error) }
 			}, config.timing.summarySeconds * 1000)
 			try {
-				currentGates = (await Promise.race([checkpointFailed, Promise.all(approxGates.map(async (dataChunk, index) => {
+				currentGates = roundSearchResult(await Promise.race([checkpointFailed, Promise.all(approxGates.map(async (dataChunk, index) => {
 					const workerFile = paths.worker(index)
 					writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
 					let executionStarted: number | undefined
@@ -792,7 +793,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 					statuses[index].done = true
 					writeCircuit(workerFile, inputCircuit.wire_count, result)
 					return result
-				}))])).flat()
+				}))]), wholeCircuit)
 			} finally {
 				clearInterval(summaryTimer)
 			}

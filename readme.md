@@ -91,7 +91,9 @@ The solver combines several approaches:
   search effort and time; each can be disabled in `synthesis`.
 
 Replacements are ordered by gate count, then used-wire count and read cost.
-Multiple workers search circuit chunks, retaining caches between jobs. The
+Multiple workers search circuit chunks, retaining caches between jobs. For circuits
+with at most 2,000 gates, workers instead run independent whole-circuit searches
+and keep the best result, preserving opportunities across chunk boundaries. The
 coordinator verifies combined results before saving them. By default, improving
 rounds aim to finish after five minutes; rounds without reductions retain a
 25-minute budget. Later rounds repartition and shuffle the circuit.
@@ -121,6 +123,9 @@ fail at startup. Job-specific circuit filenames stay on the command line.
 
 Useful settings to start with:
 
+- `workers.wholeCircuitMaximumGates`: use parallel whole-circuit searches below
+  this gate count (inclusive); default 2,000, or 0 to always split into chunks.
+  The adaptive concurrency and memory limits still apply.
 - `workers.maximum`: upper bound on solver workers; the default cap is 24.
   Actual concurrency also depends on the circuit and resource limits.
 - `runtime.heapMegabytes`: Node heap budget; the default is 16,384 MiB. SQLite,

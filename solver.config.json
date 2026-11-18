@@ -10,6 +10,7 @@
     "databaseDirectory": "."
   },
   "workers": {
+    "wholeCircuitMaximumGates": 2000,
     "maximum": 24,
     "minimumChunkGates": 100,
     "maximumChunkFraction": 0.5,

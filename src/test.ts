@@ -977,3 +977,5 @@ await import('./generation-interval-test.js')
 await import('./generation-final-lookup-test.js')
 
 await import('./generation-streaming-test.js')
+
+await import('./round-search-test.js')
