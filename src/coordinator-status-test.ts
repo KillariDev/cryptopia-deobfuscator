@@ -17,6 +17,7 @@ try {
 	config.files.dataDirectory = directory
 	config.database.sharedTables = false
 	config.workers.maximum = 2
+	config.workers.keepBusy = false // Exercise the optional legacy between-round shuffle.
 	config.workers.adaptiveConcurrency = false
 	config.workers.broadSearchSeconds = 60
 	config.timing.summarySeconds = 0.02

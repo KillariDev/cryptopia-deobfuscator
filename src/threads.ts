@@ -42,7 +42,9 @@ export class WorkerPool {
 		if (this.failure) return Promise.reject(this.failure)
 		if (!Number.isFinite(budgetMs) || budgetMs <= 0) return Promise.reject(new Error('Invalid job budget'))
 		return new Promise((resolve, reject) => {
-			this.queue.push({ solver, restartOnImprovement, budgetMs, gates, wires, stopSignal, onProgress, resolve, reject })
+			const job = { solver, restartOnImprovement, budgetMs, gates, wires, stopSignal, onProgress, resolve, reject }
+			if (solver === 'broad') this.queue.unshift(job)
+			else this.queue.push(job)
 			this.dispatch()
 		})
 	}

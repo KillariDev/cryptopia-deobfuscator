@@ -1,4 +1,5 @@
 import { AdaptiveStrategyPicker } from './strategy-picker.js'
+import { setImmediate as yieldToCoordinator, setTimeout as waitForWork } from 'node:timers/promises'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
 import { PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
@@ -843,12 +844,15 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			let lastIterationTime = performance.now()
 			const nPrevGates = currentGates.length
 			const workersSize = getRandomNumberInRange(Math.min(config.workers.minimumChunkGates, currentGates.length), Math.max(1, currentGates.length * config.workers.maximumChunkFraction))
-			const runBroad = broadSchedule.take(performance.now())
-			const { wholeCircuit, capacity } = roundSearchPlan(currentGates.length, nMaxWorkers, workersSize, config.workers.wholeCircuitMaximumGates)
-			const nWorkers = config.workers.adaptiveConcurrency ? concurrency.limit(Math.min(nMaxWorkers, capacity + Number(runBroad))) : Math.min(nMaxWorkers, capacity + Number(runBroad))
+			const runBroad = config.workers.keepBusy ? config.workers.broadSearchSeconds > 0 : broadSchedule.take(performance.now())
+			let broadStarted = false
+			const plan = roundSearchPlan(currentGates.length, nMaxWorkers, workersSize, config.workers.wholeCircuitMaximumGates)
+			const wholeCircuit = plan.wholeCircuit || (config.workers.keepBusy && currentGates.length < nMaxWorkers)
+			const nWorkers = config.workers.keepBusy ? nMaxWorkers : config.workers.adaptiveConcurrency ? concurrency.limit(Math.min(nMaxWorkers, plan.capacity + Number(runBroad))) : Math.min(nMaxWorkers, plan.capacity + Number(runBroad))
 			pool.setConcurrency(nWorkers)
 			const localWorkers = Math.max(1, nWorkers - Number(runBroad && nWorkers > 1))
-			const jobCount = wholeCircuit ? localWorkers * config.workers.jobsPerWorker : Math.min(currentGates.length, localWorkers * config.workers.jobsPerWorker)
+			const requestedJobs = config.workers.keepBusy ? Math.max(nWorkers, localWorkers * config.workers.jobsPerWorker) : localWorkers * config.workers.jobsPerWorker
+			const jobCount = wholeCircuit ? requestedJobs : Math.min(currentGates.length, requestedJobs)
 			const approxGates = wholeCircuit ? Array.from({ length: jobCount }, () => currentGates.slice()) : config.search.balancedWorkers ? balancedChunks(currentGates, jobCount, wireCosts) : splitArrayIntoApproximatelyChunks(currentGates, jobCount)
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
@@ -868,7 +872,8 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const localCandidate = () => roundSearchResult(snapshots, wholeCircuit)
 			const report = (force = false) => {
 				const elapsed = performance.now() - lastIterationTime
-				logVerbose(formatProgress(nPrevGates, (wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)), completed, jobCount, elapsed))
+				if (config.workers.keepBusy) logVerbose(`Jobs finished this round: ${completed}; continuing searches across ${jobCount} ${wholeCircuit ? 'whole-circuit alternatives' : 'chunks'}.`)
+				else logVerbose(formatProgress(nPrevGates, (wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)), completed, jobCount, elapsed))
 				logVerbose(formatWorkerActivity(statuses, elapsed, WORKER_ROUND_MS))
 				const snapshot = restart ? roundSearchResult([restart.best, localCandidate()], true) : localCandidate()
 				checkpoint.saveIfReduced(snapshot)
@@ -892,53 +897,89 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
 			}
 			try {
-				// Queue broad work before local jobs so it cannot sit behind the chunk queue.
-				const broadJob = nextStrategyJob++
-				const broad = runBroad ? pool.run(currentGates, inputCircuit.wire_count, (_, activity, snapshot) => {
-					strategySummary.observe(broadJob, activity?.strategies)
-					strategyWeights.observe(activity)
-					statuses[jobCount] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
-					if (snapshot) try { restart!.accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
-				}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, true, 'broad').then(result => {
-					strategySummary.finish(broadJob); statuses[jobCount].done = true
-					restart!.accept(result)
-					return result
-				}) : Promise.resolve(currentGates)
-				const local = Promise.all(approxGates.map(async (dataChunk, index) => {
-					const workerFile = paths.worker(index)
-					writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
-					let executionStarted: number | undefined
-					const strategyJob = nextStrategyJob++
-					const result = await pool.run(dataChunk, inputCircuit.wire_count, (count, activity, snapshot) => {
-							executionStarted ??= performance.now()
-							strategySummary.observe(strategyJob, activity?.strategies)
+				const canContinue = () => {
+					if (!config.workers.keepBusy || Atomics.load(stopSignal, 0) !== 0) return false
+					const count = wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, value) => sum + value, 0)
+					const elapsed = performance.now() - lastIterationTime
+					if (!count || elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, count)) { Atomics.store(stopSignal, 0, 1); return false }
+					return true
+				}
+				// Broad work has priority in the pool, and can recur during long
+				// rounds. Local jobs fill its slot while it waits for its cadence.
+				const broad = runBroad ? (async () => {
+					let best = currentGates
+					do {
+						if (config.workers.keepBusy) {
+							while (canContinue() && !broadSchedule.take(performance.now())) await waitForWork(Math.min(250, config.workers.broadSearchSeconds * 1000))
+							if (!canContinue()) break
+						}
+						const broadJob = nextStrategyJob++
+						statuses[jobCount] = { updatedAtMs: performance.now() - lastIterationTime, done: false, started: false }
+						broadStarted = true
+						const result = await pool.run(currentGates, inputCircuit.wire_count, (_, activity, snapshot) => {
+							strategySummary.observe(broadJob, activity?.strategies)
 							strategyWeights.observe(activity)
-							if (snapshot) {
-								snapshots[index] = snapshot
-								try { restart?.accept(wholeCircuit ? snapshot : localCandidate()) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
-							}
-							candidateCounts[index] = count
-							statuses[index] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
-						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, wholeCircuit)
-					strategySummary.finish(strategyJob)
-					if (executionStarted !== undefined) {
-						const cost = (performance.now() - executionStarted) / Math.max(1, dataChunk.length)
-						for (const wire of new Set(dataChunk.flatMap(getVars))) wireCosts.set(wire, ((wireCosts.get(wire) ?? cost) + cost) / 2)
-					}
-					candidateCounts[index] = result.length
-					snapshots[index] = result
-					restart?.accept(wholeCircuit ? result : localCandidate())
-					completed++
+							statuses[jobCount] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
+							if (snapshot) try { restart!.accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
+						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, true, 'broad')
+						strategySummary.finish(broadJob); statuses[jobCount].done = true
+						restart!.accept(result)
+						best = roundSearchResult([best, result], true)
+						if (!canContinue()) break
+					} while (canContinue())
+					return best
+				})() : Promise.resolve(currentGates)
+				const local = Promise.all(approxGates.map(async (_initial, index) => {
+					const workerFile = paths.worker(index)
+					let chunk = index
+					do {
+						if (config.workers.keepBusy && !snapshots[chunk].length) {
+							const next = snapshots.findIndex(candidate => candidate.length > 0)
+							if (next === -1) { Atomics.store(stopSignal, 0, 1); break }
+							chunk = next
+						}
+						const target = chunk, dataChunk = snapshots[target]
+						writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
+						let executionStarted: number | undefined
+						const strategyJob = nextStrategyJob++
+						const accept = (candidate: Gate[]) => {
+							// Several idle lanes may retry the same remaining chunk. Their
+							// results are alternatives, never additional chunks to concatenate.
+							if (!isReplacementSimpler(candidate, snapshots[target])) return
+							snapshots[target] = candidate; candidateCounts[target] = candidate.length
+							restart?.accept(wholeCircuit ? candidate : localCandidate())
+						}
+						const result = await pool.run(dataChunk, inputCircuit.wire_count, (_count, activity, snapshot) => {
+								executionStarted ??= performance.now()
+								strategySummary.observe(strategyJob, activity?.strategies)
+								strategyWeights.observe(activity)
+								if (snapshot) {
+									try { accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
+								}
+								statuses[index] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
+							}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, wholeCircuit)
+						strategySummary.finish(strategyJob)
+						if (executionStarted !== undefined) {
+							const cost = (performance.now() - executionStarted) / Math.max(1, dataChunk.length)
+							for (const wire of new Set(dataChunk.flatMap(getVars))) wireCosts.set(wire, ((wireCosts.get(wire) ?? cost) + cost) / 2)
+						}
+						accept(result)
+						completed++
+						statuses[index].done = true
+						writeCircuit(workerFile, inputCircuit.wire_count, result)
+						if (!canContinue()) break
+						statuses[index] = { updatedAtMs: performance.now() - lastIterationTime, done: false, started: false }
+						await yieldToCoordinator()
+					} while (canContinue())
 					statuses[index].done = true
-					writeCircuit(workerFile, inputCircuit.wire_count, result)
-					return result
+					return snapshots[index]
 				}))
 				const results = await Promise.race([checkpointFailed, Promise.all([local, broad])])
-				currentGates = roundSearchResult(results[0], wholeCircuit)
+				currentGates = roundSearchResult(snapshots, wholeCircuit)
 				if (runBroad) currentGates = roundSearchResult([currentGates, results[1]], true)
 				if (restart) currentGates = roundSearchResult([restart.best, currentGates], true)
-			} finally { beginPhase('finishing round') }
-			if (runBroad && currentGates.length < nPrevGates) broadSchedule.retry()
+			} finally { Atomics.store(stopSignal, 0, 1); beginPhase('finishing round') }
+			if (broadStarted && currentGates.length < nPrevGates) broadSchedule.retry()
 			report()
 			const filename = paths.progress(currentGates.length)
 			if (!checkpoint.hasSaved) {
@@ -948,14 +989,14 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const gatesRemoved = nPrevGates - currentGates.length
 			const endTime = performance.now()
 			const timeDiffMins = (endTime - lastIterationTime) / 60000
-			if (config.workers.adaptiveConcurrency) {
+			if (config.workers.adaptiveConcurrency && !config.workers.keepBusy) {
 				const resources = statuses.map(status => status.activity?.resources)
 				const reason = concurrency.observe({ concurrency: nWorkers, elapsedMs: endTime - lastIterationTime, removed: gatesRemoved, databaseMs: resources.reduce((sum, value) => sum + (value?.databaseMs ?? 0), 0), workerMs: resources.reduce((sum, value) => sum + (value?.elapsedMs ?? 0), 0), memoryPressure: memoryPressure(config.workers.memoryBudgetMegabytes) })
 				if (reason === 'memory budget pressure') { pool.setConcurrency(concurrency.limit(nMaxWorkers)); await pool.trimIdle() }
 				if (reason) logVerbose(`Next round worker target: ${concurrency.limit(nMaxWorkers)} (${reason})`)
 			}
 			logVerbose(`Total gates removed in iteration: ${ gatesRemoved } (${ Math.floor(gatesRemoved/timeDiffMins * 60) } gates/hour)`)
-			if (!wholeCircuit && !(restart && currentGates.length < nPrevGates)) {
+			if (!config.workers.keepBusy && !wholeCircuit && !(restart && currentGates.length < nPrevGates)) {
 				beginPhase('shuffling next round')
 				const job = nextStrategyJob++
 				try { currentGates = await pool.run(currentGates, inputCircuit.wire_count, (_, activity) => strategySummary.observe(job, activity?.strategies), undefined, config.workers.jobSeconds * 1000, false, 'shuffle') }

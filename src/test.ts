@@ -1004,3 +1004,5 @@ await import('./adaptive-strategy-test.js')
 await import('./probabilistic-rewrite-test.js')
 
 await import('./structural-strategies-test.js')
+
+await import('./worker-utilization-test.js')

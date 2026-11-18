@@ -8,7 +8,7 @@ export type RainbowTableSpec = { wires: number, gates: number }
 export const defaults = {
 	runtime: { heapMegabytes: 16384 },
 	files: { dataDirectory: 'data', latestName: 'latest.json', workerDirectory: 'worker', progressDirectory: 'progress', databaseDirectory: '.' },
-	workers: { broadSearchSeconds: 60, wholeCircuitMaximumGates: 2000, maximum: 24, minimumChunkGates: 100, maximumChunkFraction: 0.5, jobsPerWorker: 4, jobSeconds: 120, adaptiveConcurrency: true, initialConcurrency: 4, concurrencySampleRounds: 2, concurrencyDatabaseFraction: 0.6, concurrencyRateTolerance: 0.05, memoryBudgetMegabytes: 8192, shareTemplates: true, sharedTemplateSeconds: 15, sharedTemplateEntries: 64, sharedTemplateBatch: 16 },
+	workers: { keepBusy: true, broadSearchSeconds: 60, wholeCircuitMaximumGates: 2000, maximum: 24, minimumChunkGates: 100, maximumChunkFraction: 0.5, jobsPerWorker: 4, jobSeconds: 120, adaptiveConcurrency: true, initialConcurrency: 4, concurrencySampleRounds: 2, concurrencyDatabaseFraction: 0.6, concurrencyRateTolerance: 0.05, memoryBudgetMegabytes: 8192, shareTemplates: true, sharedTemplateSeconds: 15, sharedTemplateEntries: 64, sharedTemplateBatch: 16 },
 	timing: { roundMinutes: 25, improvedRoundMinutes: 5, summarySeconds: 30, workerReportSeconds: 5, databaseLogSeconds: 60, standaloneSaveSeconds: 60 },
 	logging: { verbose: false, generationDiagnostics: true, generationDiagnosticsMinimumSeconds: 5, eventLoopResolutionMilliseconds: 20 },
 	validation: { checkpointInputs: 20, probabilisticInputs: 202, maximumWires: 64 },
