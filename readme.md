@@ -86,7 +86,7 @@ The solver combines several approaches:
 - **Local search:** prioritize recently changed regions. Adaptive search modes
   remain available through `search.adaptive`, but are off by default.
 - **Synthesis rotation:** after cheap template, variable and rainbow rewrites
-  stall, take turns in a fixed order: GF(2), forward search, Z3, meet-in-the-middle,
+  stall, take turns in a fixed order: GF(2), quadratic synthesis, forward search, Z3, meet-in-the-middle,
   equality saturation. Disabled, ineligible and cached failures are skipped.
   Region sizes still vary so persistent workers explore different candidates.
 
@@ -100,6 +100,17 @@ also composes Boolean polynomials through mixed gates: nonlinear intermediates
 may cancel to an affine map. It can rewrite that map directly, or find smaller
 mixed subwindows whose final transformation is affine. Truly nonlinear maps and
 singular affine maps are preserved.
+
+Sparse quadratic synthesis (`synthesis.quadratic`, enabled by default) can also
+emit genuinely nonlinear results: NOTs, controlled XORs, AND-controlled flips,
+and complemented variants. It orders target updates so all controls still have
+their original input values, then recomposes the candidate and checks every output
+polynomial exactly. Dependency cycles, target-dependent deltas and degree above
+two are declined by this emitter. The affine emitter still handles general
+invertible linear maps, including cyclic linear dependencies. Both local and
+broad searches use quadratic synthesis, sharing the existing symbolic resource
+limits and worker lifetime. The original recursive affine maze synthesizes to its
+known four-gate solution.
 
 Mixed symbolic analysis is bounded by `synthesis.affineMaximumTerms` (default
 100,000 stored monomials), `synthesis.affineMaximumOperations` (10,000,000 symbolic

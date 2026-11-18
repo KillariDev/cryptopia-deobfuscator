@@ -1,5 +1,5 @@
 import { StrategyPicker } from './strategy-picker.js'
-import { searchAffineRegions } from './symbolic-affine.js'
+import { searchAffineRegions, searchPolynomialRegions } from './symbolic-affine.js'
 import { synthesizeSMT } from './smt.js'
 import { recordStrategy } from './strategy-stats.js'
 import { config } from './config.js'
@@ -14,17 +14,18 @@ import { LimitedMap } from './limitedMap.js'
 
 export const templates = new TemplateLibrary(config.synthesis.templateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates, config.workers.sharedTemplateEntries)
 const failed = new LimitedMap<string, boolean>(config.synthesis.templateEntries)
-const picker = new StrategyPicker(['gf2-affine', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'])
+const picker = new StrategyPicker(['gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'])
 export type SynthesisBudget = { deadline: number, shouldStop?: () => boolean }
 // Serialize synthesis so Z3 initialization and cleanup cannot overlap.
 let pending: Promise<unknown> = Promise.resolve()
 export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = { deadline: performance.now() + config.workers.jobSeconds * 1000 }): Promise<Gate[] | undefined> {
 	const options = config.synthesis
-	if (!(options.affine || options.forwardSemanticSearch || options.smt || options.meetInMiddle || options.equalitySaturation) || gates.length > Math.max(options.maximumWindowGates, options.affine ? options.affineMaximumWindowGates : 0)) return undefined
+	if (!(options.quadratic || options.affine || options.forwardSemanticSearch || options.smt || options.meetInMiddle || options.equalitySaturation) || gates.length > Math.max(options.maximumWindowGates, (options.affine || options.quadratic) ? options.affineMaximumWindowGates : 0)) return undefined
 	const { normalized, wires, key } = normalizeWindow(gates)
 	const small = wires.length <= options.maximumWires && gates.length <= options.maximumWindowGates
 	const affine = options.affine && gates.length <= options.affineMaximumWindowGates && wires.length <= config.validation.maximumWires
-	if (!small && !affine) return undefined
+	const quadratic = options.quadratic && gates.length <= options.affineMaximumWindowGates && wires.length <= config.validation.maximumWires
+	if (!small && !affine && !quadratic) return undefined
 	const job = pending.then(async () => {
 		const stopped = () => performance.now() >= budget.deadline || budget.shouldStop?.() === true
 		if (stopped()) return undefined
@@ -38,14 +39,18 @@ export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = {
 			const result = searchAffineRegions(normalized, config.validation.maximumWires, options.affineMaximumTerms, options.affineMaximumOperations, budget.deadline, stopped)
 			return result === normalized ? undefined : result
 		} })
+		if (quadratic) choices.push({ name: 'quadratic', run: () => {
+			const result = searchPolynomialRegions(normalized, config.validation.maximumWires, options.affineMaximumTerms, options.affineMaximumOperations, budget.deadline, stopped)
+			return result === normalized ? undefined : result
+		} })
 		// Cache failures per strategy: a capped forward semantic search must not exclude Z3.
 		const available = choices.filter(choice => !failed.has(`${choice.name}:${key}`))
 		const choice = picker.pick(available)
 		if (!choice) return undefined
 		const started = performance.now()
 		const result = await choice.run()
-		const accepted = result !== undefined && isReplacementSimpler(result, normalized) && (choice.name === 'gf2-affine' || templates.learn(normalized, result))
-		const settings = choice.name === 'gf2-affine'
+		const accepted = result !== undefined && isReplacementSimpler(result, normalized) && (['gf2-affine', 'quadratic'].includes(choice.name) || templates.learn(normalized, result))
+		const settings = ['gf2-affine', 'quadratic'].includes(choice.name)
 			? { maximumWires: config.validation.maximumWires, maximumWindowGates: options.affineMaximumWindowGates, workerJobSeconds: config.workers.jobSeconds }
 			: { maximumWires: options.maximumWires, maximumWindowGates: options.maximumWindowGates, maximumReplacementGates: options.maximumReplacementGates, ...(choice.name !== 'z3' ? { states: options.states } : {}), workerJobSeconds: config.workers.jobSeconds }
 		recordStrategy(choice.name, settings, started, normalized.length, accepted ? result!.length : normalized.length, accepted)
@@ -59,9 +64,10 @@ export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = {
 
 /** A scheduled worker turn, separate from the bounded local synthesis window. */
 export function wholeCircuitAffineSearch(gates: Gate[], budgetMs: number, shouldStop: () => boolean) {
-	if (!config.synthesis.affine) return gates
+	if (!config.synthesis.affine && !config.synthesis.quadratic) return gates
 	const started = performance.now()
-	const result = searchAffineRegions(gates, config.validation.maximumWires, config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, started + budgetMs, shouldStop)
-	recordStrategy('gf2-affine-whole', { maximumWires: config.validation.maximumWires, timeoutMs: budgetMs }, started, gates.length, result.length, result !== gates)
+	const search = config.synthesis.quadratic ? searchPolynomialRegions : searchAffineRegions
+	const result = search(gates, config.validation.maximumWires, config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, started + budgetMs, shouldStop)
+	recordStrategy(config.synthesis.quadratic ? 'symbolic-whole' : 'gf2-affine-whole', { maximumWires: config.validation.maximumWires, timeoutMs: budgetMs }, started, gates.length, result.length, result !== gates)
 	return result
 }

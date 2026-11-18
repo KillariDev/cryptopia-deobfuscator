@@ -17,7 +17,7 @@ assert.equal(picker.pick(choices)?.name, 'forward', 'affine-only regions must no
 const not: Gate = { a: 0, b: 0, target: 0, gate_i: 15 }
 const saved = { ...config.synthesis }
 try {
-	Object.assign(config.synthesis, { affine: true, smt: false, forwardSemanticSearch: false, meetInMiddle: false, equalitySaturation: false })
+	Object.assign(config.synthesis, { quadratic: false, affine: true, smt: false, forwardSemanticSearch: false, meetInMiddle: false, equalitySaturation: false })
 	const input = [not, not, not]
 	assert.equal(await advancedRewrite(input, { deadline: -Infinity }), undefined)
 	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000, shouldStop: () => true }), undefined)

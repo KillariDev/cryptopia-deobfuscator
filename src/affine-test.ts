@@ -58,7 +58,7 @@ equivalent(local, localResult, 6)
 assert.equal(simplifyAffineRegions(local, 64, -Infinity), local, 'respect exhausted synthesis budgets')
 const saved = { ...config.synthesis }
 try {
-	Object.assign(config.synthesis, { affine: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false, maximumWindowGates: 1, maximumWires: 1 })
+	Object.assign(config.synthesis, { quadratic: false, affine: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false, maximumWindowGates: 1, maximumWires: 1 })
 	assert.equal(await advancedRewrite(local), undefined, 'disabled affine strategy is not selected')
 	config.synthesis.affine = true
 	const selected = await advancedRewrite(local)
