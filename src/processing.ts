@@ -1092,10 +1092,9 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 	if (originalCircuit.wire_count !== inputCircuit.wire_count) throw new Error('Latest circuit wire count differs from original')
 	if (originalGates.length < gates.length) throw new Error('Latest circuit has more gates than original')
 	const inputPairs = circuitWireCost(gates).effectivePairs
-	const originalPairs = inputCircuit === originalCircuit ? inputPairs : circuitWireCost(originalGates).effectivePairs
 	const startupPhase = 'verifying input checkpoint'
 	onPhase(startupPhase)
-	logTimed(formatCoordinatorPhase(gates.length, inputPairs, originalGates.length, originalGates.length, originalPairs, startupPhase, 0))
+	logTimed(`Circuit: ${formatCircuitSize(gates.length, inputPairs)} | ${startupPhase}`)
 	const writer = new CheckpointWriter(originalGates, inputCircuit.wire_count, config.validation.checkpointInputs)
 	const paths = outputPaths(pathToFileWithoutExt)
 	const solvedAtStartup = isSingleNoOp(gates)
