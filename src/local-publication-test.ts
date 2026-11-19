@@ -43,5 +43,21 @@ try{
   activity?.stage==='shuffling' && ++shuffleChecks>=2
  )
  assert.deepEqual(stopped,shuffleInput,'honor cancellation inside the shuffle before swapping any gates')
+
+ Object.assign(config.search,{strategyAdaptive:true,subsetMinimum:2,subsetMaximum:2,sliceMinimum:2,sliceMaximum:2})
+ const repeated=await optimize(tables,[cn,cn,cn,cn],3,'contiguous rainbow',true,undefined,1000)
+ assert.deepEqual(repeated,[])
+ assert.equal(tables.statistics()[0].windows,1,'one rainbow evaluation covers all matching positions')
+ assert.equal(tables.statistics()[0].rewrites,2,'both nonoverlapping positions can use the result')
+
+ const unrelated={a:0,b:0,target:2,gate_i:15}
+ const separated=await optimize(tables,[cn,unrelated,cn],3,'dependency rainbow',true,undefined,1000,undefined,
+  activity=>activity?.improvements===1)
+ assert.deepEqual(separated,[unrelated],'dependency search finds a pair the contiguous sweep misses')
+
+ Object.assign(config.search,{rainbow:false,variableElimination:true,subsetMinimum:10,subsetMaximum:10,sliceMinimum:3,sliceMaximum:3})
+ const flip={a:0,b:0,target:0,gate_i:15}
+ const variables=await optimize(tables,[flip,flip,{...flip,gate_i:0}],3,'contiguous variables',true,undefined,1000)
+ assert.deepEqual(variables,[],'variables scan the chunk before checking dependency-region size')
 }finally{Math.random=previousRandom;Object.assign(config,saved);await tables.close()}
 console.log('Local progress publishes the first improvement promptly, coalesces later improvements and stops shuffling on cancellation')
