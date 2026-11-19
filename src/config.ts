@@ -7,7 +7,7 @@ export type RainbowTableSpec = { wires: number, gates: number }
 
 export const defaultLocalStrategyOrder = [
 	'quadratic', 'rainbow', 'variables', 'forward-semantic-search', 'equality-saturation',
-	'gf2-affine', 'factored', 'block-cancellation', 'sat-sweeping', 'mixed-basis', 'z3', 'meet-in-the-middle',
+	'gf2-affine', 'factored', 'block-cancellation', 'sat-sweeping', 'mixed-basis', 'z3', 'meet-in-the-middle', 'quadratic-shear',
 ] as const
 export const defaultBroadStrategyOrder = [
 	'sat-sweeping', 'quadratic-shear', 'mixed-basis', 'block-cancellation', 'symbolic', 'factored', 'dependency-cuts',

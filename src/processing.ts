@@ -457,7 +457,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		...(findUselessVarsSetting && sliceSize > 2 ? [{ name: 'variables' }] : []),
 		...(lookup ? [{ name: 'rainbow' }] : []),
 		...synthesisNames.map(name => ({ name })),
-		...(synthesisBudget?.broad && config.synthesis.quadraticShear ? [{ name: 'quadratic-shear' }] : []),
+		...(config.synthesis.quadraticShear ? [{ name: 'quadratic-shear' }] : []),
 		...(synthesisBudget?.broad && (config.synthesis.affine || config.synthesis.quadratic) ? [{ name: 'symbolic' }] : []),
 	]
 	const useStrategyPicker = config.search.strategyAdaptive || synthesisBudget?.forceStrategy
@@ -505,8 +505,9 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		const result = await opaqueRainbow(originalGates, tables, ioIdentifierCache, () => performance.now() >= synthesisBudget.deadline || synthesisBudget.shouldStop?.() === true)
 		if (result) { recordStrategy('rainbow', { opaque: true }, attemptStarted, originalGates.length, result.length, true); return finish({gates: result, changed:true}) }
 	}
-	if (selected === 'quadratic-shear' && synthesisBudget?.broad && config.synthesis.quadraticShear) {
-		const stopped = () => performance.now() >= synthesisBudget.deadline || synthesisBudget.shouldStop?.() === true
+	if (selected === 'quadratic-shear' && config.synthesis.quadraticShear) {
+		const deadline = synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000
+		const stopped = () => performance.now() >= deadline || synthesisBudget?.shouldStop?.() === true
 		const result = synthesizeQuadraticShear(originalGates, config.validation.maximumWires,
 			config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, stopped)
 		recordStrategy(selected, { maximumWires: Math.min(64, config.validation.maximumWires) },
@@ -870,6 +871,7 @@ const localStrategyOrder = () => prioritizeStrategies(config.search.localStrateg
 	'mixed-basis': config.synthesis.mixedBasis,
 	z3: config.synthesis.smt,
 	'meet-in-the-middle': config.synthesis.meetInMiddle,
+	'quadratic-shear': config.synthesis.quadraticShear,
 }).filter(strategy => !smallSynthesisStrategies.has(strategy) || config.search.subsetMinimum <= config.synthesis.maximumWindowGates)
 export const broadStrategyOrder = () => prioritizeStrategies(config.search.broadStrategyOrder, defaultBroadStrategyOrder, {
 	'sat-sweeping': config.synthesis.satSweeping,

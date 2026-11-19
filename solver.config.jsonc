@@ -42,7 +42,7 @@
     "quadratic": {
       "enabled": true // Run this strategy when eligible.
     },
-    // Fit quadratic shears in broad regions and prove every replacement.
+    // Fit quadratic shears in local and broad regions and prove every replacement.
     "quadraticShear": {
       "enabled": true // Run this strategy when eligible.
     },
@@ -139,8 +139,9 @@
     // Listed solvers run first in order. Omitted enabled solvers follow in their default order.
     // Local options in default order
     // "quadratic", "rainbow", "variables", "forward-semantic-search", "equality-saturation",
-    // "gf2-affine", "factored", "block-cancellation", "sat-sweeping", "mixed-basis", "z3", "meet-in-the-middle"
-    "localStrategyOrder": [], // Example ["rainbow", "quadratic"]
+    // "gf2-affine", "factored", "block-cancellation", "sat-sweeping", "mixed-basis",
+    // "z3", "meet-in-the-middle", "quadratic-shear"
+    "localStrategyOrder": [], // Example ["quadratic-shear", "rainbow"]
     // Broad options in default order
     // "sat-sweeping", "quadratic-shear", "mixed-basis", "block-cancellation",
     // "symbolic", "factored", "dependency-cuts"

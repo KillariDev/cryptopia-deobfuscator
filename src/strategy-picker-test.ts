@@ -33,7 +33,7 @@ let cancellationChecks = 0
 const started = performance.now()
 assert.equal(await synthesizeSMT([not], 2, 3, 30000, () => { cancellationChecks++; return performance.now() - started > 10 }), undefined)
 assert.ok(cancellationChecks > 1, 'SMT observes cancellation while its isolate is running')
-assert.throws(() => parseConfig({ search: { localStrategyOrder: ['quadratic-shear'] } }), /localStrategyOrder/)
+assert.throws(() => parseConfig({ search: { localStrategyOrder: ['dependency-cuts'] } }), /localStrategyOrder/)
 assert.throws(() => parseConfig({ search: { broadStrategyOrder: ['sat-sweeping', 'sat-sweeping'] } }), /broadStrategyOrder/)
 assert.throws(() => parseConfig({ search: { broadStrategyOrder: 'quadratic-shear' } }), /broadStrategyOrder/)
 const search = { ...config.search }
@@ -51,12 +51,12 @@ try {
 		assert.equal(strategyPicker.activeStrategy, 'rainbow')
 	}
 	const custom = parseConfig({ search: {
-		localStrategyOrder: ['rainbow'],
+		localStrategyOrder: ['quadratic-shear'],
 		broadStrategyOrder: ['quadratic-shear'],
 	} })
 	Object.assign(config.search, custom.search)
 	const reordered = createOptimizerCaches(7)
-	assert.equal(reordered.strategyPicker.activeStrategy, 'rainbow')
+	assert.equal(reordered.strategyPicker.activeStrategy, 'quadratic-shear')
 	reordered.strategyPicker.beginRound(1)
 	reordered.strategyPicker.beginRound(2)
 	assert.equal(reordered.strategyPicker.activeStrategy, 'quadratic', 'omitted strategies remain in rotation')
@@ -91,13 +91,13 @@ try {
 	config.synthesis.quadratic = true
 	const assignedPool = new WorkerPool(1, undefined, [createSharedTable(table, [], 1024)!])
 	try {
-		for (const strategy of ['quadratic', 'rainbow']) {
+		for (const strategy of ['quadratic', 'quadratic-shear', 'rainbow']) {
 			let reported: string | undefined
 			const input = [not, not]
 			const result = await assignedPool.run(input, 2, (_, activity) => { reported = activity?.activeStrategy },
 				undefined, 100, false, 'local', 1, strategy)
 			assert.equal(reported, strategy)
-			assert.deepEqual(result, strategy === 'quadratic' ? [] : input)
+			assert.deepEqual(result, strategy === 'rainbow' ? input : [])
 		}
 	} finally { await assignedPool.close() }
 

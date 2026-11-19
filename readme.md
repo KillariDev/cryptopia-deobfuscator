@@ -118,7 +118,7 @@ jobs use the fixed pipeline. The broad order applies in both modes.
 
 | Scope | Strategy names in default order |
 | --- | --- |
-| Local | `quadratic`, `rainbow`, `variables`, `forward-semantic-search`, `equality-saturation`, `gf2-affine`, `factored`, `block-cancellation`, `sat-sweeping`, `mixed-basis`, `z3`, `meet-in-the-middle` |
+| Local | `quadratic`, `rainbow`, `variables`, `forward-semantic-search`, `equality-saturation`, `gf2-affine`, `factored`, `block-cancellation`, `sat-sweeping`, `mixed-basis`, `z3`, `meet-in-the-middle`, `quadratic-shear` |
 | Broad | `sat-sweeping`, `quadratic-shear`, `mixed-basis`, `block-cancellation`, `symbolic`, `factored`, `dependency-cuts` |
 
 Local GF(2) affine synthesis (`strategies.gf2Affine.enabled`, enabled by default) is selected among
@@ -163,7 +163,7 @@ the whole-region SAT attempt.
 Quadratic shear interpolation (`strategies.quadraticShear.enabled`) uses packed
 samples to identify likely unchanged wires. It evaluates zero-, one-, and
 two-bit inputs to fit flips on the other wires as quadratic functions of those
-unchanged wires. It covers broad regions with up to 64 active wires, using the
+unchanged wires. It covers local and broad regions with up to 64 active wires, using the
 shared polynomial term and operation limits for its exact equivalence proof.
 A fit is discarded if the proof fails or runs out of budget.
 
