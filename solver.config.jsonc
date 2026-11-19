@@ -127,8 +127,6 @@
   "files": {
     // Base directory for working data.
     "dataDirectory": "data",
-    // Legacy latest-file setting. Checkpoints use the input filename plus -latest.json.
-    "latestName": "latest.json",
     // Name of the worker scratch directory under dataDirectory.
     "workerDirectory": "worker",
     // Name of the progress directory under dataDirectory.
@@ -138,8 +136,6 @@
   },
   // Worker concurrency, scheduling and memory.
   "workers": {
-    // Legacy setting. Global jobs now run alongside local jobs.
-    "broadSearchIdleSeconds": 0,
     // Refill workers continuously during a round.
     "keepBusy": true,
     // Maximum gate count for whole-circuit local jobs. Zero always splits.
