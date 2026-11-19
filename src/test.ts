@@ -291,6 +291,7 @@ try {
 	await rm(workerDir, { recursive: true, force: true })
 }
 
+const { defaults, parseConfig, config } = await import('./config.js')
 const { formatWorkerActivity, shouldFinishReducedRound } = await import('./logging.js')
 const status = { activity: { passes: 3, subsets: 120, checks: 900, improvements: 4, stage: 'searching' as const }, updatedAtMs: 5_000, done: false }
 const detail = formatWorkerActivity([status, { updatedAtMs: 0, done: true }], 10_000, 25 * 60_000)
@@ -298,9 +299,10 @@ assert.match(detail, /3 passes, 120 subsets visited, 900 optimization checks, 4 
 assert.match(detail, /1 searching/)
 assert.match(detail, /1 completed/)
 assert.match(detail, /5s ago/)
-assert.equal(shouldFinishReducedRound(299_999, 100, 99), false)
-assert.equal(shouldFinishReducedRound(300_000, 100, 99), true)
-assert.equal(shouldFinishReducedRound(600_000, 100, 100), false)
+const improvedRoundMs = config.timing.improvedRoundMinutes * 60_000
+assert.equal(shouldFinishReducedRound(improvedRoundMs - 1, 100, 99), false)
+assert.equal(shouldFinishReducedRound(improvedRoundMs, 100, 99), true)
+assert.equal(shouldFinishReducedRound(improvedRoundMs, 100, 100), false)
 const { ReductionCheckpoint } = await import('./storage.js')
 const writes: number[] = []
 const checkpoint = new ReductionCheckpoint(3, gates => { writes.push(gates.length) })
@@ -333,7 +335,6 @@ try {
 }
 console.log('Detailed progress, reduction checkpoints and round-stop regressions passed')
 
-const { defaults, parseConfig, config } = await import('./config.js')
 assert.deepEqual(parseConfig({}), defaults)
 const { parseConfigDocument } = await import('./config-document.js')
 assert.doesNotThrow(() => parseConfig(parseConfigDocument(readFileSync(new URL('../solver.config.jsonc', import.meta.url), 'utf8'))))
@@ -518,7 +519,7 @@ const compact = formatStatus({ effectivePairs: 12, previousPairs: 15, original: 
 assert.match(compact, /Circuit: 100G 12.00W -63G -3.00W \(90\.00%\)/)
 assert.ok(!compact.includes('Checkpoint'))
 assert.match(compact, /1 worker active/)
-assert.match(compact, /Round time: 1m 0s \/ 5m 0s$/)
+assert.ok(compact.endsWith(`Round time: 1m 0s / ${Math.floor(improvedRoundMs / 60_000)}m ${Math.floor(improvedRoundMs / 1000) % 60}s`))
 assert.ok(!compact.includes('oldest'))
 assert.ok(!compact.includes('subsets'))
 const strategyStatus = formatStatus({
