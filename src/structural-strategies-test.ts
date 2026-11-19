@@ -116,7 +116,7 @@ const saved = structuredClone(config), tables = new RainbowPortfolio([{ wires: 3
 try {
 	Object.assign(config.synthesis, { affine: false, quadratic: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false, factored: true, blockCancellation: true, satSweeping: true })
 	config.search.strategyAdaptive = true
-	const cases = { factored: [t, t, t], 'block-cancellation': blockInput, 'sat-sweeping': distributed, 'mixed-basis': blockInput }
+	const cases = { 'factored-synthesis': [t, t, t], 'block-cancellation': blockInput, 'sat-sweeping': distributed, 'basis-change-cancellation': blockInput }
 	for (const name of structuralNames) {
 		resetStrategyStats()
 		const input = cases[name], picker = new RoundStrategyPicker([name])

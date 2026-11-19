@@ -14,6 +14,8 @@ const directory = await mkdtemp(join(tmpdir(), 'local-global-'))
 const done = new Error('verified round')
 const circuit = { wire_count: 2, gate_count: 5001, gates: Array.from({ length: 5001 }, () => [0, 0, 0, 15] as [number, number, number, number]) }
 try {
+	config.search.localStrategyOrder = []
+	config.search.broadStrategyOrder = []
 	config.files.dataDirectory = directory
 	config.database.sharedTables = false
 	config.logging.verbose = false
@@ -46,7 +48,7 @@ try {
 			assert.equal(restart, false)
 			if (jobRound === 2) {
 				if (solver === 'broad') {
-					assert.equal(broadStrategy, broadRemoved === 0 ? 'quadratic-shear' : 'sat-sweeping')
+					assert.equal(broadStrategy, broadRemoved === 0 ? 'quadratic-shear-interpolation' : 'sat-sweeping')
 					throw done
 				}
 				return gates
@@ -75,9 +77,9 @@ try {
 				localImproved = true
 				await expectCheckpointAndStatus(broadRemoved, broadRemoved)
 				progress?.(gates.length - 4, {
-					workerId: 2, activeStrategy: 'rainbow', stage: 'searching',
+					workerId: 2, activeStrategy: 'truth-table-lookup', stage: 'searching',
 					passes: 1, subsets: 1, checks: 1, improvements: 1,
-					strategies: [{ strategy: 'rainbow', settings: '', attempts: 1, elapsedMs: 50, rewrites: 1, gatesRemoved: 4 }],
+					strategies: [{ strategy: 'truth-table-lookup', settings: '', attempts: 1, elapsedMs: 50, rewrites: 1, gatesRemoved: 4 }],
 				}, gates.slice(4))
 				assert.equal(Atomics.load(stop, 0), 0, 'local improvement leaves the other work running')
 				releaseBroad()
@@ -92,7 +94,7 @@ try {
 		const resultLine = reports.find(line => line.includes(`Round winner: ${winner} | Local: 4 gates removed | Global: ${broadRemoved} gates removed`))
 		assert.match(resultLine ?? '', / \| [1-9]\d* gates\/hour$/)
 		assert.ok(reports.every(line => !/\| (Local|Global) worker \d+ started/.test(line)))
-		assert.ok(reports.some(line => line.endsWith('Local strategies: rainbow:1')))
+		assert.ok(reports.some(line => line.endsWith('Local strategies: truth-table-lookup:1')))
 		assert.ok(reports.some(line => line.endsWith('Global strategies: SAT sweep:1')))
 		assert.ok(reports.every(line => !line.includes(' tried (worker time):')))
 	}
@@ -179,7 +181,7 @@ try {
 	}
 	await assert.rejects(splitTaskAndRun(join(directory, 'whole-strategies'), 'unused',
 		{ originalCircuit: splitFixture, inputCircuit: splitFixture }), error => error === done)
-	assert.deepEqual(attempts, ['quadratic', 'rainbow', 'block-cancellation'])
+	assert.deepEqual(attempts, ['anf-synthesis', 'truth-table-lookup', 'block-cancellation'])
 
 } finally {
 	Object.assign(config, saved)

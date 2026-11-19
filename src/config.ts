@@ -6,11 +6,11 @@ import { isMainThread, workerData } from 'worker_threads'
 export type RainbowTableSpec = { wires: number, gates: number }
 
 export const defaultLocalStrategyOrder = [
-	'quadratic', 'rainbow', 'variables', 'forward-semantic-search', 'equality-saturation',
-	'gf2-affine', 'factored', 'block-cancellation', 'sat-sweeping', 'mixed-basis', 'z3', 'meet-in-the-middle', 'quadratic-shear',
+	'anf-synthesis', 'truth-table-lookup', 'variable-elimination', 'forward-semantic-search', 'commutation-search',
+	'gf2-affine', 'factored-synthesis', 'block-cancellation', 'sat-sweeping', 'basis-change-cancellation', 'smt-synthesis', 'meet-in-the-middle', 'quadratic-shear-interpolation',
 ] as const
 export const defaultBroadStrategyOrder = [
-	'sat-sweeping', 'quadratic-shear', 'mixed-basis', 'block-cancellation', 'symbolic', 'factored', 'dependency-cuts',
+	'sat-sweeping', 'quadratic-shear-interpolation', 'basis-change-cancellation', 'block-cancellation', 'polynomial-region-search', 'factored-synthesis', 'dependency-cuts',
 ] as const
 
 export const defaults = {
@@ -30,32 +30,59 @@ export type SolverConfig = typeof defaults
 
 // Keep one runtime representation for workers, benchmarks, and legacy JSON.
 const strategySettings = {
-	rainbow: { enabled: 'search.rainbow' },
-	variables: { enabled: 'search.variableElimination', exactMaximumWires: 'search.exactMaximumWires', sampleCandidates: 'search.probabilistic', samples: 'validation.probabilisticInputs' },
+	truthTableLookup: { enabled: 'search.rainbow' },
+	variableElimination: { enabled: 'search.variableElimination', exactMaximumWires: 'search.exactMaximumWires', sampleCandidates: 'search.probabilistic', samples: 'validation.probabilisticInputs' },
 	dependencyCuts: { enabled: 'search.dependencyCuts' },
 	satSweeping: { enabled: 'synthesis.satSweeping', cutsFirst: 'synthesis.broadSatCutsFirst' },
-	mixedBasis: { enabled: 'synthesis.mixedBasis' },
+	basisChangeCancellation: { enabled: 'synthesis.mixedBasis' },
 	blockCancellation: { enabled: 'synthesis.blockCancellation' },
-	factored: { enabled: 'synthesis.factored' },
+	factoredSynthesis: { enabled: 'synthesis.factored' },
 	gf2Affine: { enabled: 'synthesis.affine' },
-	quadratic: { enabled: 'synthesis.quadratic' },
-	quadraticShear: { enabled: 'synthesis.quadraticShear' },
+	anfSynthesis: { enabled: 'synthesis.quadratic' },
+	quadraticShearInterpolation: { enabled: 'synthesis.quadraticShear' },
 	forwardSemantic: { enabled: 'synthesis.forwardSemanticSearch' },
-	smt: { enabled: 'synthesis.smt' },
+	smtSynthesis: { enabled: 'synthesis.smt' },
 	meetInMiddle: { enabled: 'synthesis.meetInMiddle' },
-	equalitySaturation: { enabled: 'synthesis.equalitySaturation' },
+	commutationSearch: { enabled: 'synthesis.equalitySaturation' },
 	factoredLimits: { maximumNodes: 'synthesis.factoredMaximumNodes', maximumEdges: 'synthesis.factoredMaximumEdges' },
 	polynomialLimits: { maximumWindowGates: 'synthesis.affineMaximumWindowGates', maximumTerms: 'synthesis.affineMaximumTerms', maximumOperations: 'synthesis.affineMaximumOperations' },
 	smallSynthesisLimits: { maximumWires: 'synthesis.maximumWires', maximumWindowGates: 'synthesis.maximumWindowGates', maximumReplacementGates: 'synthesis.maximumReplacementGates', states: 'synthesis.states' },
 }
 
+const strategyGroupAliases: ReadonlyMap<string, string> = new Map([
+	['quadraticShear', 'quadraticShearInterpolation'],
+	['quadratic', 'anfSynthesis'],
+	['smt', 'smtSynthesis'],
+	['variables', 'variableElimination'],
+	['factored', 'factoredSynthesis'],
+	['mixedBasis', 'basisChangeCancellation'],
+	['equalitySaturation', 'commutationSearch'],
+	['rainbow', 'truthTableLookup'],
+])
+
+const strategyOrderAliases: ReadonlyMap<string, string> = new Map([
+	['quadratic-shear', 'quadratic-shear-interpolation'],
+	['quadratic', 'anf-synthesis'],
+	['symbolic', 'polynomial-region-search'],
+	['z3', 'smt-synthesis'],
+	['variables', 'variable-elimination'],
+	['factored', 'factored-synthesis'],
+	['mixed-basis', 'basis-change-cancellation'],
+	['equality-saturation', 'commutation-search'],
+	['rainbow', 'truth-table-lookup'],
+])
+
 function expandStrategySettings(value: object) {
 	const { strategies, ...sections } = value as Record<string, unknown>
 	if (!Object.prototype.hasOwnProperty.call(value, 'strategies')) return sections
 	if (!strategies || typeof strategies !== 'object' || Array.isArray(strategies)) throw new Error('Invalid config section: strategies')
-	for (const [strategy, settings] of Object.entries(strategies)) {
+	const seen = new Set<string>()
+	for (const [source, settings] of Object.entries(strategies)) {
+		const strategy = strategyGroupAliases.get(source) ?? source
 		if (strategy === 'templates') continue // Settings from before template removal.
-		if (!Object.prototype.hasOwnProperty.call(strategySettings, strategy)) throw new Error(`Unknown strategy group: ${strategy}`)
+		if (!Object.prototype.hasOwnProperty.call(strategySettings, strategy)) throw new Error(`Unknown strategy group: ${source}`)
+		if (seen.has(strategy)) throw new Error(`Duplicate strategy group: ${source}`)
+		seen.add(strategy)
 		if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error(`Invalid strategy group: ${strategy}`)
 		const fields = strategySettings[strategy as keyof typeof strategySettings] as Record<string, string>
 		for (const [name, setting] of Object.entries(settings)) {
@@ -100,10 +127,11 @@ export function parseConfig(value: unknown): SolverConfig {
 			if (!Object.prototype.hasOwnProperty.call(target, key)) throw new Error(`Unknown config setting: ${section}.${key}`)
 			if (section === 'search' && (key === 'localStrategyOrder' || key === 'broadStrategyOrder')) {
 				const allowed: readonly string[] = key === 'localStrategyOrder' ? defaultLocalStrategyOrder : defaultBroadStrategyOrder
-				if (!Array.isArray(setting) || setting.some(name => !allowed.includes(name)) || new Set(setting).size !== setting.length) {
+				const order = Array.isArray(setting) ? setting.map(name => strategyOrderAliases.get(name) ?? name) : undefined
+				if (!order || order.some(name => !allowed.includes(name)) || new Set(order).size !== order.length) {
 					throw new Error(`search.${key} needs distinct strategy names from: ${allowed.join(', ')}`)
 				}
-				target[key] = setting.slice()
+				target[key] = order
 				continue
 			}
 			if (section === 'benchmark' && key === 'variants') {

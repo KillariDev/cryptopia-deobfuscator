@@ -8,6 +8,7 @@ import { RainbowPortfolio } from './rainbow-portfolio.js'
 import { broadStrategyOrder, createOptimizerCaches, massOptimizeStep, SubsetPreparation } from './processing.js'
 import { strategySnapshot } from './strategy-stats.js'
 import { structuralChoices, structuralNames } from './structural-strategies.js'
+import { quadraticShearRegions } from './quadratic-shear.js'
 import { hashGates } from './utils.js'
 
 /** Coarse-to-fine windows with 50% overlap, interleaved so all scales get a turn. */
@@ -33,7 +34,7 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 	const deadline = performance.now() + budgetMs
 	const stopped = () => shouldStop() || performance.now() >= deadline
 	const activity: WorkerActivity = { scope: 'broad', passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
-	const report = (snapshot?: Gate[], cutPatch?: CutPatch) => onProgress(snapshot?.length ?? input.length, { ...activity, cutPatch, activeStrategy: config.search.strategyAdaptive ? caches.broadStrategyPicker.activeStrategy : undefined, strategies: strategySnapshot().map(stat => ({ ...stat, strategy: ['gf2-affine-whole', 'symbolic-whole'].includes(stat.strategy) ? stat.strategy : `${stat.strategy} broad` })) }, snapshot)
+	const report = (snapshot?: Gate[], cutPatch?: CutPatch) => onProgress(snapshot?.length ?? input.length, { ...activity, cutPatch, activeStrategy: config.search.strategyAdaptive ? caches.broadStrategyPicker.activeStrategy : undefined, strategies: strategySnapshot().map(stat => ({ ...stat, strategy: ['gf2-affine-whole', 'polynomial-region-search'].includes(stat.strategy) ? stat.strategy : `${stat.strategy} broad` })) }, snapshot)
 	const minimum = minimumBroadGates()
 	const structural = structuralChoices()
 	const assigned = config.search.strategyAdaptive ? caches.broadStrategyPicker.activeStrategy : undefined
@@ -51,7 +52,21 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 	const passes = choices.map(({ name }) => {
 		let cursor = state.get(name)
 		if (!cursor) { cursor = new SearchProgress(); state.set(name, cursor) }
-		cursor.reset(input, () => broadRegions(length, minimum), key)
+		cursor.reset(input, function* () {
+			const regions = broadRegions(length, minimum)
+			yield { start: 0, end: length }
+			regions.next()
+			const seen = new Set<string>()
+			if (name === 'quadratic-shear-interpolation') {
+				for (const region of quadraticShearRegions(input, wires, minimum)) {
+					seen.add(`${region.start}:${region.end}`)
+					yield region
+				}
+			}
+			for (const region of regions) {
+				if (!seen.has(`${region.start}:${region.end}`)) yield region
+			}
+		}, key)
 		return { name, cursor }
 	})
 	const remaining = passes.slice()

@@ -33,34 +33,45 @@ let cancellationChecks = 0
 const started = performance.now()
 assert.equal(await synthesizeSMT([not], 2, 3, 30000, () => { cancellationChecks++; return performance.now() - started > 10 }), undefined)
 assert.ok(cancellationChecks > 1, 'SMT observes cancellation while its isolate is running')
+const legacyNames = parseConfig({
+	strategies: { rainbow: { enabled: false }, quadraticShear: { enabled: false }, smt: { enabled: false } },
+	search: { localStrategyOrder: ['rainbow', 'quadratic', 'z3'], broadStrategyOrder: ['quadratic-shear', 'symbolic'] },
+})
+assert.equal(legacyNames.search.rainbow, false)
+assert.equal(legacyNames.synthesis.quadraticShear, false)
+assert.equal(legacyNames.synthesis.smt, false)
+assert.deepEqual(legacyNames.search.localStrategyOrder, ['truth-table-lookup', 'anf-synthesis', 'smt-synthesis'])
+assert.deepEqual(legacyNames.search.broadStrategyOrder, ['quadratic-shear-interpolation', 'polynomial-region-search'])
+assert.throws(() => parseConfig({ search: { localStrategyOrder: ['quadratic', 'anf-synthesis'] } }), /localStrategyOrder/)
+assert.throws(() => parseConfig({ strategies: { smt: {}, smtSynthesis: {} } }), /Duplicate strategy group/)
 assert.throws(() => parseConfig({ search: { localStrategyOrder: ['dependency-cuts'] } }), /localStrategyOrder/)
 assert.throws(() => parseConfig({ search: { broadStrategyOrder: ['sat-sweeping', 'sat-sweeping'] } }), /broadStrategyOrder/)
-assert.throws(() => parseConfig({ search: { broadStrategyOrder: 'quadratic-shear' } }), /broadStrategyOrder/)
+assert.throws(() => parseConfig({ search: { broadStrategyOrder: 'quadratic-shear-interpolation' } }), /broadStrategyOrder/)
 const search = { ...config.search }
 const tables = config.database.tables
 const table = { wires: 2, gates: 1 }
 const pool = new WorkerPool(2, undefined, [createSharedTable(table, [], 1024)!])
 try {
-	Object.assign(config.search, { rainbow: true, strategyAdaptive: true })
+	Object.assign(config.search, { rainbow: true, strategyAdaptive: true, localStrategyOrder: [], broadStrategyOrder: [] })
 	config.synthesis.quadratic = true
 	for (const index of [0, 1, 7]) {
 		const { strategyPicker } = createOptimizerCaches(index)
 		strategyPicker.beginRound(1)
-		assert.equal(strategyPicker.activeStrategy, 'quadratic')
+		assert.equal(strategyPicker.activeStrategy, 'anf-synthesis')
 		strategyPicker.beginRound(2)
-		assert.equal(strategyPicker.activeStrategy, 'rainbow')
+		assert.equal(strategyPicker.activeStrategy, 'truth-table-lookup')
 	}
 	const custom = parseConfig({ search: {
-		localStrategyOrder: ['quadratic-shear'],
-		broadStrategyOrder: ['quadratic-shear'],
+		localStrategyOrder: ['quadratic-shear-interpolation'],
+		broadStrategyOrder: ['quadratic-shear-interpolation'],
 	} })
 	Object.assign(config.search, custom.search)
 	const reordered = createOptimizerCaches(7)
-	assert.equal(reordered.strategyPicker.activeStrategy, 'quadratic-shear')
+	assert.equal(reordered.strategyPicker.activeStrategy, 'quadratic-shear-interpolation')
 	reordered.strategyPicker.beginRound(1)
 	reordered.strategyPicker.beginRound(2)
-	assert.equal(reordered.strategyPicker.activeStrategy, 'quadratic', 'omitted strategies remain in rotation')
-	assert.deepEqual(broadStrategyOrder().slice(0, 2), ['quadratic-shear', 'sat-sweeping'])
+	assert.equal(reordered.strategyPicker.activeStrategy, 'anf-synthesis', 'omitted strategies remain in rotation')
+	assert.deepEqual(broadStrategyOrder().slice(0, 2), ['quadratic-shear-interpolation', 'sat-sweeping'])
 	const shearEnabled = config.synthesis.quadraticShear
 	try {
 		config.synthesis.quadraticShear = false
@@ -68,7 +79,7 @@ try {
 	} finally {
 		config.synthesis.quadraticShear = shearEnabled
 	}
-	Object.assign(config.search, search)
+	Object.assign(config.search, search, { localStrategyOrder: [], broadStrategyOrder: [] })
 
 	config.synthesis.quadratic = false
 	config.database.tables = [table]
@@ -77,7 +88,7 @@ try {
 	let firstLocalStrategy: string | undefined
 	await pool.run([not], 2, (_, activity) => { firstLocalStrategy ??= activity?.activeStrategy },
 		undefined, 20, false, 'local', 1)
-	assert.equal(firstLocalStrategy, 'rainbow', 'starting a broad worker first preserves the first local strategy')
+	assert.equal(firstLocalStrategy, 'truth-table-lookup', 'starting a broad worker first preserves the first local strategy')
 	Object.assign(config.search, { subsetMinimum: 2, subsetMaximum: 2, sliceMinimum: 2, sliceMaximum: 2 })
 	const limitedPool = new WorkerPool(2, undefined, [createSharedTable(table, [], 1024)!], undefined, 1)
 	try {
@@ -91,13 +102,13 @@ try {
 	config.synthesis.quadratic = true
 	const assignedPool = new WorkerPool(1, undefined, [createSharedTable(table, [], 1024)!])
 	try {
-		for (const strategy of ['quadratic', 'quadratic-shear', 'rainbow']) {
+		for (const strategy of ['anf-synthesis', 'quadratic-shear-interpolation', 'truth-table-lookup']) {
 			let reported: string | undefined
 			const input = [not, not]
 			const result = await assignedPool.run(input, 2, (_, activity) => { reported = activity?.activeStrategy },
 				undefined, 100, false, 'local', 1, strategy)
 			assert.equal(reported, strategy)
-			assert.deepEqual(result, strategy === 'rainbow' ? input : [])
+			assert.deepEqual(result, strategy === 'truth-table-lookup' ? input : [])
 		}
 	} finally { await assignedPool.close() }
 

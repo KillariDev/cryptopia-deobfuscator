@@ -89,25 +89,27 @@ The solver combines several approaches:
   expose simplifications that were not adjacent before.
 - **Local search:** prioritize recently changed regions. Adaptive search modes
   remain available through `search.adaptive`, but are off by default.
-- **Strategy rotation:** by default in split-circuit mode, local workers start with quadratic synthesis when enabled,
-  followed by rainbow lookup in the rotation. When quadratic is disabled, local
-  workers start at offset positions in the enabled strategy order. A worker keeps
-  its strategy for the entire round and advances after a round without a gate
-  reduction. Local and broad searches have separate strategy orders.
-  The broad lane keeps its strategy whenever it removes gates, regardless of which result wins.
+- **Strategy rotation:** a worker keeps its strategy for the entire round and
+  advances after a round without a gate reduction. The local and broad searches
+  have separate strategy orders. The checked-in config starts both with
+  quadratic shear interpolation. With an empty local priority list, split
+  workers start with ANF synthesis when enabled, followed by truth-table lookup.
+  When ANF synthesis is disabled and the list is empty, workers start at offset
+  positions in the enabled strategy order. The broad lane keeps its strategy
+  whenever it removes gates, regardless of which result wins.
 
 The round summary reports worker counts by strategy. Set `search.strategyAdaptive` to false to use the fixed pipeline and
 synthesis rotation. Failed-region caches are separate by strategy so each method
 can try the same region.
 
 Set `search.localStrategyOrder` or `search.broadStrategyOrder` to give
-specific strategies priority. For example, this tries rainbow before quadratic
-in local search and quadratic shear before SAT sweeping in broad search.
+specific strategies priority. For example, this tries truth-table lookup before ANF synthesis in local
+search and quadratic shear interpolation before SAT sweeping in broad search.
 
 ```jsonc
 "search": {
-  "localStrategyOrder": ["rainbow", "quadratic"],
-  "broadStrategyOrder": ["quadratic-shear", "sat-sweeping"]
+  "localStrategyOrder": ["truth-table-lookup", "anf-synthesis"],
+  "broadStrategyOrder": ["quadratic-shear-interpolation", "sat-sweeping"]
 }
 ```
 
@@ -116,10 +118,32 @@ strategies are skipped. The local order applies to adaptive rounds and to queuin
 whole-circuit local jobs. With adaptive strategy selection disabled, split local
 jobs use the fixed pipeline. The broad order applies in both modes.
 
-| Scope | Strategy names in default order |
-| --- | --- |
-| Local | `quadratic`, `rainbow`, `variables`, `forward-semantic-search`, `equality-saturation`, `gf2-affine`, `factored`, `block-cancellation`, `sat-sweeping`, `mixed-basis`, `z3`, `meet-in-the-middle`, `quadratic-shear` |
-| Broad | `sat-sweeping`, `quadratic-shear`, `mixed-basis`, `block-cancellation`, `symbolic`, `factored`, `dependency-cuts` |
+### Search strategies
+
+Scope indicates which priority list accepts the strategy. Broad dependency
+cuts can also invoke local rewrite methods inside a cut.
+
+| Strategy | Scope | What it does |
+| --- | --- | --- |
+| `anf-synthesis` | Local | Composes gates in algebraic normal form (ANF) and synthesizes affine, quadratic, and certain cubic maps. |
+| `truth-table-lookup` | Local | Matches a region’s input/output behavior against precomputed tables of shorter gate sequences. |
+| `variable-elimination` | Local | Removes wires or substitutes controls where the region’s behavior allows it. |
+| `forward-semantic-search` | Local | Enumerates short gate sequences from the identity and deduplicates them by exact input/output behavior. |
+| `commutation-search` | Local | Explores commuting gate swaps and removes spans whose endpoint states match. |
+| `gf2-affine` | Local | Finds affine maps and rebuilds them with binary linear algebra. |
+| `factored-synthesis` | Local and broad | Keeps Boolean expressions factored while simplifying them and attempts to emit a shorter circuit. |
+| `block-cancellation` | Local and broad | Finds repeated blocks and proves when they cancel across intervening gates. |
+| `sat-sweeping` | Local and broad | Uses SAT to prove that candidate expressions are equivalent, then uses those identities to simplify the circuit. |
+| `basis-change-cancellation` | Local and broad | Tracks XOR contributions across reversible basis changes so matching contributions can cancel. |
+| `smt-synthesis` | Local | Asks Z3 for a shorter sequence with the same behavior on every input of a small region. |
+| `meet-in-the-middle` | Local | Searches from both the identity and the target function, then joins paths at the same intermediate function. |
+| `quadratic-shear-interpolation` | Local and broad | Samples inputs with zero, one, and two active controls to fit quadratic target flips while preserving the controls. |
+| `polynomial-region-search` | Broad | Searches larger regions and their subwindows using the enabled affine and ANF synthesis methods. |
+| `dependency-cuts` | Broad | Builds regions from gate dependencies, including noncontiguous gates, and tries enabled rewrite strategies there. |
+
+See the comments next to the order settings in `solver.config.jsonc` for the
+default local and broad orders. Older strategy names still work in priority
+lists and older group names still work under `strategies`.
 
 Local GF(2) affine synthesis (`strategies.gf2Affine.enabled`, enabled by default) is selected among
 the eligible synthesis choices. It is not an unconditional startup or worker
@@ -132,7 +156,7 @@ may cancel to an affine map. It can rewrite that map directly, or find smaller
 mixed subwindows whose final transformation is affine. Truly nonlinear maps and
 singular affine maps are preserved.
 
-Sparse quadratic synthesis (`strategies.quadratic.enabled`, enabled by default) can also
+ANF synthesis (`strategies.anfSynthesis.enabled`, enabled by default) can also
 emit genuinely nonlinear results: NOTs, controlled XORs, AND-controlled flips,
 and complemented variants. It orders target updates so all controls still have
 their original input values, then recomposes the candidate and checks every output
@@ -141,7 +165,7 @@ when all cubic terms share a pair of unchanged inputs and an otherwise unused,
 unchanged wire can temporarily be XORed with their product. The rewrite restores
 that wire and cancels the effect of its original value. The affine emitter still handles general
 invertible linear maps, including cyclic linear dependencies. Both local and
-broad searches use quadratic synthesis, sharing the existing symbolic resource
+broad searches use ANF synthesis, sharing the existing symbolic resource
 limits and worker lifetime. The original recursive affine maze synthesizes to its
 known four-gate solution.
 
@@ -153,23 +177,31 @@ approximate equivalence.
 
 A broad worker starts with the full circuit and scans overlapping coarse-to-fine
 regions. Its default strategy order is SAT sweeping with bounded dependency cuts,
-quadratic shear interpolation, mixed-basis simplification, block cancellation,
-whole-region symbolic synthesis, factored synthesis, and dependency cuts.
+quadratic shear interpolation, basis-change cancellation, block cancellation,
+polynomial region search, factored synthesis, and dependency cuts.
 Rainbow lookup and variable elimination remain available inside dependency cuts
 and in local search. Set
 `strategies.satSweeping.cutsFirst` to true to try a small batch of ranked cuts before
 the whole-region SAT attempt.
 
-Quadratic shear interpolation (`strategies.quadraticShear.enabled`) uses packed
-samples to identify likely unchanged wires. It evaluates zero-, one-, and
-two-bit inputs to fit flips on the other wires as quadratic functions of those
-unchanged wires. It covers local and broad regions with up to 64 active wires, using the
-shared polynomial term and operation limits for its exact equivalence proof.
-An exact mismatch rejects the fit. If the exact checker exhausts its resource
-limits, `strategies.variables.sampleCandidates` also controls whether quadratic
-shear may accept the fit after fresh randomized checks. The fallback uses at
-least 4,096 inputs or `strategies.variables.samples` if higher. A sampled
-replacement can miss differences on rare inputs.
+Quadratic shear interpolation (`strategies.quadraticShearInterpolation.enabled`)
+uses packed samples to identify likely unchanged wires. It evaluates zero-, one-,
+and two-bit inputs to fit quadratic flips. If the shear fit fails, it can try
+an ordered quadratic map whose target updates read their controls before those
+controls change. The emitter packs compatible terms into a single gate and
+tries a shared-output basis change when overlapping target expressions can
+justify the cost of changing and restoring the basis. Broad search checks the
+whole circuit first, then tries up to 16 sampled restore windows before its
+regular windows. Each proposed window is verified independently.
+
+Regions of up to 12 active wires are checked exhaustively. Larger regions use
+the shared polynomial proof limits. An exact mismatch rejects the candidate.
+If the proof runs out of resources, `strategies.variableElimination.sampleCandidates`
+allows randomized fallback. The sample count grows with the larger of active
+wire count and the logarithm of the original gate count. The automatic range is
+4,096 to 65,536 tests, with `strategies.variableElimination.samples` as a
+configurable floor. Strategy statistics record the verification method and the
+number of inputs checked when applicable. Random samples can miss rare differences.
 
 Eligible rounds start one broad worker alongside the chunk workers when the
 configured worker cap is at least two. Broad jobs share that cap and are

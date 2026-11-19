@@ -99,7 +99,7 @@ try {
  const rewritten = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, sparse, sparse.length, false, false, true, new SubsetPreparation(sparse), { deadline: performance.now() + 10000, broad: true, minimumBroadGates: sparse.length }, picker)
  assert.equal(rewritten.gates.length, sparse.length - 2)
  equivalent(sparse, rewritten.gates, 6)
- assert.ok(strategySnapshot().some(stat => stat.strategy === 'rainbow' && stat.gatesRemoved === 2), 'reuse rainbow lookup on distant live values')
+ assert.ok(strategySnapshot().some(stat => stat.strategy === 'truth-table-lookup' && stat.gatesRemoved === 2), 'reuse rainbow lookup on distant live values')
  config.synthesis.satSweeping = true
  resetStrategyStats()
 	let patched = mixed

@@ -19,6 +19,7 @@ const saved = structuredClone(config)
 const db = new sqlite3.Database(':memory:')
 const tables = new RainbowPortfolio([{ wires: 3, gates: 1, db }])
 try {
+	config.search.broadStrategyOrder = []
 	config.search.strategyAdaptive = false
 	// This case isolates contiguous broad windows; global cuts have separate
 	// integration coverage and may find a smaller improvement first.
@@ -67,7 +68,7 @@ try {
 		config.search.strategyAdaptive = adaptive
 		resetStrategyStats()
 		assert.deepEqual(await broadSearch(tables, input, 8, createOptimizerCaches(), 5000, () => false, () => {}), [])
-		assert.ok(strategySnapshot().some(stat => stat.strategy === 'factored'))
+		assert.ok(strategySnapshot().some(stat => stat.strategy === 'factored-synthesis'))
 		assert.equal(await broadSearch(tables, input, 8, createOptimizerCaches(), 5000, () => true, () => {}), input)
 	}
 	config.synthesis.factored = false
@@ -82,35 +83,61 @@ try {
 		config.search.strategyAdaptive = adaptive
 		resetStrategyStats()
 		const fitted = await broadSearch(tables, fittingInput, 8, createOptimizerCaches(), 5000, () => false, () => {})
-		assert.equal(fitted.length, 3)
+		assert.equal(fitted.length, 2)
 		const inputs = generateCombinations(8)
 		assert.deepEqual(calculateAllOutputsArray(fitted, inputs), calculateAllOutputsArray(fittingInput, inputs))
-		assert.ok(strategySnapshot().some(stat => stat.strategy === 'quadratic-shear'))
+		assert.ok(strategySnapshot().some(stat => stat.strategy === 'quadratic-shear-interpolation'))
 	}
-	const { synthesizeQuadraticShear } = await import('./quadratic-shear.js')
+	const { quadraticShearRegions, quadraticShearSampleCount, synthesizeQuadraticShear } = await import('./quadratic-shear.js')
+	const wide = [...fittingInput, ...Array.from({ length: 14 }, (_, target) => {
+		const gate = { a: 0, b: 0, target, gate_i: 15 }
+		return [gate, gate]
+	}).flat()]
+	const assertFit = (gates: Gate[], expectedLength: number, width: number) => {
+		const fitted = synthesizeQuadraticShear(gates, 64, 1, 10000000, () => false)
+		assert.equal(fitted?.length, expectedLength)
+		const inputs = generateCombinations(width)
+		assert.deepEqual(calculateAllOutputsArray(fitted!, inputs), calculateAllOutputsArray(gates, inputs))
+	}
+	const product = { a: 0, b: 1, target: 2, gate_i: 1 }
+	const packed = [product, { ...product, gate_i: 3 }, { ...product, gate_i: 5 }]
+	assertFit(packed, 1, 3)
+	const change = { a: 3, b: 0, target: 0, gate_i: 3 }
+	assertFit([product, change, change, change], 2, 4)
+	const shared = [1, 2, 3, 4].flatMap(b => [5, 6].map(target => ({ a: 0, b, target, gate_i: 1 })))
+	assertFit(shared, 6, 7)
+	assert.equal(quadraticShearSampleCount(81026, 64, 4096), 28672)
+	assert.ok(quadraticShearSampleCount(81026, 64, 4096) > quadraticShearSampleCount(1024, 16, 4096))
+	assert.ok(quadraticShearSampleCount(81026, 64, 100000) >= 100000)
+	assert.deepEqual([...quadraticShearRegions([change, { ...product, gate_i: 15 }, change, { ...product, gate_i: 0 }], 4, 2)], [{ start: 0, end: 3 }])
 	const proofTermLimit = config.synthesis.affineMaximumTerms
 	try {
 		config.synthesis.affineMaximumTerms = 1
 		config.search.strategyAdaptive = true
-		assert.equal(await broadSearch(tables, fittingInput, 8, createOptimizerCaches(), 5000, () => false, () => {}), fittingInput)
+		const caches = createOptimizerCaches()
+		const strict = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, wide,
+			wide.length, false, false, false, undefined,
+			{ deadline: performance.now() + 5000, broad: true, selectedStrategy: 'quadratic-shear-interpolation' })
+		assert.equal(strict.changed, false)
 		config.search.probabilistic = true
-		const fitted = await broadSearch(tables, fittingInput, 8, createOptimizerCaches(), 5000, () => false, () => {})
-		assert.equal(fitted.length, 3)
-		const inputs = generateCombinations(8)
-		assert.deepEqual(calculateAllOutputsArray(fitted, inputs), calculateAllOutputsArray(fittingInput, inputs))
+		const fitted = await broadSearch(tables, wide, 14, createOptimizerCaches(), 5000, () => false, () => {})
+		assert.equal(fitted.length, 2)
+		assert.ok(strategySnapshot().some(stat => stat.settings.includes('"verification":"sampled"')))
+		const inputs = generateCombinations(14)
+		assert.deepEqual(calculateAllOutputsArray(fitted, inputs), calculateAllOutputsArray(wide, inputs))
 	} finally {
 		config.synthesis.affineMaximumTerms = proofTermLimit
 		config.search.probabilistic = false
 	}
-	assert.equal(synthesizeQuadraticShear(fittingInput, 64, 1, 10000000, () => false), undefined, 'a fit cannot bypass the proof budget')
-	assert.equal(synthesizeQuadraticShear(fittingInput, 64, 100000, 10000000, () => true), undefined)
+	assert.equal(synthesizeQuadraticShear(wide, 64, 1, 10000000, () => false), undefined, 'a fit cannot bypass the proof budget')
+	assert.equal(synthesizeQuadraticShear(wide, 64, 100000, 10000000, () => true), undefined)
 	const compute = { a: 0, b: 1, target: 3, gate_i: 1 }
 	const cubic: Gate[] = [compute, { a: 2, b: 3, target: 4, gate_i: 1 }, compute]
 	assert.equal(synthesizeQuadraticShear(cubic, 64, 1, 10000000, () => false, 4096), undefined)
 
 	Object.assign(config.synthesis, { factored: true, satSweeping: true, mixedBasis: true, blockCancellation: true, affine: true })
 	config.search.dependencyCuts = true
-	assert.deepEqual(broadStrategyOrder(), ['sat-sweeping', 'quadratic-shear', 'mixed-basis', 'block-cancellation', 'symbolic', 'factored', 'dependency-cuts'])
+	assert.deepEqual(broadStrategyOrder(), ['sat-sweeping', 'quadratic-shear-interpolation', 'basis-change-cancellation', 'block-cancellation', 'polynomial-region-search', 'factored-synthesis', 'dependency-cuts'])
 	config.search.strategyAdaptive = true
 	config.synthesis.broadSatCutsFirst = true
 	let provenIndices: number[] | undefined

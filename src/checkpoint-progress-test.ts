@@ -31,7 +31,7 @@ try {
 	broadCaches.broadStrategyPicker.beginRound(1, 'block-cancellation')
 	assert.equal((await scan()).checks, 4)
 	assert.deepEqual(await scan().then(({ checks, broadExhausted }) => ({ checks, broadExhausted })), { checks: 0, broadExhausted: true })
-	broadCaches.broadStrategyPicker.beginRound(2, 'factored')
+	broadCaches.broadStrategyPicker.beginRound(2, 'factored-synthesis')
 	assert.equal((await scan()).checks, 4, 'a different strategy gets independent coverage')
 	broadCaches.broadStrategyPicker.beginRound(3, 'block-cancellation')
 	assert.equal((await scan()).checks, 0, 'rotation retains the completed scan')
@@ -46,7 +46,7 @@ try {
 		const activity: WorkerActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
 		await optimizeSubset(tables, localInput, cache.ioIdentifierCache, cache.processedGatesCache,
 			2, maxSlice, 'heavy', () => stopAfterCheck && activity.checks > 0, activity, () => {},
-			cache.testedSubsets, 'rainbow', undefined, undefined, new RoundStrategyPicker(['rainbow']), 1)
+			cache.testedSubsets, 'truth-table-lookup', undefined, undefined, new RoundStrategyPicker(['truth-table-lookup']), 1)
 		return activity.checks
 	}
 	const local = createOptimizerCaches(0)

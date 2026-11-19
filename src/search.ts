@@ -45,7 +45,7 @@ export const improving = (old: Gate[]) => {
 	}
 }
 
-export type SearchArm = { subset: number, slice: number, method?: 'all' | 'variables' | 'rainbow' }
+export type SearchArm = { subset: number, slice: number, method?: 'all' | 'variable-elimination' | 'truth-table-lookup' }
 type Score = { count: number, milliseconds: number, removed: number, epoch: number }
 export class SearchScheduler {
 	private scores = new Map<string, Score>()
@@ -93,7 +93,7 @@ export function createSearchArms(count: number, subsetMinimum: number, subsetMax
 		const subset = Math.round(subsetMinimum * (subsetMaximum / subsetMinimum) ** (step / steps))
 		const maximum = Math.min(sliceMaximum, subset)
 		const slice = Math.max(sliceMinimum, Math.round(sliceMinimum * (Math.max(sliceMinimum, maximum) / sliceMinimum) ** ((step % 3 + 1) / 3)))
-		return { method: (['all', 'variables', 'rainbow'] as const)[index % 3], subset, slice }
+		return { method: (['all', 'variable-elimination', 'truth-table-lookup'] as const)[index % 3], subset, slice }
 	})
 }
 

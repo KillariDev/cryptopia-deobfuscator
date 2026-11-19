@@ -89,7 +89,7 @@ export function formatStatus(status: SolverStatus) {
 	return `${formatGateCount(candidate, status.pairUses, previous, status.previousPairs, original)} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${preparing ? `; ${preparing} preparing regions` : ''}${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${formatTopStrategy(statuses)}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
 }
 
-const strategyLabels: Record<string, string> = { 'dependency-cuts': 'cuts', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', z3: 'Z3' }
+const strategyLabels: Record<string, string> = { 'dependency-cuts': 'cuts', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'commutation-search': 'commutation', 'smt-synthesis': 'SMT' }
 
 function formatTopStrategy(statuses: WorkerStatus[]) {
 	const totals = new Map<string, { gatesRemoved: number, rewrites: number }>()

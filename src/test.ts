@@ -349,7 +349,7 @@ console.log('Detailed progress, reduction checkpoints and round-stop regressions
 assert.deepEqual(parseConfig({}), defaults)
 const { parseConfigDocument } = await import('./config-document.js')
 assert.doesNotThrow(() => parseConfig(parseConfigDocument(readFileSync(new URL('../solver.config.jsonc', import.meta.url), 'utf8'))))
-const grouped = parseConfig(parseConfigDocument('{ // comment\n "strategies": {"rainbow":{"enabled":false,},"variables":{"samples":12},"satSweeping":{"enabled":false}}, "files":{"databaseDirectory":"https://example.test/tables"} }'))
+const grouped = parseConfig(parseConfigDocument('{ // comment\n "strategies": {"truthTableLookup":{"enabled":false,},"variableElimination":{"samples":12},"satSweeping":{"enabled":false}}, "files":{"databaseDirectory":"https://example.test/tables"} }'))
 assert.equal(grouped.search.rainbow, false)
 assert.equal(grouped.validation.probabilisticInputs, 12)
 assert.equal(grouped.synthesis.satSweeping, false)
@@ -452,7 +452,7 @@ for (let i = 0; i < 100; i++) {
 	assert.equal(improving(before)(after), isReplacementSimpler(after, before))
 }
 const scheduler = new SearchScheduler(3)
-const arms = [{ subset: 3, slice: 2, method: 'all' as const }, { subset: 5, slice: 3, method: 'rainbow' as const }]
+const arms = [{ subset: 3, slice: 2, method: 'all' as const }, { subset: 5, slice: 3, method: 'truth-table-lookup' as const }]
 scheduler.record(arms[0], 100, 1)
 scheduler.record(arms[1], 10, 10)
 assert.deepEqual(scheduler.choose(arms, () => 0), arms[1])
@@ -512,7 +512,7 @@ try {
 	const { RoundStrategyPicker } = await import('./strategy-picker.js')
 	const not = { a: 0, b: 0, target: 0, gate_i: 15 }
 	const oneWireIdentity = [not, not, not, not]
-	const oneWire = await massOptimizeStep(integrationPortfolio, new LimitedMap(100), new LimitedMap(100), oneWireIdentity, 4, true, true, false, undefined, undefined, new RoundStrategyPicker(['variables']))
+	const oneWire = await massOptimizeStep(integrationPortfolio, new LimitedMap(100), new LimitedMap(100), oneWireIdentity, 4, true, true, false, undefined, undefined, new RoundStrategyPicker(['variable-elimination']))
 	assert.deepEqual(oneWire.gates, [], 'the variables strategy cancels a one-wire identity')
 	const tested = new LimitedMap<string, boolean>(1000)
 	const processed = new LimitedMap<string, boolean>(1000)
@@ -520,8 +520,8 @@ try {
 	const counters = () => ({ passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const })
 	const first = counters(), second = counters()
 	const unchanged = circuit.map((gate, i) => ({ ...gate, a: i % 2, target: 1 - i % 2 }))
-	await optimizeSubset(integrationPortfolio, unchanged, lookups, processed, 3, 2, 'heavy', () => false, first, () => {}, tested, 'rainbow')
-	await optimizeSubset(integrationPortfolio, unchanged, lookups, processed, 3, 2, 'heavy', () => false, second, () => {}, tested, 'rainbow')
+	await optimizeSubset(integrationPortfolio, unchanged, lookups, processed, 3, 2, 'heavy', () => false, first, () => {}, tested, 'truth-table-lookup')
+	await optimizeSubset(integrationPortfolio, unchanged, lookups, processed, 3, 2, 'heavy', () => false, second, () => {}, tested, 'truth-table-lookup')
 	assert.ok(first.checks > 0)
 	assert.equal(second.checks, 0)
 } finally { await closeRainbowTable(integrationDb) }
@@ -545,7 +545,7 @@ const strategyStatus = formatStatus({
 	statuses: [
 		{ ...status, activity: { ...status.activity, strategies: [
 			{ strategy: 'sat-sweeping', settings: '{}', attempts: 4, rewrites: 1, gatesRemoved: 4, elapsedMs: 100 },
-			{ strategy: 'z3', settings: '{}', attempts: 4, rewrites: 2, gatesRemoved: 6, elapsedMs: 100 },
+			{ strategy: 'smt-synthesis', settings: '{}', attempts: 4, rewrites: 2, gatesRemoved: 6, elapsedMs: 100 },
 		] } },
 		{ ...status, done: true, activity: { ...status.activity, strategies: [
 			{ strategy: 'sat-sweeping', settings: '{"limit":2}', attempts: 4, rewrites: 1, gatesRemoved: 4, elapsedMs: 100 },
@@ -655,7 +655,7 @@ try {
 	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
 	assert.equal(strategySnapshot().length, 1)
 	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
-	assert.deepEqual(new Set(strategySnapshot().map(stat => stat.strategy)), new Set(['forward-semantic-search', 'z3']))
+	assert.deepEqual(new Set(strategySnapshot().map(stat => stat.strategy)), new Set(['forward-semantic-search', 'smt-synthesis']))
 	const count = strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0)
 	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
 	assert.equal(strategySnapshot().reduce((sum, stat) => sum + stat.attempts, 0), count)
@@ -664,7 +664,7 @@ try {
 	const recovered = await advancedRewrite([not0, not0, not0], { deadline: performance.now() + 5000 })
 	assert.ok(recovered && recovered.length === 1)
 	assert.equal(functionKey(recovered!, 2), functionKey([not0], 2))
-	assert.ok(['z3', 'forward-semantic-search'].includes(strategySnapshot()[strategySnapshot().length - 1].strategy))
+	assert.ok(['smt-synthesis', 'forward-semantic-search'].includes(strategySnapshot()[strategySnapshot().length - 1].strategy))
 } finally {
 	Object.assign(config.synthesis, synthesisOptions)
 	resetStrategyStats()

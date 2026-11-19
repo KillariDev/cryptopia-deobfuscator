@@ -4,7 +4,7 @@ import { opaqueRainbow } from './opaque-rainbow.js'
 import { RoundStrategyPicker, StrategyPicker } from './strategy-picker.js'
 import { searchDependencyCuts } from './dependency-cuts.js'
 import { setImmediate as yieldToCoordinator } from 'node:timers/promises'
-import { synthesizeQuadraticShear } from './quadratic-shear.js'
+import { synthesizeQuadraticShear, type QuadraticVerification } from './quadratic-shear.js'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
 import { mergeDisjointRoundResults, RoundCutPatches, roundChunkSize, roundSearchPlan, roundSearchResult } from './round-search.js'
@@ -446,19 +446,19 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	const synthesisNames = [
 		...((synthesisBudget?.broad || symbolicEligible) ? structuralChoices() : []),
 		...(symbolicEligible && config.synthesis.affine ? ['gf2-affine'] : []),
-		...(symbolicEligible && config.synthesis.quadratic ? ['quadratic'] : []),
+		...(symbolicEligible && config.synthesis.quadratic ? ['anf-synthesis'] : []),
 		...(smallEligible && config.synthesis.forwardSemanticSearch ? ['forward-semantic-search'] : []),
-		...(smallEligible && config.synthesis.smt ? ['z3'] : []),
+		...(smallEligible && config.synthesis.smt ? ['smt-synthesis'] : []),
 		...(smallEligible && config.synthesis.meetInMiddle ? ['meet-in-the-middle'] : []),
-		...(smallEligible && config.synthesis.equalitySaturation ? ['equality-saturation'] : []),
+		...(smallEligible && config.synthesis.equalitySaturation ? ['commutation-search'] : []),
 	]
 	const available = [
 		...(config.search.dependencyCuts && synthesisBudget?.broad && !synthesisBudget.dependencyRegion ? [{ name: 'dependency-cuts' }] : []),
-		...(findUselessVarsSetting && sliceSize > 2 ? [{ name: 'variables' }] : []),
-		...(lookup ? [{ name: 'rainbow' }] : []),
+		...(findUselessVarsSetting && sliceSize > 2 ? [{ name: 'variable-elimination' }] : []),
+		...(lookup ? [{ name: 'truth-table-lookup' }] : []),
 		...synthesisNames.map(name => ({ name })),
-		...(config.synthesis.quadraticShear ? [{ name: 'quadratic-shear' }] : []),
-		...(synthesisBudget?.broad && (config.synthesis.affine || config.synthesis.quadratic) ? [{ name: 'symbolic' }] : []),
+		...(config.synthesis.quadraticShear ? [{ name: 'quadratic-shear-interpolation' }] : []),
+		...(synthesisBudget?.broad && (config.synthesis.affine || config.synthesis.quadratic) ? [{ name: 'polynomial-region-search' }] : []),
 	]
 	const useStrategyPicker = config.search.strategyAdaptive || synthesisBudget?.forceStrategy
 	const selected = synthesisBudget?.selectedStrategy ?? (useStrategyPicker || synthesisBudget?.dependencyRegion ? strategyPicker?.pick(available)?.name : undefined)
@@ -472,7 +472,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		if (!cache) { cache = new LimitedMap(Math.max(1, Math.floor(config.cache.processedEntries / 4))); caches.set(selected, cache) }
 		processedGatesCache = cache
 	}
-	if (selected !== undefined) { findUselessVarsSetting &&= selected === 'variables'; lookup &&= selected === 'rainbow' }
+	if (selected !== undefined) { findUselessVarsSetting &&= selected === 'variable-elimination'; lookup &&= selected === 'truth-table-lookup' }
 	const finish = (result: { gates: Gate[], changed: boolean }) => {
 		if (selected && strategyPicker instanceof RoundStrategyPicker) strategyPicker.observe(selected, originalGates.length - result.gates.length)
 		return result
@@ -481,7 +481,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		const key = strategyPicker ?? ioIdentifierCache
 		let state = dependencySearches.get(key)
 		if (!state) {
-			state = { picker: new StrategyPicker(['rainbow', 'variables', ...structuralNames, 'symbolic', 'gf2-affine', 'quadratic', 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation']), processed: new LimitedMap(config.cache.processedEntries), offset: 0 }
+			state = { picker: new StrategyPicker(['truth-table-lookup', 'variable-elimination', ...structuralNames, 'polynomial-region-search', 'gf2-affine', 'anf-synthesis', 'forward-semantic-search', 'smt-synthesis', 'meet-in-the-middle', 'commutation-search']), processed: new LimitedMap(config.cache.processedEntries), offset: 0 }
 			dependencySearches.set(key, state)
 		}
 		const deadline = synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000
@@ -501,21 +501,22 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		recordStrategy('dependency-cuts', { global: true }, attemptStarted + stats.solverMs, originalGates.length, result?.length ?? originalGates.length, result !== undefined)
 		return finish({ gates: result ?? originalGates, changed: result !== undefined })
 	}
-	if (selected === 'rainbow' && lookup && synthesisBudget?.dependencyRegion) {
+	if (selected === 'truth-table-lookup' && lookup && synthesisBudget?.dependencyRegion) {
 		const result = await opaqueRainbow(originalGates, tables, ioIdentifierCache, () => performance.now() >= synthesisBudget.deadline || synthesisBudget.shouldStop?.() === true)
-		if (result) { recordStrategy('rainbow', { opaque: true }, attemptStarted, originalGates.length, result.length, true); return finish({gates: result, changed:true}) }
+		if (result) { recordStrategy('truth-table-lookup', { opaque: true }, attemptStarted, originalGates.length, result.length, true); return finish({gates: result, changed:true}) }
 	}
-	if (selected === 'quadratic-shear' && config.synthesis.quadraticShear) {
+	if (selected === 'quadratic-shear-interpolation' && config.synthesis.quadraticShear) {
 		const deadline = synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000
 		const stopped = () => performance.now() >= deadline || synthesisBudget?.shouldStop?.() === true
 		const fallbackSamples = config.search.probabilistic ? Math.max(4096, config.validation.probabilisticInputs) : 0
+		let verification: QuadraticVerification | undefined
 		const result = synthesizeQuadraticShear(originalGates, config.validation.maximumWires,
-			config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, stopped, fallbackSamples)
-		recordStrategy(selected, { maximumWires: Math.min(64, config.validation.maximumWires), fallbackSamples },
+			config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, stopped, fallbackSamples, outcome => { verification = outcome })
+		recordStrategy(selected, { maximumWires: Math.min(64, config.validation.maximumWires), ...verification },
 			attemptStarted, originalGates.length, result?.length ?? originalGates.length, result !== undefined)
 		return finish({ gates: result ?? originalGates, changed: result !== undefined })
 	}
-	if (selected === 'symbolic') {
+	if (selected === 'polynomial-region-search') {
 		const result = wholeCircuitAffineSearch(originalGates, Math.max(0, (synthesisBudget?.deadline ?? performance.now()) - performance.now()), () => synthesisBudget?.shouldStop?.() === true)
 		return finish({ gates: result, changed: result !== originalGates })
 	}
@@ -544,7 +545,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	if (preparation.gates !== originalGates) throw new Error('Subset preparation belongs to a different circuit')
 	let strategyStarted = performance.now()
 	const changes = optimizeVariables(processedGatesCache, originalGates, sliceSize, useProbabilistically, findUselessVarsSetting, lookup ? tables.maximumWires : 0, prepared, preparation, () => synthesisBudget?.shouldStop?.() === true || (synthesisBudget !== undefined && performance.now() >= synthesisBudget.deadline), synthesisBudget?.onCandidate)
-	if (findUselessVarsSetting && sliceSize > 2) recordStrategy('variables', { slice: sliceSize, probabilistic: useProbabilistically, exactMaximumWires: config.search.exactMaximumWires }, strategyStarted, originalGates.length, changes.gates.length, changes.changed)
+	if (findUselessVarsSetting && sliceSize > 2) recordStrategy('variable-elimination', { slice: sliceSize, probabilistic: useProbabilistically, exactMaximumWires: config.search.exactMaximumWires }, strategyStarted, originalGates.length, changes.gates.length, changes.changed)
 	if (!lookup) {
 		if (runSynthesis && !changes.changed) { const candidate = await advancedRewrite(originalGates, selectedBudget); if (candidate) return finish({ gates: candidate, changed: true }) }
 		return finish(changes)
@@ -618,7 +619,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		tables.recordApplied(query.match, query.end - query.start)
 		replacements.push({ start: query.start, end: query.end - 1, replacement: query.replacement })
 	}
-	recordStrategy('rainbow', { slice: sliceSize, maximumWires: tables.maximumWires }, strategyStarted, gates.length, gates.length - replacements.reduce((sum, entry) => sum + entry.end - entry.start + 1 - entry.replacement.length, 0), replacements.length > 0)
+	recordStrategy('truth-table-lookup', { slice: sliceSize, maximumWires: tables.maximumWires }, strategyStarted, gates.length, gates.length - replacements.reduce((sum, entry) => sum + entry.end - entry.start + 1 - entry.replacement.length, 0), replacements.length > 0)
 	if (replacements.length === 0) {
 		if (runSynthesis && !changes.changed) { const candidate = await advancedRewrite(originalGates, selectedBudget); if (candidate) return finish({ gates: candidate, changed: true }) }
 		return finish(changes)
@@ -778,16 +779,16 @@ function appendMissingNumbers(arr: number[], n: number): number[] {
 export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method'], onLazyCandidate?: (gates: ChunkedSequence<Gate>) => void, synthesisBudget?: SynthesisBudget, strategyPicker?: StrategyPicker | RoundStrategyPicker, initialSeed?: number, sliceResults?: SliceResults, claimCheck: () => boolean = () => true): Promise<Gate[]> => {
 	// No convex region can reach the requested size in this chunk.
 	if (subsetSize > slicedVersion.length) return slicedVersion.slice()
-	const useProbabilistically = method !== 'rainbow' && phase === 'heavy' && config.search.probabilistic
-	const findUselessVarsSetting = method !== 'rainbow' && config.search.variableElimination
+	const useProbabilistically = method !== 'truth-table-lookup' && phase === 'heavy' && config.search.probabilistic
+	const findUselessVarsSetting = method !== 'truth-table-lookup' && config.search.variableElimination
 	const useStrategyPicker = config.search.strategyAdaptive || synthesisBudget?.forceStrategy
 	const active = useStrategyPicker && strategyPicker instanceof RoundStrategyPicker ? strategyPicker.activeStrategy : undefined
 	const useLegacyCache = !(useStrategyPicker && strategyPicker)
 	const attemptBudget = useLegacyCache
 		? { deadline: performance.now() + config.workers.jobSeconds * 1000, ...synthesisBudget, exhaustStrategies: true }
 		: synthesisBudget
-	const firstSlice = active === 'variables' ? Math.max(3, config.search.sliceMinimum) : config.search.sliceMinimum
-	const lastSlice = active && active !== 'rainbow' && active !== 'variables' ? firstSlice : maxSlice
+	const firstSlice = active === 'variable-elimination' ? Math.max(3, config.search.sliceMinimum) : config.search.sliceMinimum
+	const lastSlice = active && active !== 'truth-table-lookup' && active !== 'variable-elimination' ? firstSlice : maxSlice
 	let regenerateGraph = false
 	let changedWires = new Set<number>()
 	const neighborhoods = new NeighborhoodQueue(config.search.localSearchSeeds, config.search.localSearchRadius, config.search.localSearchBroadEvery)
@@ -821,7 +822,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 					if (attemptKey && testedSubsets.has(attemptKey)) continue
 					if (!claimCheck()) return circuit.toArray()
 					activity.checks++
-					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables', preparation ??= new SubsetPreparation(inGates, sliceResults), attemptBudget, strategyPicker)
+					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variable-elimination', preparation ??= new SubsetPreparation(inGates, sliceResults), attemptBudget, strategyPicker)
 					if (!optimizationOutput.changed) {
 						if (timeToEndWorker() || (attemptBudget && (performance.now() >= attemptBudget.deadline || attemptBudget.shouldStop?.()))) return circuit.toArray()
 						if (attemptKey && !optimizationOutput.unavailable) testedSubsets.set(attemptKey, true)
@@ -858,29 +859,29 @@ function prioritizeStrategies<T extends string>(priorities: string[], defaults: 
 		...eligible.filter(name => !priorities.includes(name))]
 }
 
-const smallSynthesisStrategies = new Set(['forward-semantic-search', 'equality-saturation', 'z3', 'meet-in-the-middle'])
+const smallSynthesisStrategies = new Set(['forward-semantic-search', 'commutation-search', 'smt-synthesis', 'meet-in-the-middle'])
 const localStrategyOrder = () => prioritizeStrategies(config.search.localStrategyOrder, defaultLocalStrategyOrder, {
-	quadratic: config.synthesis.quadratic,
-	rainbow: config.search.rainbow,
-	variables: config.search.variableElimination && config.search.sliceMaximum >= 3 && config.search.subsetMaximum >= 3,
+	'anf-synthesis': config.synthesis.quadratic,
+	'truth-table-lookup': config.search.rainbow,
+	'variable-elimination': config.search.variableElimination && config.search.sliceMaximum >= 3 && config.search.subsetMaximum >= 3,
 	'forward-semantic-search': config.synthesis.forwardSemanticSearch,
-	'equality-saturation': config.synthesis.equalitySaturation,
+	'commutation-search': config.synthesis.equalitySaturation,
 	'gf2-affine': config.synthesis.affine,
-	factored: config.synthesis.factored,
+	'factored-synthesis': config.synthesis.factored,
 	'block-cancellation': config.synthesis.blockCancellation,
 	'sat-sweeping': config.synthesis.satSweeping,
-	'mixed-basis': config.synthesis.mixedBasis,
-	z3: config.synthesis.smt,
+	'basis-change-cancellation': config.synthesis.mixedBasis,
+	'smt-synthesis': config.synthesis.smt,
 	'meet-in-the-middle': config.synthesis.meetInMiddle,
-	'quadratic-shear': config.synthesis.quadraticShear,
+	'quadratic-shear-interpolation': config.synthesis.quadraticShear,
 }).filter(strategy => !smallSynthesisStrategies.has(strategy) || config.search.subsetMinimum <= config.synthesis.maximumWindowGates)
 export const broadStrategyOrder = () => prioritizeStrategies(config.search.broadStrategyOrder, defaultBroadStrategyOrder, {
 	'sat-sweeping': config.synthesis.satSweeping,
-	'quadratic-shear': config.synthesis.quadraticShear,
-	'mixed-basis': config.synthesis.mixedBasis,
+	'quadratic-shear-interpolation': config.synthesis.quadraticShear,
+	'basis-change-cancellation': config.synthesis.mixedBasis,
 	'block-cancellation': config.synthesis.blockCancellation,
-	symbolic: config.synthesis.affine || config.synthesis.quadratic,
-	factored: config.synthesis.factored,
+	'polynomial-region-search': config.synthesis.affine || config.synthesis.quadratic,
+	'factored-synthesis': config.synthesis.factored,
 	'dependency-cuts': config.search.dependencyCuts,
 })
 export const createOptimizerCaches = (workerIndex = 0) => ({
@@ -916,9 +917,9 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	
 	tables.resetStatistics()
 	const strategy = config.search.strategyAdaptive || wholeCircuitStrategy ? caches.strategyPicker.activeStrategy : undefined
-	const scanContiguous = strategy === 'variables' || (strategy === 'rainbow' && tables.maximumWires > 0)
+	const scanContiguous = strategy === 'variable-elimination' || (strategy === 'truth-table-lookup' && tables.maximumWires > 0)
 	const sliceResults = scanContiguous ? new SliceResults() : undefined
-	const minimumSubset = strategy === 'variables' ? Math.max(3, config.search.subsetMinimum) : config.search.subsetMinimum
+	const minimumSubset = strategy === 'variable-elimination' ? Math.max(3, config.search.subsetMinimum) : config.search.subsetMinimum
 	const maximumSubset = strategy && smallSynthesisStrategies.has(strategy)
 		? Math.min(config.search.subsetMaximum, config.synthesis.maximumWindowGates)
 		: config.search.subsetMaximum
@@ -990,7 +991,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		}
 		subsetSize = Math.max(minimumSubset, Math.min(subsetSize, maximumSubset))
 		if (wholeCircuitStrategy) subsetSize = Math.min(subsetSize, optimizedVersion.length)
-		if (strategy === 'variables') maxSlice = Math.max(3, maxSlice)
+		if (strategy === 'variable-elimination') maxSlice = Math.max(3, maxSlice)
 		const selection = { subset: subsetSize, slice: maxSlice, method }
 		let methodCache = caches.methodCaches.get(method ?? 'all')
 		if (!methodCache) {
@@ -1003,12 +1004,12 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		activity.stage = 'searching'
 		const startLength = optimizedVersion.length
 		if (activity.passes === 1 && scanContiguous) {
-			const first = strategy === 'variables' ? Math.max(3, config.search.sliceMinimum) : config.search.sliceMinimum
+			const first = strategy === 'variable-elimination' ? Math.max(3, config.search.sliceMinimum) : config.search.sliceMinimum
 			let preparation = new SubsetPreparation(optimizedVersion, sliceResults)
 			let key = createHash('sha256').update(hashGates(optimizedVersion)).digest('base64')
 			// Start with the shortest size for variables and up to two for
 			// rainbow. Graph search still covers longer and noncontiguous windows.
-			const last = strategy === 'variables' ? first : first + 1
+			const last = strategy === 'variable-elimination' ? first : first + 1
 			for (let size = first; size <= Math.min(last, maxSlice, optimizedVersion.length); size++) {
 				if (timeToEndWorker() || checkLimitReached()) break
 				const attempt = `contiguous:${strategy}:${phase}:${size}:${key}`

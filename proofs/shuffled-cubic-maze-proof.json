@@ -1,0 +1,21 @@
+{
+  "seed": 20261123,
+  "commuting_swaps": 837762,
+  "gate_count": 19560,
+  "known_solution_gate_count": 104,
+  "cubic_witness": {
+    "controls": [
+      0,
+      1,
+      2
+    ],
+    "target": 16,
+    "coefficient": 1
+  },
+  "sampled_inputs": 4096,
+  "proof": "The conjugated shears commute and each occurs twice. Adjacent swaps preserve the map when neither gate writes the other gate\u2019s controls.",
+  "sha256": {
+    "shuffled-cubic-maze.json": "ab82d7f5dd035e3cbaccfab4677f5c48db4c618db67aa78fa41977bb128c6e49",
+    "shuffled-cubic-maze-solved.json": "73687fc9253595df9e2718460f8ed6a2d7d09073e2ba19221279c696fded8fd8"
+  }
+}

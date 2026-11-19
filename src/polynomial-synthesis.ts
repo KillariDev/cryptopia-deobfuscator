@@ -23,7 +23,6 @@ export function emitQuadraticMap(rows: Set<bigint>[], wires: number[], maximumGa
 	}
 	const dependencies: Set<number>[] = [], incoming = new Uint32Array(wires.length)
 	const terms: { constant: boolean, singles: number[], pairs: [number, number][] }[] = []
-	let gateCount = 0
 	for (const target of changed) {
 		const row = rows[target], targetBit = bits[target]
 		// A missing identity term makes the delta depend on the target.
@@ -49,8 +48,6 @@ export function emitQuadraticMap(rows: Set<bigint>[], wires: number[], maximumGa
 			}
 			if (changedWires[a]) uses.add(a)
 		}
-		gateCount += Math.max(Number(constant), pairs.length + Math.ceil(singles.length / 2))
-		if (gateCount >= maximumGates) return undefined
 		// This output must read its controls before they change.
 		for (const control of uses) incoming[control]++
 		terms[target] = { constant, singles, pairs }
@@ -67,19 +64,29 @@ export function emitQuadraticMap(rows: Set<bigint>[], wires: number[], maximumGa
 	for (const target of order) {
 		if (stopped()) return undefined
 		let { constant, singles, pairs } = terms[target]
-		singles.sort((a, b) => a - b)
-		// Sorting by high bit, then low bit, preserves monomial order.
+		const pendingSingles = new Set(singles.sort((a, b) => a - b))
 		pairs.sort(([a, b], [c, d]) => b - d || a - c)
-		for (const [a, b] of pairs) {
-			result.push({ a: wires[a], b: wires[b], target: wires[target], gate_i: constant ? 14 : 1 })
+		// First pack pairs that can absorb both linear terms. Each consumed
+		// linear term can be assigned to just one pair.
+		const deferred: [number, number][] = []
+		for (const both of [true, false]) for (const [a, b] of both ? pairs : deferred) {
+			if (both && !(pendingSingles.has(a) && pendingSingles.has(b))) {
+				deferred.push([a, b])
+				continue
+			}
+			const gate_i = 1 ^ (pendingSingles.delete(a) ? 3 : 0) ^ (pendingSingles.delete(b) ? 5 : 0)
+			result.push({ a: wires[a], b: wires[b], target: wires[target], gate_i: constant ? gate_i ^ 15 : gate_i })
 			constant = false
+			if (result.length >= maximumGates) return undefined
 		}
-		for (let i = 0; i < singles.length; i += 2) {
-			const a = wires[singles[i]], b = wires[singles[i + 1]]
+		const remaining = [...pendingSingles]
+		for (let i = 0; i < remaining.length; i += 2) {
+			const a = wires[remaining[i]], b = wires[remaining[i + 1]]
 			result.push({ a, b: b ?? 0, target: wires[target], gate_i: b === undefined ? (constant ? 12 : 3) : (constant ? 9 : 6) })
 			constant = false
 		}
 		if (constant) result.push({ a: 0, b: 0, target: wires[target], gate_i: 15 })
+		if (result.length >= maximumGates) return undefined
 	}
 	return result
 }

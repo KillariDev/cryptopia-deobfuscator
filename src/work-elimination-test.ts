@@ -163,7 +163,7 @@ try {
 	assert.equal(preparation.fingerprint(gates), preparation.fingerprint(gates))
 	for (const size of [2, 3, 4]) await massOptimizeStep(portfolio, new LimitedMap(100), new LimitedMap(100), gates, size, false, false, true, preparation)
 	const sliceActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const }
-	assert.deepEqual(await optimizeSubset(portfolio, gates, new LimitedMap(100), new LimitedMap(100), 3, 199, 'heavy', () => false, sliceActivity, () => {}, new LimitedMap(100), 'rainbow'), gates)
+	assert.deepEqual(await optimizeSubset(portfolio, gates, new LimitedMap(100), new LimitedMap(100), 3, 199, 'heavy', () => false, sliceActivity, () => {}, new LimitedMap(100), 'truth-table-lookup'), gates)
 	assert.ok(sliceActivity.subsets > 0)
 	assert.equal(sliceActivity.checks, sliceActivity.subsets * 2, 'only sizes 2 and 3 run, once each')
 	await assert.rejects(massOptimizeStep(portfolio, new LimitedMap(10), new LimitedMap(10), gates.slice(), 2, false, false, true, preparation), /different circuit/)
@@ -174,7 +174,7 @@ try {
 	let snapshots = 0, edits = 0
 	ChunkedSequence.prototype.toArray = function() { snapshots++; return nativeArray.call(this) }
 	try {
-		const result = await optimizeSubset(portfolio, source, new LimitedMap(100), new LimitedMap(100), 3, 199, 'heavy', () => false, activity, () => { throw new Error('eager snapshot') }, new LimitedMap(100), 'rainbow', () => { edits++; assert.equal(snapshots, 0) })
+		const result = await optimizeSubset(portfolio, source, new LimitedMap(100), new LimitedMap(100), 3, 199, 'heavy', () => false, activity, () => { throw new Error('eager snapshot') }, new LimitedMap(100), 'truth-table-lookup', () => { edits++; assert.equal(snapshots, 0) })
 		assert.ok(edits > 1); assert.equal(snapshots, 1)
 		assert.deepEqual(calculateAllOutputsArray(result, generateCombinations(3)), calculateAllOutputsArray(source, generateCombinations(3)))
 	} finally { ChunkedSequence.prototype.toArray = nativeArray }

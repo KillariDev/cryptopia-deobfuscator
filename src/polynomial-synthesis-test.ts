@@ -72,11 +72,11 @@ const sharedProducts = fixture.gates.map(([a, b, target, gate_i]) => ({ a, b, ta
 assert.equal(sharedProducts.length, 48)
 const comparisonBudgetMs = 2000
 const cubicReplacement = await advancedRewrite(sharedProducts, {
-	selectedStrategy: 'quadratic', deadline: performance.now() + comparisonBudgetMs
+	selectedStrategy: 'anf-synthesis', deadline: performance.now() + comparisonBudgetMs
 })
 assert.ok(cubicReplacement && cubicReplacement.length === 26)
 for (const selectedStrategy of [
-	'gf2-affine', ...structuralNames, 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'
+	'gf2-affine', ...structuralNames, 'forward-semantic-search', 'smt-synthesis', 'meet-in-the-middle', 'commutation-search'
 ]) {
 	const candidate = await advancedRewrite(sharedProducts, { selectedStrategy, deadline: performance.now() + comparisonBudgetMs })
 	assert.equal(candidate, undefined, selectedStrategy)
