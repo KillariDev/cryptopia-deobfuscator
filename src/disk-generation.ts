@@ -10,10 +10,11 @@ import { candidateMergeSQL } from './generation-merge.js'
 import { StagingWriter, StagingRow } from './generation-staging.js'
 import { frontierCandidatesSQL, countNewFinalFunctionsSQL } from './generation-dedup.js'
 import sqlite3 from 'sqlite3'
+import { realpath } from 'node:fs/promises'
 import { Gate } from './types.js'
 import { circuitState, encodeGates } from './semantic.js'
 import { hashGates } from './utils.js'
-import { runSQL, allSQL } from './sql.js'
+import { runSQL, allSQL, withSQLiteLock } from './sql.js'
 import { overallGenerationWork, GenerationProfile, SemanticProgress } from './generation-progress.js'
 import { ExpansionKernel } from './generation-expansion.js'
 import { GenerationPool } from './generation-pool.js'
@@ -27,8 +28,25 @@ type PreparedBatch = { batch: Entry[], depth: number, expansion?: GenerationPref
 type Entry = { id: number, state: Buffer, mask: number, reads: number, gates: Buffer }
 export type DiskGenerationOptions = { readRows: number, stageRows: number, parameterLimit: number, stateLimit: number, keepState: boolean, workers?: number, queueBatches?: number, minimumWork?: number, preparedInserts?: boolean, sortStaging?: boolean, statementCacheEntries?: number, appendStaging?: boolean, compactBindings?: boolean, stagingWriters?: number, stagingDirectory?: string, stagingCacheMegabytes?: number, aggregateMerge?: boolean, countFinalInserts?: boolean, candidateCacheMegabytes?: number, streamStaging?: boolean, stagingQueueBatches?: number, directInputMerge?: boolean, prefetch?: boolean, prefetchMegabytes?: number, onActivity?: (read: () => GenerationActivity) => void, onProfile?: (profile: GenerationProfile) => void, beforeCommit?: () => Promise<void> }
 
-/** A transaction commits output, discovered states and input consumption together. */
-export async function generateOnDisk(db: sqlite3.Database, wires: number, maximumDepth: number, catalog: Gate[], options: DiskGenerationOptions,
+const activeMemoryBuilds = new WeakSet<sqlite3.Database>()
+
+export async function withGenerationLock<T>(db: sqlite3.Database, run: () => Promise<T>): Promise<T> {
+	const filename = (await allSQL<{ name: string, file: string }>(db, 'PRAGMA database_list')).find(row => row.name === 'main')?.file
+	if (filename) {
+		const path = await realpath(filename)
+		return withSQLiteLock(`${path}.generation-lock.db`, `Rainbow generation is already running for ${path}`, run)
+	}
+	if (activeMemoryBuilds.has(db)) throw new Error('Rainbow generation is already running on this connection')
+	activeMemoryBuilds.add(db)
+	try { return await run() } finally { activeMemoryBuilds.delete(db) }
+}
+
+export function generateOnDisk(...args: Parameters<typeof generateOnDiskLocked>) {
+	return withGenerationLock(args[0], () => generateOnDiskLocked(...args))
+}
+
+/** The caller holds the generation lock across frontier reads and commits. */
+export async function generateOnDiskLocked(db: sqlite3.Database, wires: number, maximumDepth: number, catalog: Gate[], options: DiskGenerationOptions,
 	onProgress?: (progress: SemanticProgress) => void, shouldPause?: () => boolean) {
 	if (!Number.isInteger(wires) || wires < 1 || wires > 8 || !Number.isSafeInteger(maximumDepth) || maximumDepth < 1) throw new Error('Invalid generation wire/depth limits')
 	const workers = options.workers ?? 1, queueBatches = options.queueBatches ?? 2, minimumWork = options.minimumWork ?? 100000

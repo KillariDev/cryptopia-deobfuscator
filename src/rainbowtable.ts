@@ -15,7 +15,7 @@ import { decodeGates } from './semantic.js'
 import { LimitedMap } from './limitedMap.js'
 import { logTimed, hashGates } from './utils.js'
 import { runSQL, allSQL } from './sql.js'
-import { generateOnDisk } from './disk-generation.js'
+import { generateOnDiskLocked, withGenerationLock } from './disk-generation.js'
 import { GenerationEstimator, formatGenerationProgress, generationDuration, GenerationProfile, SemanticProgress, formatGenerationProfile } from './generation-progress.js'
 
 export const databaseFilename = (wires: number, gates: number) => join(config.files.databaseDirectory, `rainbow_${wires}_${gates}.db`)
@@ -140,7 +140,17 @@ export function* generateAllGates(wires: number): Generator<Gate, undefined, unk
 export const createRainbowTable = async (wires: number, gates: number, onMetrics?: (profile: GenerationProfile | undefined, activity: GenerationActivity | undefined) => void) => {
 	await cleanupStagingDirectories(join(config.files.dataDirectory, config.files.workerDirectory))
 	const db = getRainbowTable(wires, gates)
-	await databaseReady(db)
+	try {
+		await databaseReady(db)
+		return await withGenerationLock(db, () => buildRainbowTable(db, wires, gates, onMetrics))
+	} catch (error) {
+		await new Promise<void>(resolve => db.close(() => resolve()))
+		throw error
+	}
+}
+
+async function buildRainbowTable(db: sqlite3.Database, wires: number, gates: number,
+	onMetrics?: (profile: GenerationProfile | undefined, activity: GenerationActivity | undefined) => void) {
 	let diagnostics: GenerationDiagnostics | undefined
 	try {
 		if (verboseLogging() && config.logging.generationDiagnostics) {
@@ -195,7 +205,7 @@ export const createRainbowTable = async (wires: number, gates: number, onMetrics
 		report(true)
 		const timer = setInterval(() => report(), config.timing.databaseLogSeconds * 1000)
 		try {
-			await generateOnDisk(db, wires, gates, catalog, {
+			await generateOnDiskLocked(db, wires, gates, catalog, {
 				readRows: config.database.generationReadRows, stageRows: config.database.generationBatchRows,
 				parameterLimit: config.database.generationSqlParameters, preparedInserts: config.database.generationPreparedInserts, appendStaging: config.database.generationAppendStaging, aggregateMerge: config.database.generationAggregateMerge, directInputMerge: config.database.generationDirectInputMerge, sortStaging: config.database.generationSortStaging, statementCacheEntries: config.database.generationStatementCacheEntries, stateLimit: config.database.generationStates,
 				keepState: true, candidateCacheMegabytes: config.database.generationCandidateCacheMegabytes, streamStaging: config.database.generationStreamStaging, stagingQueueBatches: config.database.generationStagingQueueBatches, countFinalInserts: config.database.generationCountFinalInserts,
@@ -217,7 +227,7 @@ export const createRainbowTable = async (wires: number, gates: number, onMetrics
 			if (profile) logVerbose(`Generation profile: ${profile.workersUsed} CPU threads started; ${profile.candidates} candidates expanded, ${profile.emitted} emitted after local deduplication; ${(profile.expansionMs / 1000).toFixed(2)} expansion worker-seconds; ${((profile.writeMs + profile.readMs) / 1000).toFixed(2)}s database work; ${(profile.waitMs / 1000).toFixed(2)}s waiting for expansion; peak ${profile.peakPending} pending tasks. Times can overlap.`)
 		} finally { clearInterval(timer) }
 		return db
-	} catch (error) { diagnostics?.close(); await new Promise<void>(resolve => db.close(() => resolve())); throw error } finally { diagnostics?.close() }
+	} finally { diagnostics?.close() }
 }
 
 /** Explicit, bounded build tuning; lookup connections keep their own settings. */

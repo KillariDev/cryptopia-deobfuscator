@@ -90,6 +90,13 @@ try {
 		assert.equal(latest.gates.length, circuit.gates.length - (wholeCircuit ? Math.max(broadRemoved, 4) : broadRemoved + 4))
 		const resultLine = reports.find(line => line.includes(`Round winner: ${winner} | Local: 4 gates removed | Global: ${broadRemoved} gates removed`))
 		assert.match(resultLine ?? '', / \| [1-9]\d* gates\/hour$/)
+		const localStart = reports.findIndex(line => line.includes('Round 1 | Local worker 2 started | rainbow'))
+		const globalStart = reports.findIndex(line => line.includes('Round 1 | Global worker 1 started | SAT sweep'))
+		const winnerLine = reports.findIndex(line => line.includes('Round winner:'))
+		assert.ok(localStart >= 0 && localStart < winnerLine)
+		assert.ok(globalStart >= 0 && globalStart < winnerLine)
+		assert.equal(reports.filter(line => line.includes('Round 1 | Local worker 2 started')).length, 1)
+		assert.equal(reports.filter(line => line.includes('Round 1 | Global worker 1 started')).length, 1)
 		assert.ok(reports.some(line => line.endsWith('Local strategies: rainbow:1')))
 		assert.ok(reports.some(line => line.endsWith('Global strategies: SAT sweep:1')))
 		assert.ok(reports.every(line => !line.includes(' tried (worker time):')))
@@ -136,6 +143,28 @@ try {
 	}
 	await assert.rejects(splitTaskAndRun(join(directory, 'exhausted'), 'unused', { originalCircuit: circuit, inputCircuit: circuit }), error => error === done)
 	assert.equal(broadDispatches, 1, 'unchanged rounds do not dispatch an exhausted broad scan again')
+	const zeroCircuit: CircuitData = { ...circuit, gate_count: 5000, gates: circuit.gates.slice(1) }
+	const zeroPath = join(directory, 'broad-solved')
+	let finishLocal!: () => void
+	const localStarted = new Promise<void>(resolve => { finishLocal = resolve })
+	let localJobs = 0
+	WorkerPool.prototype.run = async function(gates, _wires, progress, signal, _budget, _restart, solver) {
+		const stop = new Int32Array(signal!)
+		if (solver === 'broad') {
+			await localStarted
+			progress?.(0, undefined, [])
+			assert.equal(Atomics.load(stop, 0), 1, 'a complete broad result stops local workers immediately')
+			return []
+		}
+		localJobs++
+		finishLocal()
+		await wait(5)
+		return gates
+	}
+	await splitTaskAndRun(zeroPath, 'unused', { originalCircuit: zeroCircuit, inputCircuit: zeroCircuit })
+	assert.ok(localJobs > 0)
+	assert.equal(JSON.parse(await readFile(zeroPath + '-latest.json', 'utf8')).gate_count, 0)
+
 } finally {
 	Object.assign(config, saved)
 	WorkerPool.prototype.run = run

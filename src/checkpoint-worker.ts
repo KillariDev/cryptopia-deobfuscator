@@ -1,3 +1,5 @@
+import {config} from './config.js'
+import {createPolynomialEquivalenceChecker} from './symbolic-affine.js'
 import {parentPort,workerData} from 'node:worker_threads'
 import {IncrementalEvaluator} from './packed.js'
 import {generateCombinations,generateNRandomBooleanArray,getVars,mapCircuit,simplifyGate} from './utils.js'
@@ -22,8 +24,9 @@ function activeWires(gates: Gate[], used = new Set<number>()) {
  }
  return used
 }
+const sameGate = (a: Gate, b: Gate) => a.a===b.a && a.b===b.b && a.target===b.target && a.gate_i===b.gate_i
 let originalWires: Set<number> | undefined
-parentPort!.on('message',({gates,filenames}:{gates:Gate[],filenames:string[]})=>{
+parentPort!.on('message',({gates,filenames,requireExact}:{gates:Gate[],filenames:string[],requireExact:boolean})=>{
  try{
   if (!originalWires) {
    original.forEach((gate,index)=>validateGate(gate,index,'original circuit'))
@@ -35,10 +38,20 @@ parentPort!.on('message',({gates,filenames}:{gates:Gate[],filenames:string[]})=>
   })
   const active=originalWires.size<=exhaustiveWireLimit ? activeWires(normalized,new Set(originalWires)) : originalWires
   const exhaustive=active.size<=exhaustiveWireLimit
-  const mapping=exhaustive && active.size!==wires ? [...active].sort((a,b)=>a-b) : undefined
-  const inputs=exhaustive ? generateCombinations(active.size) : generateNRandomBooleanArray(checks,wires)
-  const evaluator=new IncrementalEvaluator(mapping ? mapCircuit(original,mapping) : original,inputs,0,1)
-  if(!evaluator.equivalent(mapping ? mapCircuit(normalized,mapping) : normalized))throw new Error('CORRUPTION: checkpoint differs from original circuit')
+  if (requireExact && !exhaustive) {
+   if (original.length!==normalized.length || !original.every((gate,index)=>sameGate(simplifyGate(gate),normalized[index]))) {
+    const deadline=performance.now()+config.workers.jobSeconds*1000
+    const proof=createPolynomialEquivalenceChecker(original,wires,config.synthesis.affineMaximumTerms,config.synthesis.affineMaximumOperations,()=>performance.now()>=deadline)
+    const equivalent=proof(normalized)
+    if (equivalent===undefined) throw new Error('Checkpoint equivalence proof exceeded its resource limits')
+    if (!equivalent) throw new Error('CORRUPTION: checkpoint differs from original circuit')
+   }
+  } else {
+   const mapping=exhaustive && active.size!==wires ? [...active].sort((a,b)=>a-b) : undefined
+   const inputs=exhaustive ? generateCombinations(active.size) : generateNRandomBooleanArray(checks,wires)
+   const evaluator=new IncrementalEvaluator(mapping ? mapCircuit(original,mapping) : original,inputs,0,1)
+   if(!evaluator.equivalent(mapping ? mapCircuit(normalized,mapping) : normalized))throw new Error('CORRUPTION: checkpoint differs from original circuit')
+  }
   const payload=convertToOriginal(wires,normalized)
   for(const filename of new Set(filenames)){
    mkdirSync(dirname(filename),{recursive:true})

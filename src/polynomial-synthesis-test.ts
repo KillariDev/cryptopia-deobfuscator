@@ -8,6 +8,9 @@ import { config } from './config.js'
 import { evalCircuit, generateCombinations, getVars, verifyCircuit } from './utils.js'
 import { seededRandom } from './random.js'
 import { CircuitData, Gate } from './types.js'
+import { optimizeSubset } from './processing.js'
+import { RainbowPortfolio } from './rainbow-portfolio.js'
+import { LimitedMap } from './limitedMap.js'
 const synthesize = (input: Gate[]) => synthesizePolynomial(input, 64, 100000, 10000000)
 const not: Gate = { a: 0, b: 0, target: 0, gate_i: 15 }
 const padding = Array.from({ length: 10 }, () => ({ ...not }))
@@ -89,6 +92,18 @@ for (const controls of generateCombinations(15)) {
 }
 console.log('Shared cubic fixture: 48 → 26 gates, exhaustive control inputs, no replacement from the other synthesis strategies')
 
+const savedSearch = { ...config.search }
+try {
+	Object.assign(config.search, { strategyAdaptive: false, rainbow: false, variableElimination: false, sliceMinimum: 2 })
+	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, affine: true, quadratic: true, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+	const input = [complemented, { a: 2, b: 2, target: 2, gate_i: 15 }]
+	const activity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const }
+	const result = await optimizeSubset(new RainbowPortfolio([]), input, new LimitedMap(10), new LimitedMap(10), 2, 2, 'heavy', () => false, activity, () => {}, new LimitedMap(10), 'all')
+	assert.deepEqual(result, [toffoli], 'an affine miss must leave quadratic synthesis available before caching the region')
+} finally {
+	Object.assign(config.search, savedSearch)
+	Object.assign(config.synthesis, saved)
+}
 const maze = JSON.parse(readFileSync(new URL('../data/recursive-affine-maze.json', import.meta.url), 'utf8'))
 const gates: Gate[] = maze.gates.map(([a,b,target,gate_i]: number[]) => ({a,b,target,gate_i}))
 const result = synthesize(gates)!

@@ -7,11 +7,16 @@ export class LimitedMap<K, V> {
 		this.map = new Map<K, V>(); this.limit = limit
 	}
 
-	set(key: K, value: V): void {
+	set(key: K, value: V): K | undefined {
+		let evicted: K | undefined
 		if (this.map.has(key)) {
 			if (this.policy === 'lru') this.map.delete(key)
-		} else if (this.map.size >= this.limit) this.map.delete(this.map.keys().next().value!)
+		} else if (this.map.size >= this.limit) {
+			evicted = this.map.keys().next().value!
+			this.map.delete(evicted)
+		}
 		this.map.set(key, value)
+		return evicted
 	}
 
 	get(key: K): V | undefined {

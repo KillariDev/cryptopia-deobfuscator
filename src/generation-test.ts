@@ -16,6 +16,37 @@ import { allSQL, runSQL } from './sql.js'
 import { overallGenerationWork, GenerationEstimator, formatGenerationProgress, GenerationProfile } from './generation-progress.js'
 import { config, parseConfig } from './config.js'
 
+const lockDirectory = await mkdtemp(join(tmpdir(), 'generation-lock-'))
+const lockPath = join(lockDirectory, 'table.db')
+const owner = new sqlite3.Database(lockPath), contender = new sqlite3.Database(lockPath)
+let signalBatch!: () => void, releaseBatch!: () => void
+const batchStarted = new Promise<void>(resolve => { signalBatch = resolve })
+const batchRelease = new Promise<void>(resolve => { releaseBatch = resolve })
+try {
+	await runSQL(owner, 'PRAGMA journal_mode=WAL')
+	await runSQL(owner, generationLookupSchema)
+	const catalog = [...generateAllGates(2)]
+	const options = { readRows: 1, stageRows: 100, parameterLimit: 100, stateLimit: 0, keepState: true }
+	let paused = false
+	const build = generateOnDisk(owner, 2, 1, catalog, { ...options, beforeCommit: async () => {
+		signalBatch()
+		await batchRelease
+		paused = true
+	} }, undefined, () => paused)
+	try {
+		await Promise.race([batchStarted, build])
+		await assert.rejects(generateOnDisk(contender, 2, 1, catalog, options), /Rainbow generation is already running/)
+	} finally {
+		releaseBatch()
+		await build
+	}
+	assert.deepEqual(await allSQL(owner, 'SELECT total,processed FROM BuildMeta'), [{ total: 1, processed: 1 }])
+	assert.equal(await generateOnDisk(contender, 2, 1, catalog, options), true)
+} finally {
+	await Promise.all([owner, contender].map(db => new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))))
+	await rm(lockDirectory, { recursive: true, force: true })
+}
+
 let seed = 1927
 const random = (max: number) => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed % max }
 const unpack = (result: ExpansionResult, bytes: number) => {

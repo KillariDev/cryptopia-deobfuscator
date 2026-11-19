@@ -64,7 +64,10 @@ status summaries default to every 30 seconds. Cancellation is cooperative, so an
 step may take time to finish.
 
 Latest checkpoints and progress folders are named after the input file and stored
-beside it, so each puzzle keeps its own saved work.
+beside it by default, so each puzzle keeps its own saved work. Set
+`files.latestName` to customize the latest checkpoint suffix, or set
+`files.progressDirectory` to place snapshots in per-puzzle folders under
+`files.dataDirectory`.
 
 Worker snapshots are for inspection; use a verified full circuit to resume.
 Interrupted lookup-table generation resumes from its own database checkpoint.
@@ -91,7 +94,8 @@ The solver combines several approaches:
   the next strategy. Local and broad searches have separate strategy orders.
   The broad lane keeps its strategy whenever it removes gates, regardless of which result wins.
 
-The summary reports worker counts by strategy. Set `search.strategyAdaptive` to false to use the fixed pipeline and
+Workers announce their assigned strategy when they first report in each round.
+The round summary reports worker counts by strategy. Set `search.strategyAdaptive` to false to use the fixed pipeline and
 synthesis rotation. Failed-region caches are separate by strategy so each method
 can try the same region.
 
@@ -167,9 +171,11 @@ rounds aim to finish after five minutes; rounds without reductions retain a
 25-minute budget. Later rounds repartition and shuffle the circuit.
 
 Checkpoint verification is exhaustive when the original and candidate together
-use at most eight wires. Wider checkpoints are compared against the original on
-`validation.checkpointInputs` random inputs. These wide checks can miss rare
-mismatches.
+use at most eight wires. Before resuming a wider checkpoint, the solver proves
+equivalence using Boolean polynomials. If the proof reaches its time or resource
+limit, the checkpoint is left on disk and optimization stops. During a run,
+new wide checkpoints are checked against the original on
+`validation.checkpointInputs` random inputs, which can miss rare mismatches.
 
 ## Configuration
 

@@ -2,7 +2,11 @@ import { config } from './config.js'
 import { Gate } from './types.js'
 import { LimitedMap } from './limitedMap.js'
 
-const budgets = new WeakMap<LimitedMap<string, boolean>, { bytes: number, bases: WeakSet<WindowFingerprints> }>()
+const budgets = new WeakMap<LimitedMap<string, boolean>, number>()
+const keyBytes = (key: string) => 2 * key.length + 64
+
+// Copy retained keys so a short window cannot keep the full encoding alive.
+export const retainWindowKey = (key: string) => Buffer.from(key, 'utf16le').toString('utf16le')
 
 /** Rolling hashes are prefilters only. Cache hits require the exact structural key. */
 export class WindowFingerprints {
@@ -34,14 +38,21 @@ export class WindowFingerprints {
 	remember(cache: LimitedMap<string, boolean>, start: number, end: number) {
 		const key = this.key(start, end), exact = this.exactKey(start, end)
 		if (cache.has(key) && cache.has(exact)) return
-		const bytes = 2 * (key.length + exact.length) + 128
-		if (bytes > this.maximumBytes) return
-		const budget = budgets.get(cache) ?? { bytes: 0, bases: new WeakSet<WindowFingerprints>() }
-		const baseBytes = (this.encoded?.length ?? 0) * 2
-		if (bytes + baseBytes > this.maximumBytes) return
-		if (budget.bytes + bytes + (budget.bases.has(this) ? 0 : baseBytes) > this.maximumBytes) { cache.clear(); budget.bytes = 0; budget.bases = new WeakSet() }
-		if (!budget.bases.has(this)) { budget.bytes += baseBytes; budget.bases.add(this) }
-		cache.set(key, true); cache.set(exact, true)
-		budget.bytes += bytes; budgets.set(cache, budget)
+		const newBytes = keyBytes(key) + keyBytes(exact)
+		if (newBytes > this.maximumBytes) return
+		let bytes = cache.size() ? budgets.get(cache) ?? 0 : 0
+		for (const entry of [key, exact]) {
+			if (cache.delete(entry)) bytes -= keyBytes(entry)
+		}
+		while (bytes + newBytes > this.maximumBytes && cache.size()) {
+			const oldest = cache.keys().next().value!
+			cache.delete(oldest)
+			bytes -= keyBytes(oldest)
+		}
+		for (const entry of [key, retainWindowKey(exact)]) {
+			const evicted = cache.set(entry, true)
+			bytes += keyBytes(entry) - (evicted === undefined ? 0 : keyBytes(evicted))
+		}
+		budgets.set(cache, bytes)
 	}
 }

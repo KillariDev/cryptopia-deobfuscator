@@ -176,6 +176,17 @@ try {
 	assert.notEqual(outputPaths('alpha/puzzle').worker(0), outputPaths('beta/puzzle').worker(0))
 	assert.equal(outputPaths('alpha/puzzle').worker(0), outputPaths(join(temporaryDirectory, 'alpha/puzzle')).worker(0))
 	const { config: jobConfig } = await import('./config.js')
+	const savedPaths = { ...jobConfig.files }
+	try {
+		Object.assign(jobConfig.files, { latestName: 'resume.json', progressDirectory: 'snapshots' })
+		const custom = outputPaths('original')
+		assert.equal(custom.latest, 'original-resume.json')
+		assert.ok(custom.progress(1).startsWith(join(savedPaths.dataDirectory, 'snapshots') + '/'))
+		assert.notEqual(outputPaths('alpha/puzzle').progress(1), outputPaths('beta/puzzle').progress(1))
+		assert.equal(custom.lock, paths.lock)
+		writeCircuit(custom.latest, 4, singleGate)
+		assert.deepEqual(loadJob('original').inputCircuit.gates, initialJob.originalCircuit.gates)
+	} finally { Object.assign(jobConfig.files, savedPaths) }
 	const { summarySeconds, checkpointSeconds } = jobConfig.timing
 	try {
 		Object.assign(jobConfig.timing, { summarySeconds: 10, checkpointSeconds: 55 })
@@ -896,6 +907,14 @@ firstWindow.remember(bounded,0,1)
 secondWindow.remember(bounded,0,1)
 assert.equal(secondWindow.seen(bounded,0,1), true)
 assert.equal(firstWindow.seen(bounded,0,1), false)
+const largeWindowSource = new WindowFingerprints(Array.from({ length: 1024 }, () => singleGate[0]), 256)
+largeWindowSource.remember(bounded, 0, 2)
+assert.equal(largeWindowSource.seen(bounded, 0, 2), true, 'short keys fit even when the source encoding exceeds the budget')
+const entryBounded = new LimitedMap<string, boolean>(2)
+for (const window of [firstWindow, secondWindow, firstWindow]) {
+	window.remember(entryBounded, 0, 1)
+	assert.equal(window.seen(entryBounded, 0, 1), true, 'entry-count evictions release the byte budget')
+}
 console.log('Out-of-order jobs, cooperative queue cancellation, SQL request sharing and window-cache bounds passed')
 
 // Portfolio routing must use each table's truth-table width and its own cache namespace.

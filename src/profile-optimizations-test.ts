@@ -4,6 +4,8 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {SolverService} from './solver-worker.js'
 import {CheckpointWriter} from './checkpoint-writer.js'
+import {splitTaskAndRun} from './processing.js'
+import {outputPaths} from './storage.js'
 import {AsyncReductionCheckpoint} from './storage.js'
 import {IncrementalGraph} from './incremental-graph.js'
 import {createDependencyGraph} from './lineswapper.js'
@@ -44,6 +46,10 @@ let ticks=0;const heartbeat=setInterval(()=>ticks++,1)
 try{
  await writer.write([file],[])
  assert.ok(ticks>0,'main-thread timers run while a large checkpoint is verified')
+ const idleWorker = Reflect.get(writer, 'worker')
+ await idleWorker.terminate()
+ await writer.write([file],[])
+ assert.notEqual(Reflect.get(writer, 'worker'),idleWorker,'the next write replaces an exited idle worker')
  const before=await readFile(file,'utf8')
  await assert.rejects(writer.write([file],[{a:0,b:0,target:0,gate_i:15}]),/CORRUPTION/)
  await assert.rejects(writer.write([file],[{a:0,b:0,target:3,gate_i:15}]),/CORRUPTION: invalid gate.*checkpoint candidate/)
@@ -70,6 +76,28 @@ const rareDifference = [flip,left,flip,right,flip,left,flip,right]
 const narrow = new CheckpointWriter(rareDifference,64,1)
 try {
  const path = join(proofDir, 'latest.json')
+ const fixture = JSON.parse(await readFile(new URL('../proofs/nonlinear-basis-maze-corruption.json', import.meta.url), 'utf8'))
+ const circuit = (gates: [number, number, number, number][]) => ({ wire_count: 64, gate_count: gates.length, gates })
+ const originalCircuit = circuit(fixture.before), inputCircuit = circuit(fixture.incorrect_after)
+ const puzzle = join(proofDir, 'wide-resume')
+ let initialized = false
+ await assert.rejects(splitTaskAndRun(puzzle, puzzle, { originalCircuit, inputCircuit }, undefined, async () => {
+  initialized = true
+ }), /CORRUPTION: checkpoint differs/)
+ assert.equal(initialized, false)
+ await assert.rejects(readFile(outputPaths(puzzle).latest), { code: 'ENOENT' })
+ const noOpPuzzle = join(proofDir, 'single-no-op')
+ const noOpCircuit = circuit([[0, 0, 0, 6]])
+ await splitTaskAndRun(noOpPuzzle, noOpPuzzle, { originalCircuit: noOpCircuit, inputCircuit: noOpCircuit }, undefined, async () => {
+  assert.fail('a single no-op should finish before initializing rainbow tables')
+ })
+ assert.equal(JSON.parse(await readFile(outputPaths(noOpPuzzle).latest, 'utf8')).gate_count, 0)
+ const wideGates = fixture.before.map(([a, b, target, gate_i]: number[]) => ({ a, b, target, gate_i }))
+ const wide = new CheckpointWriter(wideGates, 64, 1)
+ try {
+  const not = { a: 0, b: 0, target: 63, gate_i: 15 }
+  await wide.write([], [...wideGates, not, not], true)
+ } finally { await wide.close() }
  await narrow.write([path],rareDifference)
  const savedProof = await readFile(path,'utf8')
  await assert.rejects(narrow.write([path],[]),/CORRUPTION/)
