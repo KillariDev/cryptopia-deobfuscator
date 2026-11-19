@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import { StrategyPicker } from './strategy-picker.js'
 import { advancedRewrite } from './strategies.js'
-import { config } from './config.js'
+import { config, parseConfig } from './config.js'
 import { forwardSemanticSearch, meetInMiddle } from './semantic.js'
 import { saturateCircuit } from './equality.js'
 import { synthesizeSMT } from './smt.js'
 import { Gate } from './types.js'
 import { WorkerPool } from './threads.js'
 import { createSharedTable } from './shared-table.js'
-import { createOptimizerCaches } from './processing.js'
+import { broadStrategyOrder, createOptimizerCaches } from './processing.js'
 const picker = new StrategyPicker(['GF2', 'forward', 'Z3'])
 const choices = ['GF2', 'forward', 'Z3'].map(name => ({ name }))
 assert.deepEqual(Array.from({ length: 6 }, () => picker.pick(choices)?.name), ['GF2', 'forward', 'Z3', 'GF2', 'forward', 'Z3'])
@@ -33,6 +33,9 @@ let cancellationChecks = 0
 const started = performance.now()
 assert.equal(await synthesizeSMT([not], 2, 3, 30000, () => { cancellationChecks++; return performance.now() - started > 10 }), undefined)
 assert.ok(cancellationChecks > 1, 'SMT observes cancellation while its isolate is running')
+assert.throws(() => parseConfig({ search: { localStrategyOrder: ['quadratic-shear'] } }), /localStrategyOrder/)
+assert.throws(() => parseConfig({ search: { broadStrategyOrder: ['sat-sweeping', 'sat-sweeping'] } }), /broadStrategyOrder/)
+assert.throws(() => parseConfig({ search: { broadStrategyOrder: 'quadratic-shear' } }), /broadStrategyOrder/)
 const search = { ...config.search }
 const tables = config.database.tables
 const table = { wires: 2, gates: 1 }
@@ -47,6 +50,26 @@ try {
 		strategyPicker.beginRound(2)
 		assert.equal(strategyPicker.activeStrategy, 'rainbow')
 	}
+	const custom = parseConfig({ search: {
+		localStrategyOrder: ['rainbow'],
+		broadStrategyOrder: ['quadratic-shear'],
+	} })
+	Object.assign(config.search, custom.search)
+	const reordered = createOptimizerCaches(7)
+	assert.equal(reordered.strategyPicker.activeStrategy, 'rainbow')
+	reordered.strategyPicker.beginRound(1)
+	reordered.strategyPicker.beginRound(2)
+	assert.equal(reordered.strategyPicker.activeStrategy, 'quadratic', 'omitted strategies remain in rotation')
+	assert.deepEqual(broadStrategyOrder().slice(0, 2), ['quadratic-shear', 'sat-sweeping'])
+	const shearEnabled = config.synthesis.quadraticShear
+	try {
+		config.synthesis.quadraticShear = false
+		assert.equal(broadStrategyOrder()[0], 'sat-sweeping', 'disabled strategies stay disabled when prioritized')
+	} finally {
+		config.synthesis.quadraticShear = shearEnabled
+	}
+	Object.assign(config.search, search)
+
 	config.synthesis.quadratic = false
 	config.database.tables = [table]
 	pool.setBroadReservation(true)

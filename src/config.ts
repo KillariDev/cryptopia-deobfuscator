@@ -5,6 +5,14 @@ import { isMainThread, workerData } from 'worker_threads'
 
 export type RainbowTableSpec = { wires: number, gates: number }
 
+export const defaultLocalStrategyOrder = [
+	'quadratic', 'rainbow', 'variables', 'forward-semantic-search', 'equality-saturation',
+	'gf2-affine', 'factored', 'block-cancellation', 'sat-sweeping', 'mixed-basis', 'z3', 'meet-in-the-middle',
+] as const
+export const defaultBroadStrategyOrder = [
+	'sat-sweeping', 'quadratic-shear', 'mixed-basis', 'block-cancellation', 'symbolic', 'factored', 'dependency-cuts',
+] as const
+
 export const defaults = {
 	runtime: { heapMegabytes: 16384 },
 	files: { dataDirectory: 'data', latestName: 'latest.json', workerDirectory: 'worker', workerSnapshots: false, progressDirectory: 'progress', databaseDirectory: '.' },
@@ -12,7 +20,7 @@ export const defaults = {
 	timing: { checkpointSeconds: 30, roundSeconds: 1500, improvedRoundSeconds: 300, summarySeconds: 30, workerReportSeconds: 5, databaseLogSeconds: 60, standaloneSaveSeconds: 60 },
 	logging: { verbose: false, generationDiagnostics: true, generationDiagnosticsMinimumSeconds: 5, eventLoopResolutionSeconds: 0.02 },
 	validation: { checkpointInputs: 20, probabilisticInputs: 202, maximumWires: 64 },
-	search: { rainbow: true, dependencyCuts: true, strategyAdaptive: true, probabilistic: true, variableElimination: true, exactMaximumWires: 7, subsetMinimum: 2, subsetMaximum: 199, sliceMinimum: 2, sliceMaximum: 199, maximumInnerChunks: 5, minimumInnerChunkGates: 200, workerShufflePasses: 200, roundShufflePasses: 2000, adaptive: false, stableSearchArms: false, schedulerHistoryEntries: 128, independentComponents: false, schedulerDecay: 0.98, localSearch: true, localSearchSeeds: 32, localSearchRadius: 16, localSearchBroadEvery: 5, explorationEvery: 5, searchArms: 16, prioritizeChangedWires: true, incrementalEvaluation: true, incrementalDependencies: true, circuitChunkGates: 128, prefixCacheBytes: 8388608, prefixStride: 16, normalizedCacheEntries: 10000, balancedWorkers: true },
+	search: { rainbow: true, dependencyCuts: true, strategyAdaptive: true, localStrategyOrder: [] as string[], broadStrategyOrder: [] as string[], probabilistic: true, variableElimination: true, exactMaximumWires: 7, subsetMinimum: 2, subsetMaximum: 199, sliceMinimum: 2, sliceMaximum: 199, maximumInnerChunks: 5, minimumInnerChunkGates: 200, workerShufflePasses: 200, roundShufflePasses: 2000, adaptive: false, stableSearchArms: false, schedulerHistoryEntries: 128, independentComponents: false, schedulerDecay: 0.98, localSearch: true, localSearchSeeds: 32, localSearchRadius: 16, localSearchBroadEvery: 5, explorationEvery: 5, searchArms: 16, prioritizeChangedWires: true, incrementalEvaluation: true, incrementalDependencies: true, circuitChunkGates: 128, prefixCacheBytes: 8388608, prefixStride: 16, normalizedCacheEntries: 10000, balancedWorkers: true },
 	cache: { lookupPolicy: 'lru' as 'fifo' | 'lru', lookupEntries: 1000000, processedEntries: 1000000, shuffleEntries: 100000, subsetEntries: 100000, windowKeyBytes: 16777216 },
 	database: { tables: [{ wires: 3, gates: 6 }, { wires: 4, gates: 5 }, { wires: 5, gates: 2 }], queryBatchSize: 900, lookupBatchSeconds: 0, statementCacheEntries: 16, sharedTables: true, sharedTableBytes: 33554432, sharedTableMaximumRows: 100000, memoryMapBytes: 268435456, generationStates: 0, generationBatchRows: 3000, generationReadRows: 4096, generationSqlParameters: 8192, generationPreparedInserts: true, generationCompactBindings: true, generationStagingWriters: 1, generationAppendStaging: false, generationAggregateMerge: true, generationCountFinalInserts: false, generationCandidateCacheMegabytes: 32, generationStreamStaging: true, generationStagingQueueBatches: 2, generationDirectInputMerge: true, generationSortStaging: false, generationStatementCacheEntries: 8, generationCacheMegabytes: 256, generationTempStore: 'file' as 'file' | 'memory', generationJournalMode: 'wal' as 'wal' | 'delete', generationSynchronous: 'full' as 'full' | 'normal', generationWorkers: 8, generationPrefetch: true, generationPrefetchMegabytes: 16, generationQueueBatches: 2, generationMinimumWork: 100000, etaWindowSamples: 5, etaWarmupSamples: 3, etaSmoothing: 0.2, etaMaximumSlowdown: 1, etaTrendWindowSamples: 60, etaTrendMinimumSamples: 10, etaTrendMinimumWorkGrowth: 0.25 },
 	benchmark: { generationStreamingComparison: false, generationFinalComparison: false, finalLookupOutputName: 'final-lookup-benchmark.json', generationWriterComparison: false, generationPrefetchComparison: false, generationStagingComparison: false, mergeOutputName: 'merge-benchmark.json', stagingWideSqlParameters: 16384, stagingRows: 200000, stagingOutputName: 'staging-benchmark.json', dedupSeenRows: [10000, 100000, 1000000], dedupCandidateFunctions: 2000, dedupMasksPerFunction: 4, dedupOutputName: 'dedup-benchmark.json', generationTables: [{ wires: 3, gates: 3 }, { wires: 4, gates: 2 }], generationOutputName: 'generation-benchmark.json', generationTimeoutSeconds: 600, variants: [] as string[], decayFactor: 0.98, mode: 'comparison' as 'comparison' | 'ablation', caseManifest: 'benchmarks/cases.json', caseOutputDirectory: 'benchmark-cases', seconds: 10, repeats: 3, seed: 1729, workerCounts: [1, 2, 4], maximumChecks: 0, maximumOverrunSeconds: 30, outputName: 'benchmark.json' },
@@ -90,6 +98,14 @@ export function parseConfig(value: unknown): SolverConfig {
 			if (section === 'workers' && ['shareTemplates', 'sharedTemplateSeconds', 'sharedTemplateEntries', 'sharedTemplateBatch'].includes(key)) continue
 			const target = result[section as keyof SolverConfig] as Record<string, unknown>
 			if (!Object.prototype.hasOwnProperty.call(target, key)) throw new Error(`Unknown config setting: ${section}.${key}`)
+			if (section === 'search' && (key === 'localStrategyOrder' || key === 'broadStrategyOrder')) {
+				const allowed: readonly string[] = key === 'localStrategyOrder' ? defaultLocalStrategyOrder : defaultBroadStrategyOrder
+				if (!Array.isArray(setting) || setting.some(name => !allowed.includes(name)) || new Set(setting).size !== setting.length) {
+					throw new Error(`search.${key} needs distinct strategy names from: ${allowed.join(', ')}`)
+				}
+				target[key] = setting.slice()
+				continue
+			}
 			if (section === 'benchmark' && key === 'variants') {
 				const allowed = ['reference', 'shared-tables', 'components', 'stable-arms', 'decay', 'lru', 'tuned', 'tuned-no-stable', 'tuned-conservative']
 				if (!Array.isArray(setting) || setting.some(name => typeof name !== 'string' || !allowed.includes(name)) || new Set(setting).size !== setting.length) throw new Error('Invalid benchmark variants')

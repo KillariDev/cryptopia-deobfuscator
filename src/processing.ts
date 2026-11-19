@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto'
 import { advancedRewrite, wholeCircuitAffineSearch, SynthesisBudget } from './strategies.js'
 import { IncrementalEvaluator, PackedInputs, sameGate } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, workerRegionSeed, createSearchArms, independentComponents } from './search.js'
-import { config, minimumBroadGates } from './config.js'
+import { config, defaultBroadStrategyOrder, defaultLocalStrategyOrder, minimumBroadGates } from './config.js'
 import { formatCircuitSize, formatCoordinatorPhase, SummaryThrottle, verboseLogging, formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
 import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
 import { Gate } from './types.js'
@@ -850,36 +850,39 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 	return circuit.toArray()
 }
 
-const standaloneStructural = () => [
-	...(config.synthesis.factored ? ['factored'] : []),
-	...(config.synthesis.blockCancellation ? ['block-cancellation'] : []),
-	...(config.synthesis.satSweeping ? ['sat-sweeping'] : []),
-	...(config.synthesis.mixedBasis ? ['mixed-basis'] : []),
-]
-const variableStrategy = () => config.search.variableElimination && config.search.sliceMaximum >= 3 ? ['variables'] : []
+function prioritizeStrategies<T extends string>(priorities: string[], defaults: readonly T[], enabled: Record<T, boolean>): T[] {
+	const eligible = defaults.filter(name => enabled[name])
+	return [...priorities.flatMap(name => eligible.filter(strategy => strategy === name)),
+		...eligible.filter(name => !priorities.includes(name))]
+}
+
 const smallSynthesisStrategies = new Set(['forward-semantic-search', 'equality-saturation', 'z3', 'meet-in-the-middle'])
-const localStrategyOrder = () => [
-	...(config.synthesis.quadratic ? ['quadratic'] : []),
-	...(config.search.rainbow ? ['rainbow'] : []), ...(config.search.subsetMaximum >= 3 ? variableStrategy() : []),
-	...(config.synthesis.forwardSemanticSearch ? ['forward-semantic-search'] : []),
-	...(config.synthesis.equalitySaturation ? ['equality-saturation'] : []),
-	...(config.synthesis.affine ? ['gf2-affine'] : []),
-	...standaloneStructural(),
-	...(config.synthesis.smt ? ['z3'] : []),
-	...(config.synthesis.meetInMiddle ? ['meet-in-the-middle'] : []),
-].filter(strategy => !smallSynthesisStrategies.has(strategy) || config.search.subsetMinimum <= config.synthesis.maximumWindowGates)
-export const broadStrategyOrder = () => [
-	...(config.synthesis.satSweeping ? ['sat-sweeping'] : []),
-	...(config.synthesis.quadraticShear ? ['quadratic-shear'] : []),
-	...(config.synthesis.mixedBasis ? ['mixed-basis'] : []),
-	...(config.synthesis.blockCancellation ? ['block-cancellation'] : []),
-	...(config.synthesis.affine || config.synthesis.quadratic ? ['symbolic'] : []),
-	...(config.synthesis.factored ? ['factored'] : []),
-	...(config.search.dependencyCuts ? ['dependency-cuts'] : []),
-]
+const localStrategyOrder = () => prioritizeStrategies(config.search.localStrategyOrder, defaultLocalStrategyOrder, {
+	quadratic: config.synthesis.quadratic,
+	rainbow: config.search.rainbow,
+	variables: config.search.variableElimination && config.search.sliceMaximum >= 3 && config.search.subsetMaximum >= 3,
+	'forward-semantic-search': config.synthesis.forwardSemanticSearch,
+	'equality-saturation': config.synthesis.equalitySaturation,
+	'gf2-affine': config.synthesis.affine,
+	factored: config.synthesis.factored,
+	'block-cancellation': config.synthesis.blockCancellation,
+	'sat-sweeping': config.synthesis.satSweeping,
+	'mixed-basis': config.synthesis.mixedBasis,
+	z3: config.synthesis.smt,
+	'meet-in-the-middle': config.synthesis.meetInMiddle,
+}).filter(strategy => !smallSynthesisStrategies.has(strategy) || config.search.subsetMinimum <= config.synthesis.maximumWindowGates)
+export const broadStrategyOrder = () => prioritizeStrategies(config.search.broadStrategyOrder, defaultBroadStrategyOrder, {
+	'sat-sweeping': config.synthesis.satSweeping,
+	'quadratic-shear': config.synthesis.quadraticShear,
+	'mixed-basis': config.synthesis.mixedBasis,
+	'block-cancellation': config.synthesis.blockCancellation,
+	symbolic: config.synthesis.affine || config.synthesis.quadratic,
+	factored: config.synthesis.factored,
+	'dependency-cuts': config.search.dependencyCuts,
+})
 export const createOptimizerCaches = (workerIndex = 0) => ({
 	workerIndex,
-	strategyPicker: new RoundStrategyPicker(localStrategyOrder(), config.synthesis.quadratic ? 0 : workerIndex),
+	strategyPicker: new RoundStrategyPicker(localStrategyOrder(), config.search.localStrategyOrder.length || config.synthesis.quadratic ? 0 : workerIndex),
 	broadStrategyPicker: new RoundStrategyPicker(broadStrategyOrder(), workerIndex),
 	broadFallbackPicker: new StrategyPicker(broadStrategyOrder()),
 	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(config.cache.lookupEntries, config.cache.lookupPolicy),
