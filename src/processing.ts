@@ -7,7 +7,7 @@ import { setImmediate as yieldToCoordinator } from 'node:timers/promises'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
 import { mergeDisjointRoundResults, RoundCutPatches, roundSearchPlan, roundSearchResult } from './round-search.js'
-import { formatRoundStrategies, formatWorkerStart } from './logging.js'
+import { formatRoundStrategies } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
 import { AdaptiveConcurrency, MemoryConcurrency, memoryPressure, memorySnapshot } from './concurrency.js'
@@ -1172,16 +1172,10 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 				Local: new Map<string, WorkerActivity>(),
 				Global: new Map<string, WorkerActivity>(),
 			}
-			const startedWorkers = new Set<string>()
 			const observeStrategy = (side: keyof typeof roundStrategies, activity?: WorkerActivity) => {
-				if (activity?.workerId === undefined) return
-				const { workerId, activeStrategy } = activity
-				const startKey = `${side}:${workerId}`
-				if (!startedWorkers.has(startKey)) {
-					startedWorkers.add(startKey)
-					logTimed(formatWorkerStart(optimizerRound, side, workerId, activeStrategy))
+				if (activity?.workerId !== undefined && activity.activeStrategy) {
+					roundStrategies[side].set(`${activity.workerId}:${activity.activeStrategy}`, activity)
 				}
-				if (activeStrategy) roundStrategies[side].set(`${workerId}:${activeStrategy}`, activity)
 			}
 			beginPhase('preparing next round')
 			currentGates = gateSimplifier(currentGates)

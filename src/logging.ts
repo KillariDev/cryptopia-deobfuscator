@@ -129,10 +129,6 @@ export function formatStrategyActivity(statuses: WorkerStatus[]) {
 	return 'Strategies this round: ' + ([...totals.values()].sort((a, b) => b.gatesRemoved - a.gatesRemoved).map(stat => `${stat.strategy} ${stat.settings}: ${stat.gatesRemoved} gates removed, ${stat.rewrites}/${stat.attempts} improving attempts, ${(stat.elapsedMs / 1000).toFixed(3)} worker-seconds`).join('; ') || 'awaiting worker reports') + '.'
 }
 
-export function formatWorkerStart(round: number, side: 'Local' | 'Global', workerId: number, strategy?: string) {
-	return `Round ${round} | ${side} worker ${workerId} started | ${strategy ? strategyLabels[strategy] ?? strategy : 'no fixed strategy'}`
-}
-
 /** Count each worker once per strategy it was assigned during the round. */
 export function formatRoundStrategies(activities: Iterable<WorkerActivity>, side?: 'Local' | 'Global'): string | undefined {
 	const workers = new Map<string, Set<number>>()
