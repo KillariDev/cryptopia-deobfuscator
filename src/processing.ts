@@ -4,7 +4,7 @@ import { opaqueRainbow } from './opaque-rainbow.js'
 import { RoundStrategyPicker, StrategyPicker } from './strategy-picker.js'
 import { searchDependencyCuts } from './dependency-cuts.js'
 import { setImmediate as yieldToCoordinator } from 'node:timers/promises'
-import { synthesizeQuadraticShear, type QuadraticVerification } from './quadratic-shear.js'
+import { synthesizePolynomialShear, type PolynomialShearVerification } from './polynomial-shear.js'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
 import { mergeDisjointRoundResults, RoundCutPatches, roundChunkSize, roundSearchPlan, roundSearchResult } from './round-search.js'
@@ -457,7 +457,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		...(findUselessVarsSetting && sliceSize > 2 ? [{ name: 'variable-elimination' }] : []),
 		...(lookup ? [{ name: 'truth-table-lookup' }] : []),
 		...synthesisNames.map(name => ({ name })),
-		...(config.synthesis.quadraticShear ? [{ name: 'quadratic-shear-interpolation' }] : []),
+		...(config.synthesis.quadraticShear ? [{ name: 'polynomial-shear-interpolation' }] : []),
 		...(synthesisBudget?.broad && (config.synthesis.affine || config.synthesis.quadratic) ? [{ name: 'polynomial-region-search' }] : []),
 	]
 	const useStrategyPicker = config.search.strategyAdaptive || synthesisBudget?.forceStrategy
@@ -505,14 +505,15 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		const result = await opaqueRainbow(originalGates, tables, ioIdentifierCache, () => performance.now() >= synthesisBudget.deadline || synthesisBudget.shouldStop?.() === true)
 		if (result) { recordStrategy('truth-table-lookup', { opaque: true }, attemptStarted, originalGates.length, result.length, true); return finish({gates: result, changed:true}) }
 	}
-	if (selected === 'quadratic-shear-interpolation' && config.synthesis.quadraticShear) {
+	if (selected === 'polynomial-shear-interpolation' && config.synthesis.quadraticShear) {
 		const deadline = synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000
 		const stopped = () => performance.now() >= deadline || synthesisBudget?.shouldStop?.() === true
 		const fallbackSamples = config.search.probabilistic ? Math.max(4096, config.validation.probabilisticInputs) : 0
-		let verification: QuadraticVerification | undefined
-		const result = synthesizeQuadraticShear(originalGates, config.validation.maximumWires,
-			config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, stopped, fallbackSamples, outcome => { verification = outcome })
-		recordStrategy(selected, { maximumWires: Math.min(64, config.validation.maximumWires), ...verification },
+		const maximumDegree = config.synthesis.quadraticShearMaximumDegree
+		let verification: PolynomialShearVerification | undefined
+		const result = synthesizePolynomialShear(originalGates, config.validation.maximumWires,
+			config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, stopped, fallbackSamples, outcome => { verification = outcome }, maximumDegree)
+		recordStrategy(selected, { maximumWires: Math.min(64, config.validation.maximumWires), maximumDegree, ...verification },
 			attemptStarted, originalGates.length, result?.length ?? originalGates.length, result !== undefined)
 		return finish({ gates: result ?? originalGates, changed: result !== undefined })
 	}
@@ -873,11 +874,11 @@ const localStrategyOrder = () => prioritizeStrategies(config.search.localStrateg
 	'basis-change-cancellation': config.synthesis.mixedBasis,
 	'smt-synthesis': config.synthesis.smt,
 	'meet-in-the-middle': config.synthesis.meetInMiddle,
-	'quadratic-shear-interpolation': config.synthesis.quadraticShear,
+	'polynomial-shear-interpolation': config.synthesis.quadraticShear,
 }).filter(strategy => !smallSynthesisStrategies.has(strategy) || config.search.subsetMinimum <= config.synthesis.maximumWindowGates)
 export const broadStrategyOrder = () => prioritizeStrategies(config.search.broadStrategyOrder, defaultBroadStrategyOrder, {
 	'sat-sweeping': config.synthesis.satSweeping,
-	'quadratic-shear-interpolation': config.synthesis.quadraticShear,
+	'polynomial-shear-interpolation': config.synthesis.quadraticShear,
 	'basis-change-cancellation': config.synthesis.mixedBasis,
 	'block-cancellation': config.synthesis.blockCancellation,
 	'polynomial-region-search': config.synthesis.affine || config.synthesis.quadratic,

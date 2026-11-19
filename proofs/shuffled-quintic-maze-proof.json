@@ -1,0 +1,24 @@
+{
+  "seed": 20261124,
+  "commuting_swaps": 840967,
+  "gate_count": 19952,
+  "known_solution_gate_count": 496,
+  "quintic_witness": {
+    "controls": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "target": 16,
+    "coefficient": 1
+  },
+  "exhaustive_lower_inputs": 65536,
+  "sampled_full_width_inputs": 4096,
+  "proof": "The conjugated shears commute and each occurs twice. Commuting adjacent swaps preserve the map. The borrowed product gates restore their scratch wires, so both circuits are shears on the same lower wires.",
+  "sha256": {
+    "shuffled-quintic-maze.json": "dc0e30b813c9cdf7867fe9d4d80dbf928552531c10e66aee83741368aed1a2e2",
+    "shuffled-quintic-maze-solved.json": "7bcb3a1a86f166e9322e8dfc80582093afbaa562cf20a6926bfef7b22aef51df"
+  }
+}

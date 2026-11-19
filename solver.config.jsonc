@@ -10,8 +10,8 @@
     "variableElimination": {
       "enabled": true, // Run this strategy when eligible.
       "exactMaximumWires": 7, // Exhaustively evaluate variable rewrites up to this wire count.
-      "sampleCandidates": true, // Allow sampling for wide variable candidates and quadratic shear proof fallback.
-      "samples": 202 // Candidate samples. Quadratic interpolation uses this as a floor and scales with region size.
+      "sampleCandidates": true, // Allow sampling for wide variable candidates and polynomial shear proof fallback.
+      "samples": 202 // Candidate samples. Polynomial interpolation uses this as a floor and scales with region size.
     },
     // Search noncontiguous dependency regions in global search.
     "dependencyCuts": {
@@ -42,9 +42,10 @@
     "anfSynthesis": {
       "enabled": true // Run this strategy when eligible.
     },
-    // Fit quadratic shears in local and broad regions and verify each replacement.
-    "quadraticShearInterpolation": {
-      "enabled": true // Run this strategy when eligible.
+    // Fit polynomial shears in local and broad regions and verify each replacement.
+    "polynomialShearInterpolation": {
+      "enabled": true, // Run this strategy when eligible.
+      "maximumDegree": 8 // Highest degree to fit. Set to 2 for quadratic-only search.
     },
     // Enumerate short replacements by forward semantic search.
     "forwardSemantic": {
@@ -140,12 +141,12 @@
     // Local options in default order
     // "anf-synthesis", "truth-table-lookup", "variable-elimination", "forward-semantic-search", "commutation-search",
     // "gf2-affine", "factored-synthesis", "block-cancellation", "sat-sweeping", "basis-change-cancellation",
-    // "smt-synthesis", "meet-in-the-middle", "quadratic-shear-interpolation"
-    "localStrategyOrder": ["quadratic-shear-interpolation"], // Example ["quadratic-shear-interpolation", "truth-table-lookup"]
+    // "smt-synthesis", "meet-in-the-middle", "polynomial-shear-interpolation"
+    "localStrategyOrder": ["polynomial-shear-interpolation"], // Example ["polynomial-shear-interpolation", "truth-table-lookup"]
     // Broad options in default order
-    // "sat-sweeping", "quadratic-shear-interpolation", "basis-change-cancellation", "block-cancellation",
+    // "sat-sweeping", "polynomial-shear-interpolation", "basis-change-cancellation", "block-cancellation",
     // "polynomial-region-search", "factored-synthesis", "dependency-cuts"
-    "broadStrategyOrder": ["quadratic-shear-interpolation"], // Example ["quadratic-shear-interpolation", "sat-sweeping"]
+    "broadStrategyOrder": ["polynomial-shear-interpolation"], // Example ["polynomial-shear-interpolation", "sat-sweeping"]
     "subsetMinimum": 2, // Smallest local dependency subset in gates.
     "subsetMaximum": 199, // Largest local dependency subset in gates.
     "sliceMinimum": 2, // Smallest search window inside a local subset.

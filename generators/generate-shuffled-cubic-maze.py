@@ -20,9 +20,8 @@ def cubic(a, b, c, target):
     return [compute, flip, compute, flip]
 
 
-def generate():
-    rng = random.Random(SEED)
-
+def garble_shear(core, rng, cut):
+    """Insert canceling shear blocks around a valid boundary in the core."""
     def tree(depth):
         if depth == 0:
             a, b, c = rng.sample(range(BORROWED), 3)
@@ -37,17 +36,10 @@ def generate():
                 basis.append([a, 0, target, 3])
         return basis + tree(depth - 1) + tree(depth - 1) + basis[::-1]
 
-    # Disjoint triples on the same output guarantee a degree-three term and
-    # defeat the special emitter that requires one pair shared by every cubic.
-    core = cubic(0, 1, 2, SPLIT) + cubic(3, 4, 5, SPLIT)
-    for target in range(SPLIT, WIDTH):
-        a, b, c = rng.sample(range(6, BORROWED), 3)
-        core.extend(cubic(a, b, c, target))
-        core.extend([[a, b, target, 1], [c, 0, target, 3]])
     first, second = tree(4), tree(4)
     # Each tree is a shear since its bases act separately on the two halves
     # and are linear on the upper half. The trees commute and square to identity.
-    gates = first + core[:8] + second + first + core[8:] + second
+    gates = first + core[:cut] + second + first + core[cut:] + second
     swaps = 0
 
     def controls(gate):
@@ -59,6 +51,19 @@ def generate():
         if left != right and left[2] not in controls(right) and right[2] not in controls(left):
             gates[index], gates[index + 1] = right, left
             swaps += 1
+    return gates, swaps
+
+
+def generate():
+    rng = random.Random(SEED)
+    # Disjoint triples on the same output guarantee a degree-three term and
+    # defeat the special emitter that requires one pair shared by every cubic.
+    core = cubic(0, 1, 2, SPLIT) + cubic(3, 4, 5, SPLIT)
+    for target in range(SPLIT, WIDTH):
+        a, b, c = rng.sample(range(6, BORROWED), 3)
+        core.extend(cubic(a, b, c, target))
+        core.extend([[a, b, target, 1], [c, 0, target, 3]])
+    gates, swaps = garble_shear(core, rng, 8)
     return gates, core, swaps
 
 

@@ -137,72 +137,19 @@ export function emitSharedCubicMap(rows: Set<bigint>[], wires: number[], maximum
 	return [toggle, ...body, toggle, ...corrections]
 }
 
-/** Emit a cubic shear by grouping triples that can reuse a borrowed product. */
-export function emitCubicShear(rows: Set<bigint>[], wires: number[], maximumGates: number, stopped: () => boolean): Gate[] | undefined {
-	const { bits, indices } = emitterBasis(wires.length)
-	const middle = rows.map(row => new Set(row))
-	const stable = bits.reduce((mask, bit, i) => rows[i].size === 1 && rows[i].has(bit) ? mask | bit : mask, 0n)
-	let used = 0n
-	const triples: { term: bigint, target: number }[] = []
-	const groups = new Map<bigint, number[]>()
-	for (let target = 0; target < rows.length; target++) for (const term of rows[target]) {
-		if (stopped()) return undefined
-		if (term === bits[target]) continue
-		if ((term & stable) !== term) return undefined
-		used |= term
-		const a = term & -term
-		const rest = term ^ a
-		const b = rest & -rest
-		const c = rest ^ b
-		if (!c) continue
-		if (c & (c - 1n)) return undefined
-		const pairs = [a | b, a | c, b | c]
-		const index = triples.length
-		triples.push({ term, target })
-		for (const pair of pairs) {
-			const group = groups.get(pair)
-			if (group) group.push(index)
-			else groups.set(pair, [index])
-		}
-		middle[target].delete(term)
-	}
-	if (!triples.length) return undefined
-	const borrowed = bits.findIndex(bit => (bit & stable) !== 0n && (bit & used) === 0n)
-	if (borrowed < 0) return undefined
 
-	const cubic: Gate[] = []
-	const remaining = new Set(triples.map((_, i) => i))
-	while (remaining.size) {
-		if (stopped()) return undefined
-		let product = 0n
-		let best: number[] = []
-		for (const [pair, group] of groups) {
-			if (group.length <= best.length) continue
-			const pending = group.filter(index => remaining.has(index))
-			if (pending.length > best.length) { product = pair; best = pending }
-		}
-		const a = product & -product
-		const compute = { a: wires[indices.get(a)!], b: wires[indices.get(product ^ a)!], target: wires[borrowed], gate_i: 1 }
-		const flips = best.map(index => {
-			remaining.delete(index)
-			const { target, term } = triples[index]
-			return { a: wires[borrowed], b: wires[indices.get(term ^ product)!], target: wires[target], gate_i: 1 }
-		})
-		cubic.push(compute, ...flips, compute, ...flips)
-		if (cubic.length >= maximumGates) return undefined
-	}
-	const body = emitQuadraticMap(middle, wires, maximumGates - cubic.length, stopped)
-	return body && [...body, ...cubic]
+export function borrowedProductGateCount(degree: number) {
+	return 3 * 2 ** (degree - 2) - 2
 }
 
-/** Reuse a dirty cubic product across quartic terms that share three controls. */
-export function emitQuarticShear(rows: Set<bigint>[], wires: number[], maximumGates: number, stopped: () => boolean): Gate[] | undefined {
+/** Group terms by a shared product and restore each borrowed wire after use. */
+export function emitPolynomialShear(rows: Set<bigint>[], wires: number[], maximumGates: number, stopped: () => boolean): Gate[] | undefined {
 	const { bits, indices } = emitterBasis(wires.length)
 	const middle = rows.map(row => new Set(row))
 	const stable = bits.reduce((mask, bit, i) => rows[i].size === 1 && rows[i].has(bit) ? mask | bit : mask, 0n)
-	let used = 0n, hasCubic = false
-	const terms: { target: number, term: bigint }[] = []
-	const groups = new Map<bigint, number[]>()
+	let used = 0n, maximumDegree = 2
+	const terms: { term: bigint, target: number }[] = []
+	const groups = new Map<bigint, { indices: number[], computeGates: number }>()
 	for (let target = 0; target < rows.length; target++) for (const term of rows[target]) {
 		if (stopped()) return undefined
 		if (term === bits[target]) continue
@@ -210,50 +157,55 @@ export function emitQuarticShear(rows: Set<bigint>[], wires: number[], maximumGa
 		used |= term
 		const factors: bigint[] = []
 		for (let pending = term; pending; pending &= pending - 1n) factors.push(pending & -pending)
-		if (factors.length > 4) return undefined
-		if (factors.length === 3) hasCubic = true
-		if (factors.length !== 4) continue
+		if (factors.length <= 2) continue
+		maximumDegree = Math.max(maximumDegree, factors.length)
 		const index = terms.length
 		terms.push({ target, term })
 		for (const factor of factors) {
-			const triple = term ^ factor
-			const group = groups.get(triple)
-			if (group) group.push(index)
-			else groups.set(triple, [index])
+			const product = term ^ factor
+			const group = groups.get(product)
+			if (group) group.indices.push(index)
+			else groups.set(product, { indices: [index], computeGates: borrowedProductGateCount(factors.length - 1) })
 		}
 		middle[target].delete(term)
 	}
-	if (!terms.length) return undefined
+	if (!terms.length || 2 * terms.length >= maximumGates) return undefined
 	const scratch = bits.flatMap((bit, i) => bit & stable && !(bit & used) ? [wires[i]] : [])
-	if (scratch.length < 2) return undefined
-	const [pairWire, tripleWire] = scratch
+	if (scratch.length < maximumDegree - 2) return undefined
 
-	const quartic: Gate[] = []
-	const emitted = new Set<number>()
-	for (const [triple, group] of [...groups].sort(([, left], [, right]) => right.length - left.length)) {
-		if (stopped()) return undefined
-		const flips: Gate[] = []
-		for (const index of group) {
-			if (emitted.has(index)) continue
-			emitted.add(index)
-			const { term, target } = terms[index]
-			flips.push({ a: tripleWire, b: wires[indices.get(term ^ triple)!], target: wires[target], gate_i: 1 })
-		}
-		if (!flips.length) continue
-		const a = triple & -triple
-		const rest = triple ^ a
-		const b = rest & -rest
-		const c = rest ^ b
-		const pair = { a: wires[indices.get(a)!], b: wires[indices.get(b)!], target: pairWire, gate_i: 1 }
-		const addTriple = { a: pairWire, b: wires[indices.get(c)!], target: tripleWire, gate_i: 1 }
-		// This toggles tripleWire by the cubic product and restores pairWire.
-		// Repeating it after the flips restores tripleWire; the second set of
-		// flips cancels the borrowed wire's original contribution.
-		const compute = [pair, addTriple, pair, addTriple]
-		quartic.push(...compute, ...flips, ...compute, ...flips)
-		if (quartic.length >= maximumGates) return undefined
+	const productToggle = (product: bigint, target: number, depth: number): Gate[] => {
+		const first = product & -product
+		const rest = product ^ first
+		const a = wires[indices.get(first)!]
+		if (!(rest & (rest - 1n))) return [{ a, b: wires[indices.get(rest)!], target, gate_i: 1 }]
+		const compute = productToggle(rest, scratch[depth], depth + 1)
+		const flip = { a: scratch[depth], b: a, target, gate_i: 1 }
+		return [...compute, flip, ...compute, flip]
 	}
-	const emit = hasCubic ? emitCubicShear : emitQuadraticMap
-	const body = emit(middle, wires, maximumGates - quartic.length, stopped)
-	return body && [...body, ...quartic]
+	const body: Gate[] = []
+	const remaining = new Set(terms.map((_, i) => i))
+	while (remaining.size) {
+		if (stopped()) return undefined
+		let bestProduct = 0n, bestComputeGates = Infinity, best: number[] = []
+		for (const [product, group] of groups) {
+			const pending = group.indices.filter(index => remaining.has(index))
+			if (pending.length && (!best.length || group.computeGates * best.length < bestComputeGates * pending.length)) {
+				bestProduct = product
+				bestComputeGates = group.computeGates
+				best = pending
+			}
+		}
+		if (body.length + 2 * (bestComputeGates + best.length) >= maximumGates) return undefined
+		const compute = productToggle(bestProduct, scratch[0], 1)
+		const flips = best.map(index => {
+			remaining.delete(index)
+			const { target, term } = terms[index]
+			return { a: scratch[0], b: wires[indices.get(term ^ bestProduct)!], target: wires[target], gate_i: 1 }
+		})
+		// The second compute restores scratch[0]. The second set of flips
+		// cancels the contribution from that wire's original value.
+		body.push(...compute, ...flips, ...compute, ...flips)
+	}
+	const quadratic = emitQuadraticMap(middle, wires, maximumGates - body.length, stopped)
+	return quadratic && [...quadratic, ...body]
 }

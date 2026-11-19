@@ -92,7 +92,7 @@ The solver combines several approaches:
 - **Strategy rotation:** a worker keeps its strategy for the entire round and
   advances after a round without a gate reduction. The local and broad searches
   have separate strategy orders. The checked-in config starts both with
-  quadratic shear interpolation. With an empty local priority list, split
+  polynomial shear interpolation. With an empty local priority list, split
   workers start with ANF synthesis when enabled, followed by truth-table lookup.
   When ANF synthesis is disabled and the list is empty, workers start at offset
   positions in the enabled strategy order. The broad lane keeps its strategy
@@ -104,12 +104,12 @@ can try the same region.
 
 Set `search.localStrategyOrder` or `search.broadStrategyOrder` to give
 specific strategies priority. For example, this tries truth-table lookup before ANF synthesis in local
-search and quadratic shear interpolation before SAT sweeping in broad search.
+search and polynomial shear interpolation before SAT sweeping in broad search.
 
 ```jsonc
 "search": {
   "localStrategyOrder": ["truth-table-lookup", "anf-synthesis"],
-  "broadStrategyOrder": ["quadratic-shear-interpolation", "sat-sweeping"]
+  "broadStrategyOrder": ["polynomial-shear-interpolation", "sat-sweeping"]
 }
 ```
 
@@ -137,7 +137,7 @@ cuts can also invoke local rewrite methods inside a cut.
 | `basis-change-cancellation` | Local and broad | Tracks XOR contributions across reversible basis changes so matching contributions can cancel. |
 | `smt-synthesis` | Local | Asks Z3 for a shorter sequence with the same behavior on every input of a small region. |
 | `meet-in-the-middle` | Local | Searches from both the identity and the target function, then joins paths at the same intermediate function. |
-| `quadratic-shear-interpolation` | Local and broad | Fits quadratic target flips from samples, with bounded cubic and quartic shear fallbacks. |
+| `polynomial-shear-interpolation` | Local and broad | Fits quadratic target flips from samples, with bounded higher-degree shear fallbacks. |
 | `polynomial-region-search` | Broad | Searches larger regions and their subwindows using the enabled affine and ANF synthesis methods. |
 | `dependency-cuts` | Broad | Builds regions from gate dependencies, including noncontiguous gates, and tries enabled rewrite strategies there. |
 
@@ -177,24 +177,26 @@ approximate equivalence.
 
 A broad worker starts with the full circuit and scans overlapping coarse-to-fine
 regions. Its default strategy order is SAT sweeping with bounded dependency cuts,
-quadratic shear interpolation, basis-change cancellation, block cancellation,
+polynomial shear interpolation, basis-change cancellation, block cancellation,
 polynomial region search, factored synthesis, and dependency cuts.
 Rainbow lookup and variable elimination remain available inside dependency cuts
 and in local search. Set
 `strategies.satSweeping.cutsFirst` to true to try a small batch of ranked cuts before
 the whole-region SAT attempt.
 
-Quadratic shear interpolation (`strategies.quadraticShearInterpolation.enabled`)
+Polynomial shear interpolation (`strategies.polynomialShearInterpolation.enabled`)
 uses packed samples to identify likely unchanged wires. It evaluates zero-, one-,
 and two-bit inputs to fit quadratic flips. If the shear fit fails, it can try
 an ordered quadratic map whose target updates read their controls before those
-controls change. If both quadratic attempts fail, a bounded cubic shear pass
-also samples triples. It can emit those terms when an unused, unchanged wire
-can hold a product temporarily, and groups triples that share a pair. The solver
-charges for computing and restoring that wire. If cubic fails, a quartic pass
-tries regions with at most 20 inferred controls. It groups quartic terms that
-share a triple and requires two unused, unchanged wires for temporary products.
-The solver stops at the first verified improvement. The emitter packs compatible terms into a single gate and
+controls change. If both quadratic attempts fail, it tries degrees three and
+higher in order, up to `strategies.polynomialShearInterpolation.maximumDegree`
+(default 8). A degree-`d` fit checks all input subsets of up to `d` controls.
+The emitter groups terms that share a product and requires `d - 2` unused,
+unchanged wires to compute and restore that product. Higher-degree fitting
+stops at 65,536 probes per fit, 64 million packed gate evaluations across the
+higher-degree attempts, or when even one term would exceed the available gate
+budget. Worker deadlines also apply. The solver stops at the first verified
+improvement. The emitter packs compatible terms into a single gate and
 tries a shared-output basis change when overlapping target expressions can
 justify the cost of changing and restoring the basis. Broad search checks the
 whole circuit first, then tries up to 16 sampled restore windows before its

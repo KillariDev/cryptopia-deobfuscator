@@ -7,10 +7,10 @@ export type RainbowTableSpec = { wires: number, gates: number }
 
 export const defaultLocalStrategyOrder = [
 	'anf-synthesis', 'truth-table-lookup', 'variable-elimination', 'forward-semantic-search', 'commutation-search',
-	'gf2-affine', 'factored-synthesis', 'block-cancellation', 'sat-sweeping', 'basis-change-cancellation', 'smt-synthesis', 'meet-in-the-middle', 'quadratic-shear-interpolation',
+	'gf2-affine', 'factored-synthesis', 'block-cancellation', 'sat-sweeping', 'basis-change-cancellation', 'smt-synthesis', 'meet-in-the-middle', 'polynomial-shear-interpolation',
 ] as const
 export const defaultBroadStrategyOrder = [
-	'sat-sweeping', 'quadratic-shear-interpolation', 'basis-change-cancellation', 'block-cancellation', 'polynomial-region-search', 'factored-synthesis', 'dependency-cuts',
+	'sat-sweeping', 'polynomial-shear-interpolation', 'basis-change-cancellation', 'block-cancellation', 'polynomial-region-search', 'factored-synthesis', 'dependency-cuts',
 ] as const
 
 export const defaults = {
@@ -24,7 +24,7 @@ export const defaults = {
 	cache: { lookupPolicy: 'lru' as 'fifo' | 'lru', lookupEntries: 1000000, processedEntries: 1000000, shuffleEntries: 100000, subsetEntries: 100000, windowKeyBytes: 16777216 },
 	database: { tables: [{ wires: 3, gates: 6 }, { wires: 4, gates: 5 }, { wires: 5, gates: 2 }], queryBatchSize: 900, lookupBatchSeconds: 0, statementCacheEntries: 16, sharedTables: true, sharedTableBytes: 33554432, sharedTableMaximumRows: 100000, memoryMapBytes: 268435456, generationStates: 0, generationBatchRows: 3000, generationReadRows: 4096, generationSqlParameters: 8192, generationPreparedInserts: true, generationCompactBindings: true, generationStagingWriters: 1, generationAppendStaging: false, generationAggregateMerge: true, generationCountFinalInserts: false, generationCandidateCacheMegabytes: 32, generationStreamStaging: true, generationStagingQueueBatches: 2, generationDirectInputMerge: true, generationSortStaging: false, generationStatementCacheEntries: 8, generationCacheMegabytes: 256, generationTempStore: 'file' as 'file' | 'memory', generationJournalMode: 'wal' as 'wal' | 'delete', generationSynchronous: 'full' as 'full' | 'normal', generationWorkers: 8, generationPrefetch: true, generationPrefetchMegabytes: 16, generationQueueBatches: 2, generationMinimumWork: 100000, etaWindowSamples: 5, etaWarmupSamples: 3, etaSmoothing: 0.2, etaMaximumSlowdown: 1, etaTrendWindowSamples: 60, etaTrendMinimumSamples: 10, etaTrendMinimumWorkGrowth: 0.25 },
 	benchmark: { generationStreamingComparison: false, generationFinalComparison: false, finalLookupOutputName: 'final-lookup-benchmark.json', generationWriterComparison: false, generationPrefetchComparison: false, generationStagingComparison: false, mergeOutputName: 'merge-benchmark.json', stagingWideSqlParameters: 16384, stagingRows: 200000, stagingOutputName: 'staging-benchmark.json', dedupSeenRows: [10000, 100000, 1000000], dedupCandidateFunctions: 2000, dedupMasksPerFunction: 4, dedupOutputName: 'dedup-benchmark.json', generationTables: [{ wires: 3, gates: 3 }, { wires: 4, gates: 2 }], generationOutputName: 'generation-benchmark.json', generationTimeoutSeconds: 600, variants: [] as string[], decayFactor: 0.98, mode: 'comparison' as 'comparison' | 'ablation', caseManifest: 'benchmarks/cases.json', caseOutputDirectory: 'benchmark-cases', seconds: 10, repeats: 3, seed: 1729, workerCounts: [1, 2, 4], maximumChecks: 0, maximumOverrunSeconds: 30, outputName: 'benchmark.json' },
-	synthesis: { factored: true, blockCancellation: true, satSweeping: true, broadSatCutsFirst: false, mixedBasis: true, factoredMaximumNodes: 200000, factoredMaximumEdges: 16000000, quadratic: true, quadraticShear: true, affine: true, affineMaximumWindowGates: 256, affineMaximumTerms: 100000, affineMaximumOperations: 10000000, maximumWires: 3, maximumWindowGates: 8, maximumReplacementGates: 3, states: 2000, forwardSemanticSearch: true, smt: true, meetInMiddle: true, equalitySaturation: true },
+	synthesis: { factored: true, blockCancellation: true, satSweeping: true, broadSatCutsFirst: false, mixedBasis: true, factoredMaximumNodes: 200000, factoredMaximumEdges: 16000000, quadratic: true, quadraticShear: true, quadraticShearMaximumDegree: 8, affine: true, affineMaximumWindowGates: 256, affineMaximumTerms: 100000, affineMaximumOperations: 10000000, maximumWires: 3, maximumWindowGates: 8, maximumReplacementGates: 3, states: 2000, forwardSemanticSearch: true, smt: true, meetInMiddle: true, equalitySaturation: true },
 }
 export type SolverConfig = typeof defaults
 
@@ -39,7 +39,7 @@ const strategySettings = {
 	factoredSynthesis: { enabled: 'synthesis.factored' },
 	gf2Affine: { enabled: 'synthesis.affine' },
 	anfSynthesis: { enabled: 'synthesis.quadratic' },
-	quadraticShearInterpolation: { enabled: 'synthesis.quadraticShear' },
+	polynomialShearInterpolation: { enabled: 'synthesis.quadraticShear', maximumDegree: 'synthesis.quadraticShearMaximumDegree' },
 	forwardSemantic: { enabled: 'synthesis.forwardSemanticSearch' },
 	smtSynthesis: { enabled: 'synthesis.smt' },
 	meetInMiddle: { enabled: 'synthesis.meetInMiddle' },
@@ -50,7 +50,8 @@ const strategySettings = {
 }
 
 const strategyGroupAliases: ReadonlyMap<string, string> = new Map([
-	['quadraticShear', 'quadraticShearInterpolation'],
+	['quadraticShear', 'polynomialShearInterpolation'],
+	['quadraticShearInterpolation', 'polynomialShearInterpolation'],
 	['quadratic', 'anfSynthesis'],
 	['smt', 'smtSynthesis'],
 	['variables', 'variableElimination'],
@@ -61,7 +62,8 @@ const strategyGroupAliases: ReadonlyMap<string, string> = new Map([
 ])
 
 const strategyOrderAliases: ReadonlyMap<string, string> = new Map([
-	['quadratic-shear', 'quadratic-shear-interpolation'],
+	['quadratic-shear', 'polynomial-shear-interpolation'],
+	['quadratic-shear-interpolation', 'polynomial-shear-interpolation'],
 	['quadratic', 'anf-synthesis'],
 	['symbolic', 'polynomial-region-search'],
 	['z3', 'smt-synthesis'],
@@ -179,6 +181,7 @@ export function parseConfig(value: unknown): SolverConfig {
 	if (database.etaTrendMinimumSamples < 3 || database.etaTrendMinimumSamples > database.etaTrendWindowSamples) throw new Error('Invalid ETA trend history settings')
 	if (database.etaSmoothing > 1 || database.etaWarmupSamples > database.etaWindowSamples) throw new Error('Invalid ETA smoothing settings')
 	if (result.synthesis.maximumWires > 4) throw new Error('synthesis.maximumWires must be at most 4')
+	if (result.synthesis.quadraticShearMaximumDegree < 2) throw new Error('strategies.polynomialShearInterpolation.maximumDegree must be at least 2')
 	if (search.subsetMinimum < 2 || search.sliceMinimum < 2 || search.subsetMaximum < search.subsetMinimum || search.sliceMaximum < search.sliceMinimum) throw new Error('Invalid search size ranges')
 	if (search.exactMaximumWires > 16 || search.exactMaximumWires > validation.maximumWires || database.tables.some(table => table.wires > validation.maximumWires) || validation.maximumWires > 1024 || database.queryBatchSize > 900) throw new Error('Config exceeds supported wire or database batch limits')
 	if (timing.improvedRoundSeconds > timing.roundSeconds || workers.maximumChunkFraction > 1) throw new Error('Invalid round timing or chunk fraction')

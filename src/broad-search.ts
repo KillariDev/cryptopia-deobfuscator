@@ -8,7 +8,7 @@ import { RainbowPortfolio } from './rainbow-portfolio.js'
 import { broadStrategyOrder, createOptimizerCaches, massOptimizeStep, SubsetPreparation } from './processing.js'
 import { strategySnapshot } from './strategy-stats.js'
 import { structuralChoices, structuralNames } from './structural-strategies.js'
-import { quadraticShearRegions } from './quadratic-shear.js'
+import { polynomialShearRegions } from './polynomial-shear.js'
 import { hashGates } from './utils.js'
 
 /** Coarse-to-fine windows with 50% overlap, interleaved so all scales get a turn. */
@@ -57,8 +57,8 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 			yield { start: 0, end: length }
 			regions.next()
 			const seen = new Set<string>()
-			if (name === 'quadratic-shear-interpolation') {
-				for (const region of quadraticShearRegions(input, wires, minimum)) {
+			if (name === 'polynomial-shear-interpolation') {
+				for (const region of polynomialShearRegions(input, wires, minimum)) {
 					seen.add(`${region.start}:${region.end}`)
 					yield region
 				}

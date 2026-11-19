@@ -48,7 +48,7 @@ try {
 			assert.equal(restart, false)
 			if (jobRound === 2) {
 				if (solver === 'broad') {
-					assert.equal(broadStrategy, broadRemoved === 0 ? 'quadratic-shear-interpolation' : 'sat-sweeping')
+					assert.equal(broadStrategy, broadRemoved === 0 ? 'polynomial-shear-interpolation' : 'sat-sweeping')
 					throw done
 				}
 				return gates

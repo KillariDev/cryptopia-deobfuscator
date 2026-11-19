@@ -41,12 +41,20 @@ assert.equal(legacyNames.search.rainbow, false)
 assert.equal(legacyNames.synthesis.quadraticShear, false)
 assert.equal(legacyNames.synthesis.smt, false)
 assert.deepEqual(legacyNames.search.localStrategyOrder, ['truth-table-lookup', 'anf-synthesis', 'smt-synthesis'])
-assert.deepEqual(legacyNames.search.broadStrategyOrder, ['quadratic-shear-interpolation', 'polynomial-region-search'])
+assert.deepEqual(legacyNames.search.broadStrategyOrder, ['polynomial-shear-interpolation', 'polynomial-region-search'])
+const priorShearName = parseConfig({
+	strategies: { quadraticShearInterpolation: { enabled: false, maximumDegree: 5 } },
+	search: { localStrategyOrder: ['quadratic-shear-interpolation'], broadStrategyOrder: ['quadratic-shear-interpolation'] },
+})
+assert.equal(priorShearName.synthesis.quadraticShear, false)
+assert.equal(priorShearName.synthesis.quadraticShearMaximumDegree, 5)
+assert.deepEqual(priorShearName.search.localStrategyOrder, ['polynomial-shear-interpolation'])
+assert.deepEqual(priorShearName.search.broadStrategyOrder, ['polynomial-shear-interpolation'])
 assert.throws(() => parseConfig({ search: { localStrategyOrder: ['quadratic', 'anf-synthesis'] } }), /localStrategyOrder/)
 assert.throws(() => parseConfig({ strategies: { smt: {}, smtSynthesis: {} } }), /Duplicate strategy group/)
 assert.throws(() => parseConfig({ search: { localStrategyOrder: ['dependency-cuts'] } }), /localStrategyOrder/)
 assert.throws(() => parseConfig({ search: { broadStrategyOrder: ['sat-sweeping', 'sat-sweeping'] } }), /broadStrategyOrder/)
-assert.throws(() => parseConfig({ search: { broadStrategyOrder: 'quadratic-shear-interpolation' } }), /broadStrategyOrder/)
+assert.throws(() => parseConfig({ search: { broadStrategyOrder: 'polynomial-shear-interpolation' } }), /broadStrategyOrder/)
 const search = { ...config.search }
 const tables = config.database.tables
 const table = { wires: 2, gates: 1 }
@@ -62,16 +70,16 @@ try {
 		assert.equal(strategyPicker.activeStrategy, 'truth-table-lookup')
 	}
 	const custom = parseConfig({ search: {
-		localStrategyOrder: ['quadratic-shear-interpolation'],
-		broadStrategyOrder: ['quadratic-shear-interpolation'],
+		localStrategyOrder: ['polynomial-shear-interpolation'],
+		broadStrategyOrder: ['polynomial-shear-interpolation'],
 	} })
 	Object.assign(config.search, custom.search)
 	const reordered = createOptimizerCaches(7)
-	assert.equal(reordered.strategyPicker.activeStrategy, 'quadratic-shear-interpolation')
+	assert.equal(reordered.strategyPicker.activeStrategy, 'polynomial-shear-interpolation')
 	reordered.strategyPicker.beginRound(1)
 	reordered.strategyPicker.beginRound(2)
 	assert.equal(reordered.strategyPicker.activeStrategy, 'anf-synthesis', 'omitted strategies remain in rotation')
-	assert.deepEqual(broadStrategyOrder().slice(0, 2), ['quadratic-shear-interpolation', 'sat-sweeping'])
+	assert.deepEqual(broadStrategyOrder().slice(0, 2), ['polynomial-shear-interpolation', 'sat-sweeping'])
 	const shearEnabled = config.synthesis.quadraticShear
 	try {
 		config.synthesis.quadraticShear = false
@@ -102,7 +110,7 @@ try {
 	config.synthesis.quadratic = true
 	const assignedPool = new WorkerPool(1, undefined, [createSharedTable(table, [], 1024)!])
 	try {
-		for (const strategy of ['anf-synthesis', 'quadratic-shear-interpolation', 'truth-table-lookup']) {
+		for (const strategy of ['anf-synthesis', 'polynomial-shear-interpolation', 'truth-table-lookup']) {
 			let reported: string | undefined
 			const input = [not, not]
 			const result = await assignedPool.run(input, 2, (_, activity) => { reported = activity?.activeStrategy },

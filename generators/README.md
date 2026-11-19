@@ -44,6 +44,17 @@ Run `python3 generators/generate-shuffled-cubic-maze.py` to build a
 The generator constructs nested nonlinear basis changes and shuffles adjacent
 commuting gates. The proof metadata records the shuffle count and an eight-input
 witness of a nonzero cubic coefficient on wire 16. That witness rules out a
-whole-circuit quadratic fit. The cubic fallback in quadratic shear interpolation
+whole-circuit quadratic fit. The cubic fallback in polynomial shear interpolation
 can handle this fixture. Run the generator with `--check` to verify the
 checked-in artifacts and repeat the packed comparisons.
+
+## Shuffled quintic maze
+
+Run `python3 generators/generate-shuffled-quintic-maze.py` to build the
+19,952-gate mixed-degree challenge and its known 496-gate implementation.
+The circuit contains linear through quintic output terms. A 32-input
+witness certifies a nonzero degree-five coefficient on wire 16, beyond
+degree-four interpolation. The higher-degree fallback can handle it. The generator verifies
+the reference on all 65,536 lower-input states with upper inputs zero,
+using the shear construction to account for arbitrary upper inputs.
+Use `--check` to regenerate and verify the checked-in artifacts.

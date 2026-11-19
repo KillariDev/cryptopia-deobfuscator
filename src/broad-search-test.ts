@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import sqlite3 from 'sqlite3'
 import { broadRegions, broadSearch } from './broad-search.js'
-import { config, minimumBroadGates } from './config.js'
+import { config, minimumBroadGates, parseConfig } from './config.js'
 import { broadStrategyOrder, createOptimizerCaches, massOptimizeStep } from './processing.js'
 import { RainbowPortfolio } from './rainbow-portfolio.js'
 import { functionKey, encodeGates } from './semantic.js'
@@ -86,15 +86,15 @@ try {
 		assert.equal(fitted.length, 2)
 		const inputs = generateCombinations(8)
 		assert.deepEqual(calculateAllOutputsArray(fitted, inputs), calculateAllOutputsArray(fittingInput, inputs))
-		assert.ok(strategySnapshot().some(stat => stat.strategy === 'quadratic-shear-interpolation'))
+		assert.ok(strategySnapshot().some(stat => stat.strategy === 'polynomial-shear-interpolation'))
 	}
-	const { quadraticShearRegions, quadraticShearSampleCount, synthesizeQuadraticShear } = await import('./quadratic-shear.js')
+	const { polynomialShearRegions, polynomialShearSampleCount, synthesizePolynomialShear } = await import('./polynomial-shear.js')
 	const wide = [...fittingInput, ...Array.from({ length: 14 }, (_, target) => {
 		const gate = { a: 0, b: 0, target, gate_i: 15 }
 		return [gate, gate]
 	}).flat()]
 	const assertFit = (gates: Gate[], expectedLength: number, width: number) => {
-		const fitted = synthesizeQuadraticShear(gates, 64, 1, 10000000, () => false)
+		const fitted = synthesizePolynomialShear(gates, 64, 1, 10000000, () => false)
 		assert.equal(fitted?.length, expectedLength)
 		const inputs = generateCombinations(width)
 		assert.deepEqual(calculateAllOutputsArray(fitted!, inputs), calculateAllOutputsArray(gates, inputs))
@@ -106,10 +106,10 @@ try {
 	assertFit([product, change, change, change], 2, 4)
 	const shared = [1, 2, 3, 4].flatMap(b => [5, 6].map(target => ({ a: 0, b, target, gate_i: 1 })))
 	assertFit(shared, 6, 7)
-	assert.equal(quadraticShearSampleCount(81026, 64, 4096), 28672)
-	assert.ok(quadraticShearSampleCount(81026, 64, 4096) > quadraticShearSampleCount(1024, 16, 4096))
-	assert.ok(quadraticShearSampleCount(81026, 64, 100000) >= 100000)
-	assert.deepEqual([...quadraticShearRegions([change, { ...product, gate_i: 15 }, change, { ...product, gate_i: 0 }], 4, 2)], [{ start: 0, end: 3 }])
+	assert.equal(polynomialShearSampleCount(81026, 64, 4096), 28672)
+	assert.ok(polynomialShearSampleCount(81026, 64, 4096) > polynomialShearSampleCount(1024, 16, 4096))
+	assert.ok(polynomialShearSampleCount(81026, 64, 100000) >= 100000)
+	assert.deepEqual([...polynomialShearRegions([change, { ...product, gate_i: 15 }, change, { ...product, gate_i: 0 }], 4, 2)], [{ start: 0, end: 3 }])
 	const proofTermLimit = config.synthesis.affineMaximumTerms
 	try {
 		config.synthesis.affineMaximumTerms = 1
@@ -117,7 +117,7 @@ try {
 		const caches = createOptimizerCaches()
 		const strict = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, wide,
 			wide.length, false, false, false, undefined,
-			{ deadline: performance.now() + 5000, broad: true, selectedStrategy: 'quadratic-shear-interpolation' })
+			{ deadline: performance.now() + 5000, broad: true, selectedStrategy: 'polynomial-shear-interpolation' })
 		assert.equal(strict.changed, false)
 		config.search.probabilistic = true
 		const fitted = await broadSearch(tables, wide, 14, createOptimizerCaches(), 5000, () => false, () => {})
@@ -129,11 +129,11 @@ try {
 		config.synthesis.affineMaximumTerms = proofTermLimit
 		config.search.probabilistic = false
 	}
-	assert.equal(synthesizeQuadraticShear(wide, 64, 1, 10000000, () => false), undefined, 'a fit cannot bypass the proof budget')
-	assert.equal(synthesizeQuadraticShear(wide, 64, 100000, 10000000, () => true), undefined)
+	assert.equal(synthesizePolynomialShear(wide, 64, 1, 10000000, () => false), undefined, 'a fit cannot bypass the proof budget')
+	assert.equal(synthesizePolynomialShear(wide, 64, 100000, 10000000, () => true), undefined)
 	const compute = { a: 0, b: 1, target: 3, gate_i: 1 }
 	const cubic: Gate[] = [compute, { a: 2, b: 3, target: 4, gate_i: 1 }, compute]
-	assert.equal(synthesizeQuadraticShear(cubic, 64, 1, 10000000, () => false, 4096), undefined)
+	assert.equal(synthesizePolynomialShear(cubic, 64, 1, 10000000, () => false, 4096), undefined)
 
 	// A borrowed wire is restored for either starting value, and a shared
 	// control pair only needs one compute/restore sequence.
@@ -145,18 +145,53 @@ try {
 	const borrow = triple(4)
 	const quarticFlip = { a: 4, b: 5, target: 6, gate_i: 1 }
 	const quartic = [...borrow, quarticFlip, ...borrow, quarticFlip]
-	assert.equal(synthesizeQuadraticShear(quartic, 64, 1, 10000000, () => false, 4096), undefined)
+	assert.equal(synthesizePolynomialShear(quartic, 64, 1, 10000000, () => false, 4096), undefined)
 	const secondQuarticFlip = { ...quarticFlip, b: 7, target: 8 }
 	const secondQuartic = [...borrow, secondQuarticFlip, ...borrow, secondQuarticFlip]
 	assertFit([...quartic, ...secondQuartic], 12, 9)
 	const linear = { a: 0, b: 0, target: 8, gate_i: 3 }
 	assertFit([...quartic, ...secondQuartic, ...triple(9), linear], 17, 10)
 
+	const toggleProduct = (inputs: number[], target: number, scratch: number[]): Gate[] => {
+		const [a, ...rest] = inputs
+		if (rest.length === 1) return [{ a, b: rest[0], target, gate_i: 1 }]
+		const [borrowed, ...remaining] = scratch
+		const compute = toggleProduct(rest, borrowed, remaining)
+		const flip = { a: borrowed, b: a, target, gate_i: 1 }
+		return [...compute, flip, ...compute, flip]
+	}
+	assert.equal(parseConfig({}).synthesis.quadraticShearMaximumDegree, 8)
+	assert.throws(() => parseConfig({ strategies: { polynomialShearInterpolation: { maximumDegree: 1 } } }), /maximumDegree/)
+	for (const degree of [5, 6]) {
+		const inputs = Array.from({ length: degree }, (_, i) => i)
+		const scratch = Array.from({ length: degree - 2 }, (_, i) => i + degree)
+		const gates = [2 * degree - 2, 2 * degree - 1].flatMap(target => [
+			...toggleProduct(inputs, target, scratch), { a: 0, b: 0, target, gate_i: 3 },
+		])
+		assertFit(gates, degree === 5 ? 26 : 50, 2 * degree)
+		const caches = createOptimizerCaches()
+		const solve = () => massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, gates,
+			gates.length, false, false, false, undefined,
+			{ deadline: performance.now() + 5000, selectedStrategy: 'polynomial-shear-interpolation' })
+		const previousDegree = config.synthesis.quadraticShearMaximumDegree
+		try {
+			config.synthesis.quadraticShearMaximumDegree = parseConfig({
+				strategies: { polynomialShearInterpolation: { maximumDegree: degree - 1 } },
+			}).synthesis.quadraticShearMaximumDegree
+			assert.equal((await solve()).changed, false)
+			config.synthesis.quadraticShearMaximumDegree = degree
+			assert.equal((await solve()).gates.length, degree === 5 ? 26 : 50)
+		} finally {
+			config.synthesis.quadraticShearMaximumDegree = previousDegree
+		}
+	}
+
+
 
 
 	Object.assign(config.synthesis, { factored: true, satSweeping: true, mixedBasis: true, blockCancellation: true, affine: true })
 	config.search.dependencyCuts = true
-	assert.deepEqual(broadStrategyOrder(), ['sat-sweeping', 'quadratic-shear-interpolation', 'basis-change-cancellation', 'block-cancellation', 'polynomial-region-search', 'factored-synthesis', 'dependency-cuts'])
+	assert.deepEqual(broadStrategyOrder(), ['sat-sweeping', 'polynomial-shear-interpolation', 'basis-change-cancellation', 'block-cancellation', 'polynomial-region-search', 'factored-synthesis', 'dependency-cuts'])
 	config.search.strategyAdaptive = true
 	config.synthesis.broadSatCutsFirst = true
 	let provenIndices: number[] | undefined
