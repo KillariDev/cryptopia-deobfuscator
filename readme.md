@@ -132,11 +132,20 @@ approximate equivalence.
 
 A broad worker starts with the full circuit and scans overlapping coarse-to-fine
 regions. Its strategy order is SAT sweeping with bounded dependency cuts,
-mixed-basis simplification, block cancellation, whole-region symbolic synthesis,
-factored synthesis, and dependency cuts. Rainbow lookup and variable elimination
-remain available inside dependency cuts and in local search. Set
+quadratic shear interpolation, mixed-basis simplification, block cancellation,
+whole-region symbolic synthesis, factored synthesis, and dependency cuts.
+Rainbow lookup and variable elimination remain available inside dependency cuts
+and in local search. Set
 `strategies.satSweeping.cutsFirst` to true to try a small batch of ranked cuts before
 the whole-region SAT attempt.
+
+Quadratic shear interpolation (`strategies.quadraticShear.enabled`) uses packed
+samples to identify likely unchanged wires. It evaluates zero-, one-, and
+two-bit inputs to fit flips on the other wires as quadratic functions of those
+unchanged wires. It covers broad regions with up to 64 active wires, using the
+shared polynomial term and operation limits for its exact equivalence proof.
+A fit is discarded if the proof fails or runs out of budget.
+
 Eligible rounds start one broad worker alongside the chunk workers when the
 configured worker cap is at least two. Broad jobs share that cap and are
 queued with priority. A positive `workers.broadSearchSeconds` enables broad

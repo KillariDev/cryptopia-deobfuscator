@@ -42,6 +42,10 @@
     "quadratic": {
       "enabled": true // Run this strategy when eligible.
     },
+    // Fit quadratic shears in broad regions and prove every replacement.
+    "quadraticShear": {
+      "enabled": true // Run this strategy when eligible.
+    },
     // Enumerate short replacements by forward semantic search.
     "forwardSemantic": {
       "enabled": true // Run this strategy when eligible.

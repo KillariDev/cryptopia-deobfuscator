@@ -46,7 +46,7 @@ try {
 			assert.equal(restart, false)
 			if (jobRound === 2) {
 				if (solver === 'broad') {
-					assert.equal(broadStrategy, broadRemoved === 0 ? 'mixed-basis' : 'sat-sweeping')
+					assert.equal(broadStrategy, broadRemoved === 0 ? 'quadratic-shear' : 'sat-sweeping')
 					throw done
 				}
 				return gates
@@ -123,7 +123,7 @@ try {
 	assert.deepEqual(result.gates, splitFixture.gates)
 
 	Object.assign(config.workers, { keepBusy: true, broadSearchSeconds: 60 })
-	Object.assign(config.synthesis, { satSweeping: false, mixedBasis: false, blockCancellation: true, affine: false, quadratic: false, factored: false })
+	Object.assign(config.synthesis, { satSweeping: false, quadraticShear: false, mixedBasis: false, blockCancellation: true, affine: false, quadratic: false, factored: false })
 	config.search.dependencyCuts = false
 	let broadDispatches = 0
 	WorkerPool.prototype.run = async function(gates, _wires, progress, signal, _budget, _restart, solver, round) {
