@@ -7,7 +7,7 @@ type SweepEngine = Awaited<ReturnType<typeof import('z3-solver').init>>
 const newContext = (api: SweepEngine) => new api.Context('sweeping')
 const contexts = new WeakMap<SweepEngine, ReturnType<typeof newContext>>()
 
-export type SweepStats = { queries: number, merges: number, counterexamples: number, passes?: number, rebuilds?: number, coneNodes?: number, refinementSkips?: number, contextInitializations?: number }
+export type SweepStats = { queries: number, merges: number, counterexamples: number, passes?: number, rebuilds?: number, coneNodes?: number, refinementSkips?: number, contextInitializations?: number, encodingMs?: number, checkMs?: number }
 
 /** Evaluate concrete counterexamples in topological order. These refine the
  * candidate filter only; they never authorize a rewrite. */
@@ -151,12 +151,17 @@ export async function sweepFactored(gates: Gate[], options: FactoredOptions, dea
 								if (refined[form.id] !== refined[prior.id]) { stats.refinementSkips = (stats.refinementSkips ?? 0) + 1; continue }
 								// Define cones outside push/pop, so cached expressions always
 								// retain their permanent definitions after a miter is removed.
+								const encodingStarted = performance.now()
 								const left = expression(form), right = expression(prior)
+								stats.encodingMs = (stats.encodingMs ?? 0) + performance.now() - encodingStarted
 								solver.push()
 								let result: 'sat' | 'unsat' | 'unknown', assignment: bigint | undefined
 								try {
 									graph.check(); solver.set('timeout', Math.max(1, Math.floor(deadline - performance.now())))
-									solver.add(Xor(left, right)); stats.queries++; result = await solver.check()
+									solver.add(Xor(left, right)); stats.queries++
+									const checkStarted = performance.now()
+									result = await solver.check()
+									stats.checkMs = (stats.checkMs ?? 0) + performance.now() - checkStarted
 									if (result === 'sat') {
 										const model = solver.model()
 										try {

@@ -39,6 +39,11 @@ assert.equal(fork.cut([0, 2]), undefined, 'cannot hide an intermediate value rea
 assert.throws(() => new DependencyCutIndex([cn], () => true), CutCancelled)
 assert.equal(await searchDependencyCuts([cn, cn], () => true, async () => []), undefined)
 assert.deepEqual([...new DependencyCutIndex([cn]).regions()], [])
+const controlFree = gate(0, 0, 1, 15)
+const sameSize = await searchDependencyCuts([cn, cn], () => false, async () => [controlFree, controlFree], 0, undefined, undefined, 2)
+assert.deepEqual(sameSize, [controlFree, controlFree], 'an equivalent cut can save a wire without deleting a gate')
+equivalent([cn, cn], sameSize!, 2)
+
 
 // Exhaustively check the movement theorem, including non-involutive aliases
 // and all Boolean gate functions. Replacement leaves every region output intact.

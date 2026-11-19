@@ -1,11 +1,15 @@
-import { readFileSync, writeFileSync, statSync, readdirSync } from 'fs'
+import { defaultConfigPath, readConfigDocument } from './config-document.js'
+import { writeFileSync, statSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { createHash } from 'crypto'
 // Run as a fresh process so imports, SQLite and worker pools cannot leak between trials.
 const [root, directory, wiresText, gatesText, workersText, output, settingsSource] = process.argv.slice(2)
 const wires = Number(wiresText), gates = Number(gatesText), workers = Number(workersText)
-const settings = JSON.parse(readFileSync(settingsSource ?? join(root, 'solver.config.json'), 'utf8'))
+const settings = readConfigDocument(settingsSource ?? defaultConfigPath(root))
+settings.files ??= {}
+settings.database ??= {}
+settings.logging ??= {}
 settings.files.databaseDirectory = directory
 settings.files.dataDirectory = directory
 settings.database.generationWorkers = workers

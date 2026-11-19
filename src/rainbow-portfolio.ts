@@ -20,10 +20,9 @@ export class RainbowPortfolio {
 	private stats = new Map<string, RainbowTableStats>()
 	readonly maximumWires: number
 	constructor(tables: OpenTable[]) {
-		if (!tables.length) throw new Error('Rainbow portfolio needs at least one table')
 		this.tables = [...tables].sort((a, b) => a.wires - b.wires || a.gates - b.gates)
 			.map(table => ({ ...table, id: tableId(table) }))
-		this.maximumWires = Math.max(...tables.map(table => table.wires))
+		this.maximumWires = Math.max(0, ...tables.map(table => table.wires))
 		this.resetStatistics()
 	}
 	resetStatistics() {

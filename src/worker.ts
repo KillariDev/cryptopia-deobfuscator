@@ -1,3 +1,4 @@
+import { isReplacementSimpler } from './utils.js'
 import { broadSearch } from './broad-search.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { config } from './config.js'
@@ -35,7 +36,7 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 			return
 		}
 		// Open once per persistent worker and wait for every connection to be ready.
-		const tables = await (portfolio ??= openRainbowPortfolio(config.database.tables, workerData?.sharedTables ?? []))
+		const tables = await (portfolio ??= openRainbowPortfolio(config.search.rainbow ? config.database.tables : [], workerData?.sharedTables ?? []))
 		if (solver === 'broad') {
 			caches.broadStrategyPicker.beginRound(round, broadStrategy)
 			resetStrategyStats()
@@ -45,16 +46,18 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 			return
 		}
 		caches.strategyPicker.beginRound(round)
-		let lastSnapshotCount = gates.length
+		let lastSnapshot = gates
+		let lastConsideredImprovement = 0
 		const stop = stopSignal ? new Int32Array(stopSignal) : undefined
 		const result = await optimize(tables, gates, wires, 'worker', true, caches, Math.min(budgetMs, WORKER_ROUND_MS), (count, activity, candidate) => {
-			const snapshot = count < lastSnapshotCount ? candidate : undefined
-			if (snapshot) lastSnapshotCount = count
+			const snapshot = candidate && isReplacementSimpler(candidate, lastSnapshot) ? candidate : undefined
+			if (candidate) lastConsideredImprovement = activity.improvements
+			if (snapshot) lastSnapshot = snapshot
 			const now = performance.now()
 			const sharedTemplates = config.workers.shareTemplates && now - lastShared >= config.workers.sharedTemplateSeconds * 1000 ? templates.drainShared(config.workers.sharedTemplateBatch) : []
 			if (sharedTemplates.length) lastShared = now
 			parentPort!.postMessage({ progress: count, activity, snapshot, sharedTemplates })
-		}, activity => (restartOnImprovement && lastSnapshotCount < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0) || (workerData?.maximumChecks > 0 && (activity?.checks ?? 0) >= workerData.maximumChecks), count => count < lastSnapshotCount, true)
+		}, activity => (restartOnImprovement && lastSnapshot.length < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0) || (workerData?.maximumChecks > 0 && (activity?.checks ?? 0) >= workerData.maximumChecks), (count, improvements) => count < lastSnapshot.length || (count === lastSnapshot.length && improvements > lastConsideredImprovement), true)
 		parentPort!.postMessage({ gates: result, sharedTemplates: config.workers.shareTemplates ? templates.drainShared(config.workers.sharedTemplateBatch) : [] })
 	} catch (error) {
 		parentPort!.postMessage({ error: String(error) })

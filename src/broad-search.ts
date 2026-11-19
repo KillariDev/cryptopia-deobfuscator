@@ -1,3 +1,5 @@
+import { isReplacementSimpler } from './utils.js'
+import type { CutPatch } from './dependency-cuts.js'
 import { SearchProgress } from './search-progress.js'
 import { config, minimumBroadGates } from './config.js'
 import { Gate } from './types.js'
@@ -30,7 +32,7 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 	const deadline = performance.now() + budgetMs
 	const stopped = () => shouldStop() || performance.now() >= deadline
 	const activity: WorkerActivity = { scope: 'broad', passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
-	const report = (snapshot?: Gate[]) => onProgress(snapshot?.length ?? input.length, { ...activity, activeStrategy: config.search.strategyAdaptive ? caches.broadStrategyPicker.activeStrategy : undefined, strategies: strategySnapshot().map(stat => ({ ...stat, strategy: ['gf2-affine-whole', 'symbolic-whole'].includes(stat.strategy) ? stat.strategy : `${stat.strategy} broad` })) }, snapshot)
+	const report = (snapshot?: Gate[], cutPatch?: CutPatch) => onProgress(snapshot?.length ?? input.length, { ...activity, cutPatch, activeStrategy: config.search.strategyAdaptive ? caches.broadStrategyPicker.activeStrategy : undefined, strategies: strategySnapshot().map(stat => ({ ...stat, strategy: ['gf2-affine-whole', 'symbolic-whole'].includes(stat.strategy) ? stat.strategy : `${stat.strategy} broad` })) }, snapshot)
 	const minimum = minimumBroadGates()
 	const structural = structuralChoices()
 	const choices = broadStrategyOrder().filter(name => !(structuralNames as readonly string[]).includes(name) ||
@@ -57,15 +59,17 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 		activity.subsets++
 		activity.passes++
 		activity.checks++
+		let cutPatch: CutPatch | undefined
 		const next = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, slice,
 			config.search.probabilistic, false, false, new SubsetPreparation(region),
-			{ deadline, shouldStop, broad: true, minimumBroadGates: minimum, selectedStrategy: selected.name, onProgress: () => report() },
+			{ deadline, shouldStop, broad: true, minimumBroadGates: minimum, selectedStrategy: selected.name, onProgress: () => report(), onCut: (indices, replacement) => { cutPatch = { indices: indices.map(index => index + start), replacement } } },
 			caches.broadStrategyPicker)
 		report()
-		if (next.changed && next.gates.length < region.length) {
-			activity.improvements++
+		if (next.changed) {
 			const result = [...input.slice(0, start), ...next.gates, ...input.slice(end)]
-			report(result)
+			if (!isReplacementSimpler(result, input)) continue
+			activity.improvements++
+			report(result, cutPatch)
 			return result
 		}
 	}

@@ -1,7 +1,8 @@
 import { packedControl } from './packed.js'
 import { Gate } from './types.js'
-import { appendWireAccess, getVars, wireAccessLowerBound } from './utils.js'
+import { appendWireAccess, getVars, isReplacementSimpler, wireAccessLowerBound } from './utils.js'
 
+export type CutPatch = { indices: number[], replacement: Gate[] }
 export type WireVersion = { wire: number, version: number }
 export type DependencyCut = { indices: number[], gates: Gate[], wires: number[], inputs: WireVersion[], outputs: WireVersion[] }
 export class CutCancelled extends Error {}
@@ -186,7 +187,7 @@ function* rankCuts(regions: Generator<DependencyCut>, stopped: () => boolean) {
 const indexes = new WeakMap<object, { key: string, index: DependencyCutIndex, regions: Generator<DependencyCut>, recent?: { anchor: number, wires: number[] } }>()
 
 export type CutSearchStats = { regions: number, solverMs: number }
-export async function searchDependencyCuts(input: Gate[], stopped: () => boolean, solve: (cut: DependencyCut) => Promise<Gate[] | undefined>, offset = 0, stats: CutSearchStats = { regions: 0, solverMs: 0 }, cache?: object, minimum = 2, maximum = input.length, ranked = false): Promise<Gate[] | undefined> {
+export async function searchDependencyCuts(input: Gate[], stopped: () => boolean, solve: (cut: DependencyCut) => Promise<Gate[] | undefined>, offset = 0, stats: CutSearchStats = { regions: 0, solverMs: 0 }, cache?: object, minimum = 2, maximum = input.length, ranked = false, maxAttempts = Infinity, onPatch?: (indices: number[], replacement: Gate[]) => void): Promise<Gate[] | undefined> {
 	try {
 		const key = cache ? `${minimum}:${maximum}:${ranked}:${JSON.stringify(input)}` : ''
 		let entry = cache ? indexes.get(cache) : undefined
@@ -199,14 +200,16 @@ export async function searchDependencyCuts(input: Gate[], stopped: () => boolean
 			if (cache) indexes.set(cache, entry)
 		}
 		const { index, regions } = entry; index.setStop(stopped)
-		while (!stopped()) {
+		while (stats.regions < maxAttempts && !stopped()) {
 			const next = regions.next(); if(next.done) { if(cache) indexes.delete(cache); break }; const cut = next.value
 			stats.regions++
 			const started = performance.now(), result = await solve(cut)
 			stats.solverMs += performance.now() - started
 			if (stopped()) return undefined
-			if (result && result.length < cut.gates.length) {
+			if (result && isReplacementSimpler(result, cut.gates)) {
 				const patched = index.patch(cut, result)
+				if (!isReplacementSimpler(patched, input)) continue
+				onPatch?.(cut.indices, result)
 				entry.recent = { anchor: cut.indices[cut.indices.length - 1] + 1 - cut.indices.length, wires: cut.wires }
 				return patched
 			}

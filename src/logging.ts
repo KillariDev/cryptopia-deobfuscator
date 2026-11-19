@@ -1,3 +1,4 @@
+import type { CutPatch } from './dependency-cuts.js'
 import type { StrategyStat } from './strategy-stats.js'
 import { config } from './config.js'
 import { logTimed } from './utils.js'
@@ -28,6 +29,7 @@ export function formatProgress(initialGates: number, candidateGates: number, com
 
 export type WorkerActivity = {
 	scope?: 'broad'
+	cutPatch?: CutPatch
 	workerId?: number
 	activeStrategy?: string
 	passes: number
@@ -65,7 +67,9 @@ export type SolverStatus = {
 	roundStart: number
 	roundImproved?: boolean
 	candidate: number
+	activeWires: number
 	previous: number
+	previousWires: number
 	statuses: WorkerStatus[]
 	elapsedMs: number
 }
@@ -81,7 +85,7 @@ export function formatStatus(status: SolverStatus) {
 	const broad = statuses.filter(worker => !worker.done && worker.started !== false && worker.activity?.scope === 'broad').length
 	const queued = statuses.filter(worker => !worker.done && worker.started === false).length
 	const late = statuses.filter(worker => !worker.done && worker.started !== false && elapsedMs - worker.updatedAtMs > Math.max(config.timing.summarySeconds * 2000, config.timing.workerReportSeconds * 3000)).length
-	return `${formatGateCount(candidate, previous, original)} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${preparing ? `; ${preparing} preparing regions` : ''}${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
+	return `${formatGateCount(candidate, status.activeWires, previous, status.previousWires, original)} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${preparing ? `; ${preparing} preparing regions` : ''}${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
 }
 
 /** Per-job snapshots are summed once, including completed jobs in this round. */
@@ -124,12 +128,14 @@ export function formatRoundStrategies(activities: Iterable<WorkerActivity>, side
 	return summary ? `${side ?? 'Round'} strategies: ${summary}` : undefined
 }
 
-function formatGateCount(gates: number, previous: number, original: number) {
+export const formatCircuitSize = (gates: number, wires: number) => `${gates}G${wires}W`
+
+function formatGateCount(gates: number, wires: number, previous: number, previousWires: number, original: number) {
 	const reduction = original > 0 ? Math.max(0, (original - gates) / original * 100) : 0
-	const delta = gates > previous ? `+ ${gates - previous}` : `- ${previous - gates}`
-	return `Gates: ${gates} ${delta} (${reduction.toFixed(2)}% fewer than original)`
+	const delta = (value: number, last: number) => value > last ? `+${value - last}` : `-${last - value}`
+	return `Circuit: ${formatCircuitSize(gates, wires)} ${delta(gates, previous)}G ${delta(wires, previousWires)}W (${reduction.toFixed(2)}% fewer than original)`
 }
 
-export function formatCoordinatorPhase(gates: number, original: number, previous: number, phase: string, elapsedMs: number) {
-	return `${formatGateCount(gates, previous, original)} | ${phase} | ${duration(elapsedMs)} elapsed`
+export function formatCoordinatorPhase(gates: number, wires: number, original: number, previous: number, previousWires: number, phase: string, elapsedMs: number) {
+	return `${formatGateCount(gates, wires, previous, previousWires, original)} | ${phase} | ${duration(elapsedMs)} elapsed`
 }

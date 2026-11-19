@@ -1,6 +1,6 @@
 # Benchmark guide
 
-Run commands from the repository root. Settings come from `solver.config.json`
+Run commands from the repository root. Settings come from `solver.config.jsonc`
 or the file selected by `OPTIMIZER_CONFIG`. Reports are written under
 `files.dataDirectory`; benchmark filenames and limits are in the `benchmark`
 section. The versioned `results/` summaries retain previous measurements.

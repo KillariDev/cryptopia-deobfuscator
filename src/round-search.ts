@@ -1,3 +1,4 @@
+import type { CutPatch } from './dependency-cuts.js'
 import { Gate } from './types.js'
 import { improving } from './search.js'
 
@@ -36,6 +37,59 @@ export function mergeDisjointRoundResults(original: Gate[], chunks: Gate[][], sp
 	if (localStart < 0 || !prove(original.slice(start, end), global.slice(start, globalEnd))) return undefined
 	const local = split.flat()
 	return [...local.slice(0, localStart), ...global.slice(start, globalEnd), ...local.slice(localStart + end - start)]
+}
+
+/** Track original spans across a chain of global cut rewrites. */
+export class RoundCutPatches {
+	private origins: number[] | undefined
+	private patches: { start: number, end: number, replacement: Gate[] }[] = []
+	constructor(length: number) {
+		this.origins = Array.from({ length }, (_, i) => i)
+	}
+	observe(input: Gate[], patch?: CutPatch) {
+		if (!this.origins) return
+		if (!patch) { this.origins = undefined; return }
+		const { indices, replacement } = patch
+		const first = indices[0], last = indices[indices.length - 1]
+		const start = this.origins[first], end = this.origins[last] + 1
+		const selected = new Set(indices)
+		// Only record spans whose entire input still comes from the baseline.
+		if (end - start === last - first + 1 &&
+			this.origins.slice(first, last + 1).every((origin, i) => origin === start + i) &&
+			this.patches.every(patch => end <= patch.start || start >= patch.end)) {
+			this.patches.push({
+				start, end,
+				replacement: [...input.slice(first, last + 1).filter((_, i) => !selected.has(first + i)), ...replacement],
+			})
+		}
+		this.origins = [...this.origins.slice(0, last + 1).filter((_, i) => !selected.has(i)), ...replacement.map(() => -1), ...this.origins.slice(last + 1)]
+	}
+	merge(chunks: Gate[][], split: Gate[][]): Gate[] | undefined {
+		const edits: { start: number, end: number, replacement: Gate[] }[] = []
+		const boundaries = [0], localBoundaries = [0]
+		for (let i = 0; i < chunks.length; i++) {
+			boundaries.push(boundaries[i] + chunks[i].length)
+			localBoundaries.push(localBoundaries[i] + split[i].length)
+		}
+		for (const patch of this.patches) {
+			const chunk = boundaries.findIndex((offset, i) => offset <= patch.start && boundaries[i + 1] > patch.start)
+			if (chunk < 0) continue
+			let conflict = false
+			for (let i = chunk; boundaries[i] < patch.end; i++) if (chunks[i] !== split[i]) { conflict = true; break }
+			if (conflict) continue
+			const shift = localBoundaries[chunk] - boundaries[chunk]
+			edits.push({ start: patch.start + shift, end: patch.end + shift, replacement: patch.replacement })
+		}
+		if (!edits.length) return undefined
+		const local = split.flat(), result: Gate[] = []
+		let position = 0
+		for (const { start, end, replacement } of edits.sort((a, b) => a.start - b.start)) {
+			for (let i = position; i < start; i++) result.push(local[i])
+			for (const gate of replacement) result.push(gate)
+			position = end
+		}
+		return result.concat(local.slice(position))
+	}
 }
 
 /** Verify/persist before stopping peers, and keep better results returned while draining. */

@@ -28,5 +28,21 @@ try{
  assert.equal(emitted,40)
  assert.equal((await readdir(join(dir,'puzzle-progress'))).length,1,'a burst of local wins produces one final checkpoint')
  assert.equal(JSON.parse(await readFile(join(dir,'puzzle-latest.json'),'utf8')).gate_count,4921,'the latest reduction is retained at round end')
+ const tied = { wire_count: 2, gate_count: 4, gates: Array.from({length: 4}, () => [0, 0, 1, 3] as [number,number,number,number]) }
+ const tiedPath = join(dir,'tied')
+ const controlFree = Array.from({length: 4}, () => ({a:0,b:0,target:1,gate_i:15}))
+ first = undefined
+ WorkerPool.prototype.run=async function(gates,_wires,progress,signal){
+  if(first && first!==signal)throw done
+  first=signal
+  progress?.(gates.length,undefined,controlFree)
+  Atomics.store(new Int32Array(signal!),0,1)
+  return gates
+ }
+ await assert.rejects(splitTaskAndRun(tiedPath,'unused',{originalCircuit:tied,inputCircuit:tied}),e=>e===done)
+ const tiedCheckpoint = JSON.parse(await readFile(tiedPath+'-latest.json','utf8'))
+ assert.equal(tiedCheckpoint.gate_count, 4)
+ assert.ok(tiedCheckpoint.gates.every((gate: number[]) => gate[3] === 15), 'persist a same-size circuit that drops an active wire')
+
 }finally{WorkerPool.prototype.run=run;Object.assign(config,saved);console.log=log;await rm(dir,{recursive:true,force:true})}
 console.log('Checkpoint coalescing retains the latest of forty local updates without forty verification/write cycles')

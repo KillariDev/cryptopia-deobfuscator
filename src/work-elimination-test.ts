@@ -1,3 +1,4 @@
+import { workerRegionSeed } from './search.js'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -216,3 +217,5 @@ for (const value of [0, -1, 1.5]) {
 	assert.throws(() => parseConfig({ database: { statementCacheEntries: value } }))
 }
 console.log('Subset reuse, coverage proofs, weighted intervals, prepared statement lifecycle and chunked circuit regressions passed')
+
+assert.equal(new Set(Array.from({ length: 8 }, (_, i) => workerRegionSeed(97037, i))).size, 8)

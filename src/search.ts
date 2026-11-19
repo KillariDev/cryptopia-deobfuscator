@@ -119,6 +119,11 @@ export function independentComponents(gates: Gate[]): Gate[][] {
 	return [...components.values()]
 }
 
+/** Space worker anchors around the circuit without depending on pool size. */
+export function workerRegionSeed(length: number, workerIndex: number) {
+	return Math.floor(length * ((workerIndex * 0.61803398875) % 1))
+}
+
 /** Index seeds are rebuilt after each edit; broad traversal periodically goes first. */
 export class NeighborhoodQueue {
 	private seeds: number[] = []

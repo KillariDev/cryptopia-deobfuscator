@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mergeDisjointRoundResults, PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
+import { RoundCutPatches, mergeDisjointRoundResults, PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { parseConfig } from './config.js'
 import { evalCircuit, generateCombinations } from './utils.js'
 import { Gate } from './types.js'
@@ -80,3 +80,20 @@ const proveSplice = (before: Gate[], after: Gate[]) => generateCombinations(2).e
 assert.deepEqual(mergeDisjointRoundResults(mixed, [localChunk, globalChunk], [[not], globalChunk], [...localChunk, separate], proveSplice), [not, separate])
 assert.equal(mergeDisjointRoundResults(mixed, [localChunk, globalChunk], [localChunk, [separate]], [...localChunk, separate], proveSplice), undefined)
 assert.equal(mergeDisjointRoundResults(mixed, [localChunk, globalChunk], [[not], globalChunk], [...localChunk, separate], () => false), undefined)
+
+const third = { ...not, target: 2 }
+const thirdChunk = [third, third, third]
+const originalPatches = [...localChunk, ...globalChunk, ...thirdChunk]
+const patches = new RoundCutPatches(originalPatches.length)
+patches.observe(originalPatches, { indices: [3, 5], replacement: [] })
+patches.observe([...localChunk, separate, ...thirdChunk], { indices: [4, 6], replacement: [] })
+assert.deepEqual(patches.merge([localChunk, globalChunk, thirdChunk], [[not], globalChunk, thirdChunk]), [not, separate, third])
+assert.deepEqual(patches.merge([localChunk, globalChunk, thirdChunk], [[not], [separate], thirdChunk]), [not, separate, third])
+
+// Two global wins straddling a local edit cannot be inferred as one safe span.
+const separated = new RoundCutPatches(originalPatches.length)
+separated.observe(originalPatches, { indices: [0, 2], replacement: [] })
+separated.observe([not, ...globalChunk, ...thirdChunk], { indices: [4, 6], replacement: [] })
+assert.equal(mergeDisjointRoundResults(originalPatches, [localChunk, globalChunk, thirdChunk],
+	[localChunk, [separate], thirdChunk], [not, ...globalChunk, third], proveSplice), undefined)
+assert.deepEqual(separated.merge([localChunk, globalChunk, thirdChunk], [localChunk, [separate], thirdChunk]), [not, separate, third])

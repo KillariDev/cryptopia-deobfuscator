@@ -89,16 +89,16 @@ The solver combines several approaches:
   It keeps that strategy for the entire optimizer round and keeps it for the next
   round if it removed any gates. After a round without a reduction it moves to
   the next strategy. Local and broad searches have separate strategy orders.
-  The broad lane also advances when the local result wins the round.
+  The broad lane keeps its strategy whenever it removes gates, regardless of which result wins.
 
 The summary reports worker counts by strategy. Set `search.strategyAdaptive` to false to use the fixed pipeline and
 synthesis rotation. Failed-region caches are separate by strategy so each method
 can try the same region.
 
-Local GF(2) affine synthesis (`synthesis.affine`, enabled by default) is selected among
+Local GF(2) affine synthesis (`strategies.gf2Affine.enabled`, enabled by default) is selected among
 the eligible synthesis choices. It is not an unconditional startup or worker
 prepass. It searches affine runs and smaller subwindows inside the selected
-region, using its own `synthesis.affineMaximumWindowGates` bound (default 256) and
+region, using its own `strategies.polynomialLimits.maximumWindowGates` bound (default 256) and
 `validation.maximumWires`, independently of the tiny SMT/template limits.
 Exact symbolic verification is required for every accepted reduction. The solver
 also composes Boolean polynomials through mixed gates: nonlinear intermediates
@@ -106,7 +106,7 @@ may cancel to an affine map. It can rewrite that map directly, or find smaller
 mixed subwindows whose final transformation is affine. Truly nonlinear maps and
 singular affine maps are preserved.
 
-Sparse quadratic synthesis (`synthesis.quadratic`, enabled by default) can also
+Sparse quadratic synthesis (`strategies.quadratic.enabled`, enabled by default) can also
 emit genuinely nonlinear results: NOTs, controlled XORs, AND-controlled flips,
 and complemented variants. It orders target updates so all controls still have
 their original input values, then recomposes the candidate and checks every output
@@ -117,8 +117,8 @@ broad searches use quadratic synthesis, sharing the existing symbolic resource
 limits and worker lifetime. The original recursive affine maze synthesizes to its
 known four-gate solution.
 
-Mixed symbolic analysis is bounded by `synthesis.affineMaximumTerms` (default
-100,000 stored monomials), `synthesis.affineMaximumOperations` (10,000,000 symbolic
+Mixed symbolic analysis is bounded by `strategies.polynomialLimits.maximumTerms` (default
+100,000 stored monomials), `strategies.polynomialLimits.maximumOperations` (10,000,000 symbolic
 operations per candidate), the wire limit, and the worker job deadline. Exhausting
 any limit declines that candidate without dropping terms or accepting an
 approximate equivalence.
@@ -127,7 +127,9 @@ A broad worker starts with the full circuit and scans overlapping coarse-to-fine
 regions. Its strategy order is SAT sweeping with bounded dependency cuts,
 mixed-basis simplification, block cancellation, whole-region symbolic synthesis,
 factored synthesis, and dependency cuts. Rainbow lookup and variable elimination
-remain available inside dependency cuts and in local search.
+remain available inside dependency cuts and in local search. Set
+`strategies.satSweeping.cutsFirst` to true to try a small batch of ranked cuts before
+the whole-region SAT attempt.
 Eligible rounds start one broad worker alongside the chunk workers when the
 configured worker cap is at least two. Broad jobs share that cap and are
 queued with priority. A positive `workers.broadSearchSeconds` enables broad
@@ -164,9 +166,13 @@ uses random inputs, so a saved checkpoint is not a formal equivalence proof.
 
 ## Configuration
 
-Edit [solver.config.json](solver.config.json), then restart. The checked-in file
-lists all settings; omitted values use defaults. Invalid or unknown settings
-fail at startup. Job-specific circuit filenames stay on the command line.
+Edit [solver.config.jsonc](solver.config.jsonc), then restart. The checked-in file
+documents each setting. Omitted values use defaults. Set a strategy’s
+`enabled` field under `strategies` to false to disable it. Shared solver limits
+are listed in the same section. A file selected with `OPTIMIZER_CONFIG` can use
+JSONC or the legacy JSON layout. When both layouts provide the same setting,
+the grouped strategy value takes precedence. Job-specific circuit filenames
+stay on the command line.
 
 | Section | What it controls |
 | --- | --- |
@@ -179,7 +185,7 @@ fail at startup. Job-specific circuit filenames stay on the command line.
 | `search` | Search methods, region sizes, caching and adaptive scheduling |
 | `cache` | Per-worker cache limits |
 | `database` | Lookup-table portfolio, database access and generation settings |
-| `synthesis` | Local synthesis strategies, attempt frequency and search limits |
+| `strategies` | Strategy switches, individual settings and shared solver limits |
 | `benchmark` | Reproducible performance comparisons |
 
 Useful settings to start with:

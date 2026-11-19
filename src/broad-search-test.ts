@@ -73,6 +73,17 @@ try {
 	Object.assign(config.synthesis, { satSweeping: true, mixedBasis: true, blockCancellation: true, affine: true })
 	config.search.dependencyCuts = true
 	assert.deepEqual(broadStrategyOrder(), ['sat-sweeping', 'mixed-basis', 'block-cancellation', 'symbolic', 'factored', 'dependency-cuts'])
+	config.search.strategyAdaptive = true
+	config.synthesis.broadSatCutsFirst = true
+	let provenIndices: number[] | undefined
+	const repeated = Array.from({ length: 1200 }, () => ({ a: 0, b: 0, target: 0, gate_i: 15 }))
+	const cutResult = await broadSearch(tables, repeated, 1, createOptimizerCaches(), 5000, () => false, (_, activity) => {
+		if (activity.cutPatch) provenIndices = activity.cutPatch.indices
+	})
+	assert.ok(provenIndices?.length && cutResult.length < repeated.length, 'cuts-first reports its exact cut')
+	const bits = generateCombinations(1)
+	assert.deepEqual(calculateAllOutputsArray(cutResult, bits), calculateAllOutputsArray(repeated, bits))
+
 } finally {
 	Object.assign(config, saved)
 	await tables.close()

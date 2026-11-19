@@ -78,7 +78,11 @@ export const evalGate = (controlFunction: number, a: boolean, b: boolean, origin
 	return xor(lookupTable[controlFunction][a ? 1 : 0][b ? 1 : 0], originalOutput)
 }
 
-export const getUniqueVars = (gates: Gate[]) => Array.from(new Set(gates.flatMap((gate) => getVars(gate))))
+export const getUniqueVars = (gates: Gate[]) => {
+	const wires = new Set<number>()
+	for (const gate of gates) for (const wire of getVars(gate)) wires.add(wire)
+	return [...wires]
+}
 
 export const getVars = (gate: Gate) => {
 	switch(gate.gate_i) {

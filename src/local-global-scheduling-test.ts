@@ -20,14 +20,14 @@ try {
 	Object.assign(config.workers, { maximum: 4, keepBusy: true, jobsPerWorker: 1, wholeCircuitMaximumGates: 6000, broadSearchIdleSeconds: 600, broadSearchSeconds: 600 })
 	config.timing.checkpointSeconds = 0.005
 	config.timing.summarySeconds = 0.01
-	for (const [broadRemoved, wholeCircuit] of [[2, true], [4, true], [8, true], [2, false]] as const) {
+	for (const [broadRemoved, wholeCircuit] of [[0, true], [2, true], [4, true], [8, true], [2, false]] as const) {
 		config.workers.wholeCircuitMaximumGates = wholeCircuit ? 6000 : 0
 		const winner = !wholeCircuit ? 'combined' : broadRemoved > 4 ? 'global' : 'local'
 		const path = join(directory, `puzzle-${broadRemoved}-${wholeCircuit}`)
 		reports.length = 0
 		const expectCheckpointAndStatus = async (removed: number, delta: number) => {
 			const count = circuit.gates.length - removed
-			const expectedStatus = `Gates: ${count} - ${delta} (`
+			const expectedStatus = `Circuit: ${count}G1W -${delta}G -0W (`
 			const deadline = performance.now() + 5000
 			while (performance.now() < deadline) {
 				const latest = JSON.parse(await readFile(path + '-latest.json', 'utf8'))
@@ -44,7 +44,7 @@ try {
 			assert.equal(restart, false)
 			if (jobRound === 2) {
 				if (solver === 'broad') {
-					assert.equal(broadStrategy, winner === 'local' ? 'mixed-basis' : 'sat-sweeping')
+					assert.equal(broadStrategy, broadRemoved === 0 ? 'mixed-basis' : 'sat-sweeping')
 					throw done
 				}
 				return gates
