@@ -46,8 +46,8 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 		...config.database.tables.map(table => `Rainbow table: ${resolve(databaseFilename(table.wires, table.gates))} (${table.wires} wires, up to ${table.gates} gates)`),
 		`Logging: ${verboseLogging() ? 'verbose' : `summaries every ${config.timing.summarySeconds} seconds (OPTIMIZER_VERBOSE=1 enables details)`}`,
 		`Optimization: probabilistic=${config.search.probabilistic}; subset sizes ${config.search.subsetMinimum}-${config.search.subsetMaximum}; slice sizes ${config.search.sliceMinimum}-${config.search.sliceMaximum}`,
-		`Validation: ${config.validation.checkpointInputs} random inputs at startup/checkpoints; probabilistic replacements use ${config.validation.probabilisticInputs} inputs`,
-		`Checkpoints: every ${config.timing.summarySeconds} seconds when gates decrease; rounds finish after ${config.timing.improvedRoundMinutes} minutes with reductions, otherwise use the ${config.timing.roundMinutes}-minute budget. Stop requests are checked between steps. Ctrl+C stops the job.`,
+		`Validation: exhaustive for checkpoints using up to 8 wires; ${config.validation.checkpointInputs} random inputs for wider checkpoints and worker checks; probabilistic replacements use ${config.validation.probabilisticInputs} inputs`,
+		`Checkpoints: every ${config.timing.checkpointSeconds} seconds when the best circuit improves; rounds finish after ${config.timing.improvedRoundMinutes} minutes with reductions, otherwise use the ${config.timing.roundMinutes}-minute budget. Stop requests are checked between steps. Ctrl+C stops the job.`,
 	].join('\n')
 }
 

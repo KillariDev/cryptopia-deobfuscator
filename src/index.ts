@@ -10,22 +10,19 @@ import { config } from './config.js'
 const lifecycle = new RunLifecycle()
 
 const run = async (pathToFileWithoutExt: string, original: string, startOver: boolean) => {
-	const circuits = loadJob(pathToFileWithoutExt, original, startOver)
-	logJob(pathToFileWithoutExt, original, circuits)
-	const memory = memorySnapshot(config.workers.memoryBudgetMegabytes)
-	logTimed(`Memory: ${Math.round(memory.rss / 1048576)} MB resident; ${Math.round(memory.budget / 1048576)} MB effective budget; Node ${process.versions.node}.`)
-	if (config.search.rainbow) {
-		logTimed('Initializing rainbow table portfolio...')
-		lifecycle.setPhase('initializing rainbow table portfolio')
-		await initializeRainbowTables()
-	}
-	try {
-		await splitTaskAndRun(pathToFileWithoutExt, original, circuits, lifecycle.setPhase)
-		logTimed('Optimization complete: no gates remain.')
-	} catch(e: unknown) {
-		console.error(e)
-		process.exitCode = 1
-	}
+	await splitTaskAndRun(pathToFileWithoutExt, original, async () => {
+		const circuits = loadJob(pathToFileWithoutExt, original, startOver)
+		logJob(pathToFileWithoutExt, original, circuits)
+		const memory = memorySnapshot(config.workers.memoryBudgetMegabytes)
+		logTimed(`Memory: ${Math.round(memory.rss / 1048576)} MB resident; ${Math.round(memory.budget / 1048576)} MB effective budget; Node ${process.versions.node}.`)
+		if (config.search.rainbow && circuits.inputCircuit.gates.length > 0) {
+			logTimed('Initializing rainbow table portfolio...')
+			lifecycle.setPhase('initializing rainbow table portfolio')
+			await initializeRainbowTables()
+		}
+		return circuits
+	}, lifecycle.setPhase)
+	logTimed('Optimization complete: no gates remain.')
 }
 const args = process.argv.slice(2)
 const startOver = args.includes('--startover')

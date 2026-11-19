@@ -26,7 +26,7 @@ try{
  const circuit={wire_count:2,gate_count:5001,gates:Array.from({length:5001},()=>[0,0,0,15] as [number,number,number,number])}
  await assert.rejects(splitTaskAndRun(join(dir,'puzzle'),'unused',{originalCircuit:circuit,inputCircuit:circuit}),e=>e===done)
  assert.equal(emitted,40)
- assert.equal((await readdir(join(dir,'puzzle-progress'))).length,1,'a burst of local wins produces one final checkpoint')
+ assert.equal((await readdir(join(dir,'puzzle-progress'))).filter(file=>file.endsWith('.json')).length,1,'a burst of local wins produces one final checkpoint')
  assert.equal(JSON.parse(await readFile(join(dir,'puzzle-latest.json'),'utf8')).gate_count,4921,'the latest reduction is retained at round end')
  const tied = { wire_count: 2, gate_count: 4, gates: Array.from({length: 4}, () => [0, 0, 1, 3] as [number,number,number,number]) }
  const tiedPath = join(dir,'tied')

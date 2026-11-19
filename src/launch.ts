@@ -12,8 +12,17 @@ const child = spawn(process.execPath, [
 	fileURLToPath(new URL('./index.js', import.meta.url)),
 	...args,
 ], { stdio: 'inherit', env: { ...process.env, OPTIMIZER_CONFIG: configPath } })
+const forwardInterrupt = () => { child.kill('SIGINT') }
+const forwardTerminate = () => { child.kill('SIGTERM') }
+const removeSignalHandlers = () => {
+	process.off('SIGINT', forwardInterrupt)
+	process.off('SIGTERM', forwardTerminate)
+}
+process.on('SIGINT', forwardInterrupt)
+process.on('SIGTERM', forwardTerminate)
 child.on('error', error => { console.error(error); process.exitCode = 1 })
-child.on('exit', (code, signal) => {
+child.on('close', (code, signal) => {
+	removeSignalHandlers()
 	if (signal) {
 		if (signal !== 'SIGINT') console.error(`Optimizer process terminated by ${signal}.`)
 		process.kill(process.pid, signal)

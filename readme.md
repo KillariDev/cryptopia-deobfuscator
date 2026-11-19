@@ -164,8 +164,10 @@ coordinator verifies combined results before saving them. By default, improving
 rounds aim to finish after five minutes; rounds without reductions retain a
 25-minute budget. Later rounds repartition and shuffle the circuit.
 
-Small rewrites can be checked exhaustively. Large-circuit checkpoint validation
-uses random inputs, so a saved checkpoint is not a formal equivalence proof.
+Checkpoint verification is exhaustive when the original and candidate together
+use at most eight wires. Wider checkpoints are compared against the original on
+`validation.checkpointInputs` random inputs. These wide checks can miss rare
+mismatches.
 
 ## Configuration
 

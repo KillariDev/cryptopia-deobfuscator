@@ -13,7 +13,7 @@ import { WORKER_ROUND_MS } from './job.js'
 let portfolio: ReturnType<typeof openRainbowPortfolio> | undefined
 const caches = createOptimizerCaches(workerData?.workerIndex ?? 0)
 let lastShared = performance.now()
-parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, broadStrategy, solver = 'local', restartOnImprovement = false, sharedTemplates }: { sharedTemplates?: TemplateRule[], gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, broadStrategy?: string, restartOnImprovement?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
+parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, broadStrategy, solver = 'local', restartOnImprovement = false, splitCircuit = false, sharedTemplates }: { sharedTemplates?: TemplateRule[], gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, broadStrategy?: string, restartOnImprovement?: boolean, splitCircuit?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
 	try {
 		if (sharedTemplates !== undefined) {
 			if (config.workers.shareTemplates) templates.importShared(sharedTemplates, config.workers.sharedTemplateBatch)
@@ -50,7 +50,10 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 		let lastConsideredImprovement = 0
 		const stop = stopSignal ? new Int32Array(stopSignal) : undefined
 		const result = await optimize(tables, gates, wires, 'worker', true, caches, Math.min(budgetMs, WORKER_ROUND_MS), (count, activity, candidate) => {
-			const snapshot = candidate && isBetterCircuit(candidate, lastSnapshot) ? candidate : undefined
+			const improves = candidate && (splitCircuit
+				? count < lastSnapshot.length || (count === lastSnapshot.length && activity.improvements > lastConsideredImprovement)
+				: isBetterCircuit(candidate, lastSnapshot))
+			const snapshot = improves ? candidate : undefined
 			if (candidate) lastConsideredImprovement = activity.improvements
 			if (snapshot) lastSnapshot = snapshot
 			const now = performance.now()

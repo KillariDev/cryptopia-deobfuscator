@@ -1,4 +1,4 @@
-import { circuitWireCost, isBetterCircuit } from './circuit-cost.js'
+import { circuitWireCost, isBetterCircuit, SplitCircuitCost } from './circuit-cost.js'
 import { CheckpointWriter } from './checkpoint-writer.js'
 import { opaqueRainbow } from './opaque-rainbow.js'
 import { RoundStrategyPicker, StrategyPicker } from './strategy-picker.js'
@@ -29,7 +29,7 @@ import { RainbowPortfolio, RainbowMatch } from './rainbow-portfolio.js'
 import { LimitedMap } from './limitedMap.js'
 import { WorkerPool, configuredWorkerCount } from './threads.js'
 import { createDependencyGraph } from './lineswapper.js'
-import { outputPaths, prepareOutputDirectories, writeCircuit, writeCircuitCopies, AsyncReductionCheckpoint } from './storage.js'
+import { outputPaths, prepareOutputDirectories, withPuzzleLock, writeCircuit, writeCircuitCopies, AsyncReductionCheckpoint } from './storage.js'
 import { JobCircuits, loadJob, WORKER_ROUND_MS } from './job.js'
 
 const removeVariableFromGate = (gate: Gate, isA: boolean) => {
@@ -950,7 +950,14 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	} finally { clearInterval(heartbeat) }
 }
 
-export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: string, circuits: JobCircuits = loadJob(pathToFileWithoutExt, original), onPhase: (phase: string) => void = () => {}) => {
+export function splitTaskAndRun(pathToFileWithoutExt: string, original: string, input?: JobCircuits | (() => Promise<JobCircuits>), onPhase: (phase: string) => void = () => {}) {
+	return withPuzzleLock(pathToFileWithoutExt, async () => {
+		const circuits = typeof input === 'function' ? await input() : input ?? loadJob(pathToFileWithoutExt, original)
+		await runPuzzle(pathToFileWithoutExt, circuits, onPhase)
+	})
+}
+
+async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, onPhase: (phase: string) => void) {
 	const splitArrayIntoApproximatelyChunks = (arr: Gate[], n: number): Gate[][] => {
 		if (n <= 0) throw new Error('Number of chunks must be greater than 0')
 		if (n > arr.length) throw new Error('Number of chunks cannot exceed array length')
@@ -1080,6 +1087,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const approxGates = wholeCircuit ? Array.from({ length: jobCount }, () => currentGates.slice()) : config.search.balancedWorkers ? balancedChunks(currentGates, jobCount, wireCosts) : splitArrayIntoApproximatelyChunks(currentGates, jobCount)
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
+			const splitCost = wholeCircuit ? undefined : new SplitCircuitCost(snapshots)
 			const stopSignal = new Int32Array(new SharedArrayBuffer(4))
 			const checkpoint = new AsyncReductionCheckpoint(currentGates, async snapshot => {
 				await writer.write([paths.progress(snapshot.length), paths.latest], snapshot)
@@ -1185,8 +1193,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 						const accept = (candidate: Gate[]) => {
 							// Several idle lanes may retry the same remaining chunk. Their
 							// results are alternatives, never additional chunks to concatenate.
-							const better = wholeCircuit ? isBetterCircuit : isReplacementSimpler
-							if (!better(candidate, snapshots[target])) return
+							if (!(splitCost ? splitCost.accept(target, candidate) : isBetterCircuit(candidate, snapshots[target]))) return
 							snapshots[target] = candidate; candidateCounts[target] = candidate.length
 							pendingCheckpoint = true
 						}
@@ -1197,7 +1204,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 									try { accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
 								}
 								statuses[index] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
-							}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, false, 'local', optimizerRound)
+						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, false, 'local', optimizerRound, undefined, !wholeCircuit)
 						if (executionStarted !== undefined) {
 							const cost = (performance.now() - executionStarted) / Math.max(1, dataChunk.length)
 							for (const wire of new Set(dataChunk.flatMap(getVars))) wireCosts.set(wire, ((wireCosts.get(wire) ?? cost) + cost) / 2)

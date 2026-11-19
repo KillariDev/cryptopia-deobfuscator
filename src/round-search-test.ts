@@ -1,4 +1,4 @@
-import { circuitWireCost, isBetterCircuit } from './circuit-cost.js'
+import { circuitWireCost, isBetterCircuit, SplitCircuitCost } from './circuit-cost.js'
 import { formatCircuitSize } from './logging.js'
 import { AsyncReductionCheckpoint } from './storage.js'
 import assert from 'node:assert/strict'
@@ -117,3 +117,23 @@ const pairCheckpoint = new AsyncReductionCheckpoint(dispersed, async gates => as
 assert.equal(await pairCheckpoint.saveIfReduced(concentrated), true)
 assert.equal(await pairCheckpoint.saveIfReduced(dispersed), false)
 assert.equal(isBetterCircuit(concentrated, [ab]), false, 'gate count still takes precedence')
+
+const chunks = [pairCircuit(10, 0), pairCircuit(0, 2)]
+const splitCost = new SplitCircuitCost(chunks)
+const replacements = [
+	{ index: 1, candidate: pairCircuit(2, 0) },
+	{ index: 1, candidate: pairCircuit(0, 2) },
+	{ index: 0, candidate: pairCircuit(0, 8) },
+	{ index: 1, candidate: pairCircuit(0, 2) },
+	{ index: 0, candidate: pairCircuit(8, 0) },
+	{ index: 1, candidate: [not, not] },
+	{ index: 0, candidate: [] },
+]
+for (const { index, candidate } of replacements) {
+	const before = chunks.flat()
+	const after = chunks.map((part, i) => i === index ? candidate : part).flat()
+	for (const input of generateCombinations(3)) assert.deepEqual(evalCircuit(before, input), evalCircuit(after, input))
+	const better = isBetterCircuit(after, before)
+	assert.equal(splitCost.accept(index, candidate), better, 'split selection agrees with the complete-circuit score')
+	assert.deepEqual(chunks.flat(), better ? after : before)
+}

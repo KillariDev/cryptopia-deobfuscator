@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
+import { fork } from 'node:child_process'
+import { once } from 'node:events'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { ablationVariants, benchmarkSettings, benchmarkOrder } from './benchmark-variants.js'
@@ -43,6 +45,21 @@ const path = resolve(config.benchmark.caseManifest), manifest = readCaseManifest
 const directory = await mkdtemp(resolve(tmpdir(), 'benchmark-regressions-'))
 const saved = structuredClone(config)
 try {
+	const noRainbowSettings = resolve(directory, 'no-rainbow.json')
+	await writeFile(noRainbowSettings, JSON.stringify({
+		strategies: { rainbow: { enabled: false } },
+		files: { databaseDirectory: resolve(directory, 'missing') },
+		benchmark: { seconds: 0.1 },
+	}))
+	const trial = fork(new URL('./benchmark-trial.js', import.meta.url), [], {
+		env: { ...process.env, OPTIMIZER_CONFIG: noRainbowSettings }, execArgv: [],
+	})
+	const exited = once(trial, 'exit'), reply = once(trial, 'message')
+	const empty = { wire_count: 1, gate_count: 0, gates: [] }
+	trial.send({ input: empty, original: empty, workers: 1, seed: 1 })
+	const [message] = await reply
+	assert.equal((message as { result?: { finalGates: number } }).result?.finalGates, 0)
+	assert.deepEqual(await exited, [0, null])
 	config.files.databaseDirectory = directory
 	await initializeRainbowTables(manifest.tables)
 	const available = caseSettings(manifest, false)

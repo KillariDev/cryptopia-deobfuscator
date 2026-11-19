@@ -6,6 +6,8 @@ import { setTimeout as wait } from 'node:timers/promises'
 import { config } from './config.js'
 import { WorkerPool } from './threads.js'
 import { splitTaskAndRun } from './processing.js'
+import { circuitWireCost } from './circuit-cost.js'
+import type { CircuitData } from './types.js'
 
 const saved = structuredClone(config), run = WorkerPool.prototype.run, log = console.log
 const directory = await mkdtemp(join(tmpdir(), 'local-global-'))
@@ -92,6 +94,31 @@ try {
 		assert.ok(reports.some(line => line.endsWith('Global strategies: SAT sweep:1')))
 		assert.ok(reports.every(line => !line.includes(' tried (worker time):')))
 	}
+
+	Object.assign(config.workers, { maximum: 2, keepBusy: false, adaptiveConcurrency: false, minimumChunkGates: 2,
+		maximumChunkFraction: 0.5, wholeCircuitMaximumGates: 0, broadSearchSeconds: 0 })
+	config.search.balancedWorkers = false
+	const ab = { a: 0, b: 0, target: 1, gate_i: 3 }, ac = { ...ab, target: 2 }
+	const original = [ab, ab, ac, ac]
+	const splitFixture: CircuitData = {
+		wire_count: 3, gate_count: original.length, gates: original.map(gate => [gate.a, gate.b, gate.target, gate.gate_i]),
+	}
+	WorkerPool.prototype.run = async function(gates, _wires, progress, _signal, _budget, _restart, solver, round, _strategy, split) {
+		if (round === 2) throw done
+		if (solver === 'local') {
+			assert.equal(split, true)
+			if (gates.some(gate => gate.target === 2)) {
+				const candidate = gates.map(gate => gate.target === 2 ? ab : gate)
+				progress?.(candidate.length, undefined, candidate)
+			}
+		}
+		return gates
+	}
+	const path = join(directory, 'global-wire-score')
+	await assert.rejects(splitTaskAndRun(path, 'unused', { originalCircuit: splitFixture, inputCircuit: splitFixture }), error => error === done)
+	const result: CircuitData = JSON.parse(await readFile(path + '-latest.json', 'utf8'))
+	assert.equal(result.gate_count, original.length)
+	assert.equal(circuitWireCost(result.gates.map(([a, b, target, gate_i]) => ({ a, b, target, gate_i }))).effectivePairs, 1)
 } finally {
 	Object.assign(config, saved)
 	WorkerPool.prototype.run = run

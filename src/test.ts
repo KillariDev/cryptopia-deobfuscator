@@ -173,6 +173,16 @@ try {
 	assert.ok(summary.includes(join(temporaryDirectory, 'data', 'worker')))
 	assert.ok(summary.includes(join(temporaryDirectory, 'original-progress')))
 	assert.ok(summary.includes(join(temporaryDirectory, 'original-latest.json')))
+	assert.notEqual(outputPaths('alpha/puzzle').worker(0), outputPaths('beta/puzzle').worker(0))
+	assert.equal(outputPaths('alpha/puzzle').worker(0), outputPaths(join(temporaryDirectory, 'alpha/puzzle')).worker(0))
+	const { config: jobConfig } = await import('./config.js')
+	const { summarySeconds, checkpointSeconds } = jobConfig.timing
+	try {
+		Object.assign(jobConfig.timing, { summarySeconds: 10, checkpointSeconds: 55 })
+		assert.match(describeJob('original', 'original', initialJob), /Checkpoints: every 55 seconds/)
+	} finally {
+		Object.assign(jobConfig.timing, { summarySeconds, checkpointSeconds })
+	}
 	writeCircuit(paths.latest, 4, [{ ...singleGate[0], target: 4 }])
 	assert.throws(() => loadJob('original'), /Invalid gate at index 0.*original-latest\.json/)
 	assert.equal(loadJob('original', 'original', true).inputCircuit.gates.length, 1)

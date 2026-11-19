@@ -11,13 +11,14 @@ process.once('message', async (message: { input: CircuitData, original: CircuitD
 		const { getRainbowTable, databaseFilename, databaseReady, hasCanonicalCoverage, closeRainbowTable } = await import('./rainbowtable.js')
 		const { chunkArray, verifyCircuit, calculateAllOutputsArray, generateCombinations } = await import('./utils.js')
 		const startup = performance.now()
-		for (const spec of config.database.tables) {
+		for (const spec of config.search.rainbow ? config.database.tables : []) {
 			if (!existsSync(databaseFilename(spec.wires, spec.gates))) throw new Error('Benchmark needs existing completed tables; run optimize to build them first')
 			const db = getRainbowTable(spec.wires, spec.gates)
 			try { await databaseReady(db); if (!await hasCanonicalCoverage(db, spec.wires, spec.gates)) throw new Error('Benchmark requires completed canonical rainbow tables') }
 			finally { await closeRainbowTable(db) }
 		}
-		const shared = await loadSharedTables(), startupMs = performance.now() - startup
+		const shared = config.search.rainbow ? await loadSharedTables() : []
+		const startupMs = performance.now() - startup
 		const gates = message.input.gates.map(([a, b, target, gate_i]) => ({ a, b, target, gate_i }))
 		const original = message.original.gates.map(([a, b, target, gate_i]) => ({ a, b, target, gate_i }))
 		verifyCircuit(original, gates, message.input.wire_count, config.validation.checkpointInputs)

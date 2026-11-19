@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import sqlite3 from 'sqlite3'
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -33,6 +34,12 @@ try {
 		try {
 			await cleanupStagingDirectories(directory)
 			assert.ok((await readdir(directory)).includes(basename(shards.directory)))
+			const moduleUrl = new URL('./generation-shards.js', import.meta.url).href
+			const crossProcess = spawnSync(process.execPath, ['--input-type=module', '-e',
+				`import { cleanupStagingDirectories } from ${JSON.stringify(moduleUrl)}; await cleanupStagingDirectories(process.argv[1]);`, directory],
+				{ encoding: 'utf8', timeout: 5000 })
+			assert.equal(crossProcess.status, 0, crossProcess.stderr)
+			assert.ok((await readdir(directory)).includes(basename(shards.directory)), 'another process must preserve live staging shards')
 			assert.equal((await allSQL(db, 'PRAGMA database_list')).length, writers + 2)
 			await assert.rejects(shards.importBatch(), /No committed/)
 			for (let batch = 0; batch < 2; batch++) {

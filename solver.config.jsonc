@@ -133,7 +133,7 @@
   },
   // Shared equivalence checking limits.
   "validation": {
-    "checkpointInputs": 20, // Sample count for checkpoint equivalence validation.
+    "checkpointInputs": 20, // Random inputs for wide checkpoint validation and worker checks.
     "maximumWires": 64 // Maximum wire count accepted by the optimizer and verification.
   },
   // Region selection and search infrastructure shared by strategies.

@@ -9,12 +9,24 @@ import {IncrementalGraph} from './incremental-graph.js'
 import {createDependencyGraph} from './lineswapper.js'
 import {sweepFactored,SweepStats} from './sat-sweeping-core.js'
 import {init,killThreads} from 'z3-solver'
+import {setTimeout as wait} from 'node:timers/promises'
 const service=new SolverService()
 const fixture=new URL('data:text/javascript,'+encodeURIComponent(`import {parentPort} from 'node:worker_threads';parentPort.on('message',async()=>{await new Promise(r=>setTimeout(r,30));parentPort.postMessage({result:[]})})`))
 const first=service.run(fixture,{},1000,()=>false)
 assert.ok(service.busy)
 assert.equal(await service.run(fixture,{},1000,()=>false),undefined,'busy SAT work is skipped instead of queued')
 assert.deepEqual(await first,[]);assert.equal(service.busy,false)
+const recovered = new SolverService()
+const idleFailure = new URL('data:text/javascript,'+encodeURIComponent(`
+ import {parentPort} from 'node:worker_threads'
+ parentPort.on('message', ({ fail }) => {
+  parentPort.postMessage({result:[]})
+  if (fail) setTimeout(() => { throw new Error('injected idle worker failure') }, 5)
+ })
+`))
+assert.deepEqual(await recovered.run(idleFailure,{fail:true},1000,()=>false),[])
+await wait(100)
+assert.deepEqual(await recovered.run(idleFailure,{fail:false},1000,()=>false),[],'idle worker errors leave the service reusable')
 const cn={a:0,b:0,target:1,gate_i:3}
 const gates=Array.from({length:1000},()=>({...cn}))
 const graph=new IncrementalGraph(gates)
@@ -51,6 +63,21 @@ try{
  await assert.rejects(retry.saveIfReduced([]),/disk failure/);assert.equal(retry.hasSaved,false)
  fail=false;assert.equal(await retry.saveIfReduced([]),true,'failed writes do not advance the saved count')
 }finally{clearInterval(heartbeat);await writer.close();await rm(directory,{recursive:true,force:true})}
+
+const proofDir = await mkdtemp(join(tmpdir(),'exact-checkpoint-'))
+const flip = {a:4,b:5,target:6,gate_i:1}, left = {a:0,b:1,target:4,gate_i:1}, right = {a:2,b:3,target:5,gate_i:1}
+const rareDifference = [flip,left,flip,right,flip,left,flip,right]
+const narrow = new CheckpointWriter(rareDifference,64,1)
+try {
+ const path = join(proofDir, 'latest.json')
+ await narrow.write([path],rareDifference)
+ const savedProof = await readFile(path,'utf8')
+ await assert.rejects(narrow.write([path],[]),/CORRUPTION/)
+ assert.equal(await readFile(path,'utf8'),savedProof)
+} finally {
+ await narrow.close()
+ await rm(proofDir,{recursive:true,force:true})
+}
 const t={a:0,b:1,target:2,gate_i:1},cx={a:3,b:0,target:4,gate_i:3}
 const distributed=[t,cx,{a:2,b:4,target:5,gate_i:1},cx,{a:2,b:3,target:5,gate_i:1},{a:2,b:4,target:5,gate_i:1},t]
 const options={maximumWires:64,maximumNodes:200000,maximumEdges:16000000,stopped:()=>false}

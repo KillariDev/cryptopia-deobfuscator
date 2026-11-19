@@ -10,7 +10,19 @@ import { StagingOptions, StagingRow, StagingWriter } from './generation-staging.
 export type ShardOptions = StagingOptions & { writers: number, directory?: string, cacheMegabytes: number }
 type Shard = { db: sqlite3.Database, alias: string, attached: boolean, writer?: StagingWriter, observing: () => void, transaction: boolean, pending: StagingRow[], pageRows: number, submittedRows: number }
 const closeDB = (db: sqlite3.Database) => new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
-const activeDirectories = new Set<string>()
+const stagingPrefix = 'rainbow-staging-'
+
+function hasLiveOwner(name: string) {
+	const match = /^rainbow-staging-([1-9]\d*)-/.exec(name)
+	if (!match) return false // Legacy scratch directories have no owner record.
+	const pid = Number(match[1])
+	if (!Number.isInteger(pid) || pid > 0x7fffffff) return false
+	try { process.kill(pid, 0); return true }
+	catch (error) {
+		// Lack of permission is not evidence that the owner exited.
+		return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+	}
+}
 
 /** Scratch shards are rebuilt from the main checkpoint, never used for resume. */
 export async function cleanupStagingDirectories(root: string) {
@@ -19,7 +31,7 @@ export async function cleanupStagingDirectories(root: string) {
 	catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error }
 	for (const entry of entries) {
 		const directory = resolve(root, entry.name)
-		if (entry.isDirectory() && entry.name.startsWith('rainbow-staging-') && !activeDirectories.has(directory)) {
+		if (entry.isDirectory() && entry.name.startsWith(stagingPrefix) && !hasLiveOwner(entry.name)) {
 			await rm(directory, { recursive: true, force: true })
 		}
 	}
@@ -56,8 +68,7 @@ export class ShardedStagingWriter {
 		if (!Number.isSafeInteger(options.writers) || options.writers < 2 || options.writers > 4 || !Number.isSafeInteger(options.cacheMegabytes) || options.cacheMegabytes < 1) throw new Error('Invalid staging writer limits (2–4 writers)')
 		const root = options.directory ?? tmpdir()
 		await mkdir(root, { recursive: true })
-		const instance = new ShardedStagingWriter(owner, await mkdtemp(join(root, 'rainbow-staging-')))
-		activeDirectories.add(resolve(instance.directory))
+		const instance = new ShardedStagingWriter(owner, await mkdtemp(join(root, `${stagingPrefix}${process.pid}-`)))
 		instance.utilization = new WriterUtilization(options.writers)
 		try {
 			for (let i = 0; i < options.writers; i++) {
@@ -151,7 +162,6 @@ export class ShardedStagingWriter {
 			// Close all connections before removal (also required on Windows).
 			if (!errors.length) {
 				await rm(this.directory, { recursive: true, force: true })
-				activeDirectories.delete(resolve(this.directory))
 			}
 			if (errors.length) throw errors[0]
 		})()

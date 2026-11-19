@@ -35,8 +35,18 @@ export class SolverService {
  }
  private async execute(url: URL, data: object, budgetMs: number, shouldStop: () => boolean): Promise<Gate[] | undefined> {
   if(shouldStop() || budgetMs<=0)return undefined
-  if(this.calls>=32){await this.worker?.terminate();this.worker=undefined;this.calls=0}
-  const worker=this.worker ??= new Worker(url,{workerData:{service:true}})
+  if(this.calls>=32) await this.worker?.terminate()
+  let worker=this.worker
+  if (!worker) {
+   worker=new Worker(url,{workerData:{service:true}})
+   this.worker=worker
+   this.calls=0
+   const invalidate=()=>{if(this.worker===worker)this.worker=undefined}
+   // Errors and exits can arrive between calls, after the request listeners
+   // have been removed. Keep the service reusable and the host alive.
+   worker.on('error',invalidate)
+   worker.once('exit',invalidate)
+  }
   this.calls++;worker.ref()
   return new Promise((resolve,reject)=>{
    let done=false
@@ -52,7 +62,8 @@ export class SolverService {
    const timer=setTimeout(()=>finish(undefined,undefined,true),budgetMs)
    const poll=setInterval(()=>{if(shouldStop())finish(undefined,undefined,true)},10)
    worker.once('message',message);worker.once('error',failure);worker.once('exit',exit)
-   worker.postMessage(data)
+   try { worker.postMessage(data) }
+   catch (error) { failure(error instanceof Error ? error : new Error(String(error))) }
   })
  }
 }
