@@ -51,7 +51,7 @@ try {
 	assert.equal(counts.length, 1)
 	assert.match(counts[0], /SAT sweep:1/)
 	assert.equal(timings.length, 0)
-	const periodic = reports.findIndex(line => line.includes('Circuit: 5001G1W -0G -0W'))
+	const periodic = reports.findIndex(line => line.includes('Circuit: 5001G 0.00W -0G -0.00W'))
 	assert.ok(periodic >= 0 && periodic < reports.indexOf(counts[0]), 'periodic status precedes the round-end strategy totals')
 
 	let shuffleFinished = false, phaseReports = 0

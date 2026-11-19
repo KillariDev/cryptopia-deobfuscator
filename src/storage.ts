@@ -1,8 +1,9 @@
+import { isBetterCircuit } from './circuit-cost.js'
 import { config } from './config.js'
 import { mkdirSync, writeFileSync } from 'fs'
 import { basename, dirname, join } from 'path'
 import { Gate } from './types.js'
-import { convertToOriginal, isReplacementSimpler } from './utils.js'
+import { convertToOriginal } from './utils.js'
 
 export const outputPaths = (problemName: string, dataDirectory = config.files.dataDirectory) => {
 	const name = basename(problemName)
@@ -53,7 +54,7 @@ export class AsyncReductionCheckpoint {
 
 	saveIfReduced(gates: Gate[]) {
 		const work = this.tail.then(async () => {
-			const better = typeof this.best === 'number' ? gates.length < this.best : isReplacementSimpler(gates, this.best)
+			const better = typeof this.best === 'number' ? gates.length < this.best : isBetterCircuit(gates, this.best)
 			if (!better) return false
 			await this.persist(gates)
 			this.best = gates

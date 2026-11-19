@@ -1,4 +1,4 @@
-import { isReplacementSimpler } from './utils.js'
+import { isBetterCircuit } from './circuit-cost.js'
 import type { CutPatch } from './dependency-cuts.js'
 import { SearchProgress } from './search-progress.js'
 import { config, minimumBroadGates } from './config.js'
@@ -67,7 +67,7 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 		report()
 		if (next.changed) {
 			const result = [...input.slice(0, start), ...next.gates, ...input.slice(end)]
-			if (!isReplacementSimpler(result, input)) continue
+			if (!isBetterCircuit(result, input)) continue
 			activity.improvements++
 			report(result, cutPatch)
 			return result

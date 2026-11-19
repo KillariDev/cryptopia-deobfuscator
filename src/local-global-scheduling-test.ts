@@ -27,7 +27,7 @@ try {
 		reports.length = 0
 		const expectCheckpointAndStatus = async (removed: number, delta: number) => {
 			const count = circuit.gates.length - removed
-			const expectedStatus = `Circuit: ${count}G1W -${delta}G -0W (`
+			const expectedStatus = `Circuit: ${count}G 0.00W -${delta}G -0.00W (`
 			const deadline = performance.now() + 5000
 			while (performance.now() < deadline) {
 				const latest = JSON.parse(await readFile(path + '-latest.json', 'utf8'))

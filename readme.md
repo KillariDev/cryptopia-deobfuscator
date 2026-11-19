@@ -150,7 +150,10 @@ cooperatively at the round boundary, with state, memory and circuit-size limits
 also in effect. Legacy `synthesis.affineWholeCircuitSeconds` remains an alias
 for enabling broad work.
 
-Replacements are ordered by gate count, then used-wire count and read cost.
+Complete candidates are ordered by gate count, mean distinct wire operands per
+gate, then effective wire-pair count. In `7G 1.69W`, `W` is the effective
+pair count, calculated as the square of total pair uses divided by the sum of
+squared individual pair counts. Circuits with no pairs score `0.00W`.
 Multiple workers search circuit chunks, retaining caches between jobs. For circuits
 with at most 2,000 gates, workers instead run independent whole-circuit searches
 and keep the best result, preserving opportunities across chunk boundaries. Each

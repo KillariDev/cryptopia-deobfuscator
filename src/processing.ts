@@ -1,3 +1,4 @@
+import { circuitWireCost, isBetterCircuit } from './circuit-cost.js'
 import { CheckpointWriter } from './checkpoint-writer.js'
 import { opaqueRainbow } from './opaque-rainbow.js'
 import { RoundStrategyPicker, StrategyPicker } from './strategy-picker.js'
@@ -22,7 +23,7 @@ import { IncrementalEvaluator, PackedInputs } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, workerRegionSeed, createSearchArms, independentComponents } from './search.js'
 import { config, minimumBroadGates } from './config.js'
 import { formatCircuitSize, formatCoordinatorPhase, SummaryThrottle, verboseLogging, formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
-import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getUniqueVars, getVars, hashGates, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
+import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
 import { Gate } from './types.js'
 import { RainbowPortfolio, RainbowMatch } from './rainbow-portfolio.js'
 import { LimitedMap } from './limitedMap.js'
@@ -1014,7 +1015,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 	let currentGates = gates.slice()
 	const wireCosts = new Map<number, number>()
 	let lastReportedGates = currentGates.length
-	let lastReportedWires = getUniqueVars(currentGates).length
+	let lastReportedPairs = circuitWireCost(currentGates).effectivePairs
 	let optimizerRound = 0
 	const globalStrategyPicker = new RoundStrategyPicker(broadStrategyOrder())
 	const summaryThrottle = new SummaryThrottle(config.timing.summarySeconds * 1000)
@@ -1023,9 +1024,9 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 		const started = performance.now()
 		reportStatus = (force = false) => {
 			if (!summaryThrottle.allow(performance.now(), force || verboseLogging())) return
-			const activeWires = getUniqueVars(currentGates).length
-			logTimed(formatCoordinatorPhase(currentGates.length, activeWires, originalGates.length, lastReportedGates, lastReportedWires, phase, performance.now() - started))
-			lastReportedWires = activeWires
+			const effectivePairs = circuitWireCost(currentGates).effectivePairs
+			logTimed(formatCoordinatorPhase(currentGates.length, effectivePairs, originalGates.length, lastReportedGates, lastReportedPairs, phase, performance.now() - started))
+			lastReportedPairs = effectivePairs
 			lastReportedGates = currentGates.length
 		}
 	}
@@ -1094,7 +1095,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				if (!pendingCheckpoint) return
 				const local = localCandidate()
 				const candidate = roundSearchResult([local, broadBest], true)
-				if (isReplacementSimpler(candidate, bestObserved)) {
+				if (isBetterCircuit(candidate, bestObserved)) {
 					bestObserved = candidate
 					bestObservedSide = candidate === local ? 'local' : 'global'
 				}
@@ -1113,10 +1114,10 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 				const candidate = roundResult?.length ?? Math.min(broadBest.length, localGates)
 				if (summaryThrottle.allow(performance.now(), force || verboseLogging() || candidate === 0)) {
 					const best = roundResult ?? (broadBest.length < localGates ? broadBest : roundSearchResult([localCandidate(), broadBest], true))
-					const activeWires = getUniqueVars(best).length
-					logTimed(formatStatus({ activeWires, previousWires: lastReportedWires, original: originalGates.length, roundStart: nPrevGates, candidate, roundImproved: localGates < nPrevGates, previous: lastReportedGates, statuses, elapsedMs: elapsed }))
+					const effectivePairs = circuitWireCost(best).effectivePairs
+					logTimed(formatStatus({ effectivePairs, previousPairs: lastReportedPairs, original: originalGates.length, roundStart: nPrevGates, candidate, roundImproved: localGates < nPrevGates, previous: lastReportedGates, statuses, elapsedMs: elapsed }))
 					lastReportedGates = candidate
-					lastReportedWires = activeWires
+					lastReportedPairs = effectivePairs
 				}
 				if ((elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, localGates)) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
@@ -1145,7 +1146,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 					do {
 						statuses[jobCount] = { updatedAtMs: performance.now() - lastIterationTime, done: false, started: false }
 						const accept = (candidate: Gate[], patch?: WorkerActivity['cutPatch']) => {
-							if (!isReplacementSimpler(candidate, broadBest)) return
+							if (!isBetterCircuit(candidate, broadBest)) return
 							roundPatches?.observe(broadBest, patch)
 							broadBest = candidate
 							pendingCheckpoint = true
@@ -1177,7 +1178,8 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 						const accept = (candidate: Gate[]) => {
 							// Several idle lanes may retry the same remaining chunk. Their
 							// results are alternatives, never additional chunks to concatenate.
-							if (!isReplacementSimpler(candidate, snapshots[target])) return
+							const better = wholeCircuit ? isBetterCircuit : isReplacementSimpler
+							if (!better(candidate, snapshots[target])) return
 							snapshots[target] = candidate; candidateCounts[target] = candidate.length
 							pendingCheckpoint = true
 						}
@@ -1217,7 +1219,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 					}) : undefined
 				currentGates = roundSearchResult(merged ? [localBest, broadBest, merged] : [localBest, broadBest], true)
 				winner = currentGates === merged ? 'combined' : currentGates === localBest ? 'local' : 'global'
-				if (isReplacementSimpler(bestObserved, currentGates)) {
+				if (isBetterCircuit(bestObserved, currentGates)) {
 					currentGates = bestObserved
 					winner = bestObservedSide
 				}
@@ -1250,7 +1252,7 @@ export const splitTaskAndRun = async (pathToFileWithoutExt: string, original: st
 			const globalReduction = runBroad ? ` | Global: ${nPrevGates - broadBest.length} gates removed` : ''
 			const gatesPerHour = roundElapsedMs > 0 ? Math.floor(gatesRemoved * 3_600_000 / roundElapsedMs) : 0
 			const combinedReduction = winner === 'combined' ? ` | Combined: ${gatesRemoved} gates removed` : ''
-			logTimed(`Round winner: ${winner} | Local: ${localRemoved} gates removed${globalReduction}${combinedReduction} | Result: ${formatCircuitSize(currentGates.length, getUniqueVars(currentGates).length)} | ${gatesPerHour} gates/hour`)
+			logTimed(`Round winner: ${winner} | Local: ${localRemoved} gates removed${globalReduction}${combinedReduction} | Result: ${formatCircuitSize(currentGates.length, circuitWireCost(currentGates).effectivePairs)} | ${gatesPerHour} gates/hour`)
 			for (const side of ['Local', 'Global'] as const) {
 				const counts = formatRoundStrategies(roundStrategies[side].values(), side)
 				if (counts) logTimed(counts)

@@ -1,3 +1,6 @@
+import { circuitWireCost, isBetterCircuit } from './circuit-cost.js'
+import { formatCircuitSize } from './logging.js'
+import { AsyncReductionCheckpoint } from './storage.js'
 import assert from 'node:assert/strict'
 import { RoundCutPatches, mergeDisjointRoundResults, PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { parseConfig } from './config.js'
@@ -97,3 +100,20 @@ separated.observe([not, ...globalChunk, ...thirdChunk], { indices: [4, 6], repla
 assert.equal(mergeDisjointRoundResults(originalPatches, [localChunk, globalChunk, thirdChunk],
 	[localChunk, [separate], thirdChunk], [not, ...globalChunk, third], proveSplice), undefined)
 assert.deepEqual(separated.merge([localChunk, globalChunk, thirdChunk], [localChunk, [separate], thirdChunk]), [not, separate, third])
+
+const ab = { a: 0, b: 0, target: 1, gate_i: 3 }
+const ac = { ...ab, target: 2 }
+const pairCircuit = (abCount: number, acCount: number): Gate[] =>
+	[...Array<Gate>(abCount).fill(ab), ...Array<Gate>(acCount).fill(ac)]
+const concentrated = pairCircuit(5, 2), dispersed = pairCircuit(3, 4)
+for (const input of generateCombinations(3)) assert.deepEqual(evalCircuit(concentrated, input), evalCircuit(dispersed, input))
+assert.deepEqual(circuitWireCost(concentrated), { operands: 14, effectivePairs: 49 / 29 })
+assert.equal(circuitWireCost(dispersed).effectivePairs, 49 / 25)
+assert.equal(circuitWireCost([not]).effectivePairs, 0)
+assert.equal(circuitWireCost([{ a: 0, b: 0, target: 1, gate_i: 1 }]).operands, 2)
+assert.equal(formatCircuitSize(7, circuitWireCost(concentrated).effectivePairs), '7G 1.69W')
+assert.equal(roundSearchResult([dispersed, concentrated], true), concentrated)
+const pairCheckpoint = new AsyncReductionCheckpoint(dispersed, async gates => assert.equal(gates, concentrated))
+assert.equal(await pairCheckpoint.saveIfReduced(concentrated), true)
+assert.equal(await pairCheckpoint.saveIfReduced(dispersed), false)
+assert.equal(isBetterCircuit(concentrated, [ab]), false, 'gate count still takes precedence')

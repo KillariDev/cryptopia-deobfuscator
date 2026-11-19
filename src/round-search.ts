@@ -1,6 +1,6 @@
 import type { CutPatch } from './dependency-cuts.js'
 import { Gate } from './types.js'
-import { improving } from './search.js'
+import { isBetterCircuit } from './circuit-cost.js'
 
 /** Small circuits use independent full-context searches instead of tiny chunks. */
 export function roundSearchPlan(gates: number, maximumWorkers: number, chunkSize: number, wholeCircuitMaximumGates: number) {
@@ -12,7 +12,7 @@ export function roundSearchPlan(gates: number, maximumWorkers: number, chunkSize
 export function roundSearchResult(candidates: Gate[][], wholeCircuit: boolean): Gate[] {
 	if (!wholeCircuit) return candidates.flat()
 	if (!candidates.length) throw new Error('No whole-circuit search candidates')
-	return candidates.reduce((best, candidate) => improving(best)(candidate) ? candidate : best)
+	return candidates.reduce((best, candidate) => isBetterCircuit(candidate, best) ? candidate : best)
 }
 
 /** Merge a single global splice whose original span is unchanged by local work.

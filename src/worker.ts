@@ -1,4 +1,4 @@
-import { isReplacementSimpler } from './utils.js'
+import { isBetterCircuit } from './circuit-cost.js'
 import { broadSearch } from './broad-search.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { config } from './config.js'
@@ -50,7 +50,7 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 		let lastConsideredImprovement = 0
 		const stop = stopSignal ? new Int32Array(stopSignal) : undefined
 		const result = await optimize(tables, gates, wires, 'worker', true, caches, Math.min(budgetMs, WORKER_ROUND_MS), (count, activity, candidate) => {
-			const snapshot = candidate && isReplacementSimpler(candidate, lastSnapshot) ? candidate : undefined
+			const snapshot = candidate && isBetterCircuit(candidate, lastSnapshot) ? candidate : undefined
 			if (candidate) lastConsideredImprovement = activity.improvements
 			if (snapshot) lastSnapshot = snapshot
 			const now = performance.now()
