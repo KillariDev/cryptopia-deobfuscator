@@ -137,7 +137,13 @@
   "search": {
     "strategyAdaptive": true, // Keep productive strategies across rounds and rotate after misses.
     // Listed solvers run first in order. Omitted enabled solvers follow in their default order.
+    // Local options in default order
+    // "quadratic", "rainbow", "variables", "forward-semantic-search", "equality-saturation",
+    // "gf2-affine", "factored", "block-cancellation", "sat-sweeping", "mixed-basis", "z3", "meet-in-the-middle"
     "localStrategyOrder": [], // Example ["rainbow", "quadratic"]
+    // Broad options in default order
+    // "sat-sweeping", "quadratic-shear", "mixed-basis", "block-cancellation",
+    // "symbolic", "factored", "dependency-cuts"
     "broadStrategyOrder": [], // Example ["quadratic-shear", "sat-sweeping"]
     "subsetMinimum": 2, // Smallest local dependency subset in gates.
     "subsetMaximum": 199, // Largest local dependency subset in gates.
