@@ -533,15 +533,15 @@ assert.equal(summaryThrottle.allow(0), true)
 for (let round = 1; round < 30; round++) assert.equal(summaryThrottle.allow(round * 1000), false, 'quiet cadence survives rapid round restarts')
 assert.equal(summaryThrottle.allow(30_000), true)
 assert.equal(summaryThrottle.allow(30_001, true), true, 'verbose and final reports bypass the interval')
-const compact = formatStatus({ effectivePairs: 12, previousPairs: 15, original: 1000, roundStart: 200, candidate: 100, previous: 163, statuses: [status, { updatedAtMs: 0, done: true }], elapsedMs: 60_000 })
-assert.match(compact, /Circuit: 100G 12.00W -63G -3.00W \(90\.00%\)/)
+const compact = formatStatus({ pairUses: 12, previousPairs: 15, original: 1000, roundStart: 200, candidate: 100, previous: 163, statuses: [status, { updatedAtMs: 0, done: true }], elapsedMs: 60_000 })
+assert.match(compact, /Circuit: 100G 12P -63G -3P \(90\.00%\)/)
 assert.ok(!compact.includes('Checkpoint'))
 assert.match(compact, /1 worker active/)
 assert.ok(compact.endsWith(`Round time: 1m 0s / ${Math.floor(improvedRoundMs / 60_000)}m ${Math.floor(improvedRoundMs / 1000) % 60}s`))
 assert.ok(!compact.includes('oldest'))
 assert.ok(!compact.includes('subsets'))
 const strategyStatus = formatStatus({
-	effectivePairs: 12, previousPairs: 15, original: 1000, roundStart: 200, candidate: 100, previous: 163, elapsedMs: 60_000,
+	pairUses: 12, previousPairs: 15, original: 1000, roundStart: 200, candidate: 100, previous: 163, elapsedMs: 60_000,
 	statuses: [
 		{ ...status, activity: { ...status.activity, strategies: [
 			{ strategy: 'sat-sweeping', settings: '{}', attempts: 4, rewrites: 1, gatesRemoved: 4, elapsedMs: 100 },
@@ -553,15 +553,15 @@ const strategyStatus = formatStatus({
 	],
 })
 assert.match(strategyStatus, / \| Top: SAT sweep$/)
-const completedStatus = formatStatus({ effectivePairs: 12, previousPairs: 10, original: 100, roundStart: 100, candidate: 50, previous: 60, statuses: [{ updatedAtMs: 0, done: true }], elapsedMs: 300_000 })
+const completedStatus = formatStatus({ pairUses: 12, previousPairs: 10, original: 100, roundStart: 100, candidate: 50, previous: 60, statuses: [{ updatedAtMs: 0, done: true }], elapsedMs: 300_000 })
 assert.match(completedStatus, /All workers finished/)
 assert.match(completedStatus, /Round finished in 5m 0s/)
 assert.ok(!completedStatus.includes('% elapsed'))
-assert.match(completedStatus, /Circuit: 50G 12.00W -10G \+2.00W/)
-const lateStatus = formatStatus({ effectivePairs: 12, previousPairs: 12, original: 100, roundStart: 100, candidate: 100, previous: 100, statuses: [status], elapsedMs: 90_000 })
+assert.match(completedStatus, /Circuit: 50G 12P -10G \+2P/)
+const lateStatus = formatStatus({ pairUses: 12, previousPairs: 12, original: 100, roundStart: 100, candidate: 100, previous: 100, statuses: [status], elapsedMs: 90_000 })
 assert.match(lateStatus, /Warning: 1 worker update delayed/)
 assert.match(lateStatus, /Round time: 1m 30s \/ 25m 0s/)
-assert.ok(!formatStatus({ effectivePairs: 0, previousPairs: 0, original: 0, roundStart: 0, candidate: 0, previous: 0, statuses: [], elapsedMs: 0 }).includes('NaN'))
+assert.ok(!formatStatus({ pairUses: 0, previousPairs: 0, original: 0, roundStart: 0, candidate: 0, previous: 0, statuses: [], elapsedMs: 0 }).includes('NaN'))
 
 const { functionKey, circuitState, semanticCircuits, meetInMiddle, encodeGates, decodeGates, truthKey } = await import('./semantic.js')
 const { saturateCircuit, CircuitEqualityGraph } = await import('./equality.js')
@@ -845,7 +845,7 @@ assert.deepEqual(await inFlight, singleGate)
 const failingLookup = new LookupBatcher(10, 0, async () => { throw new Error('lookup failed') })
 await assert.rejects(failingLookup.get('a'), /lookup failed/)
 await assert.rejects(failingLookup.get('a'), /lookup failed/) // retry after rejection
-const queuedStatus = formatStatus({ effectivePairs: 12, previousPairs: 12, original: 10, roundStart: 10, candidate: 10, previous: 10, statuses: [{updatedAtMs:0,done:false,started:false}], elapsedMs: 100000 })
+const queuedStatus = formatStatus({ pairUses: 12, previousPairs: 12, original: 10, roundStart: 10, candidate: 10, previous: 10, statuses: [{updatedAtMs:0,done:false,started:false}], elapsedMs: 100000 })
 assert.match(queuedStatus, /0 workers active; 1 job queued/)
 assert.ok(!queuedStatus.includes('Warning'))
 console.log('Circuit editing, local graph updates, lazy snapshots, verified rolling fingerprints and lookup coalescing regressions passed')

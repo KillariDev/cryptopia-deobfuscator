@@ -1,4 +1,4 @@
-import { circuitWireCost, isBetterCircuit, SplitCircuitCost } from './circuit-cost.js'
+import { circuitWireCost, isBetterCircuit } from './circuit-cost.js'
 import { formatCircuitSize } from './logging.js'
 import { AsyncReductionCheckpoint } from './storage.js'
 import assert from 'node:assert/strict'
@@ -110,33 +110,23 @@ const pairCircuit = (abCount: number, acCount: number): Gate[] =>
 	[...Array<Gate>(abCount).fill(ab), ...Array<Gate>(acCount).fill(ac)]
 const concentrated = pairCircuit(5, 2), dispersed = pairCircuit(3, 4)
 for (const input of generateCombinations(3)) assert.deepEqual(evalCircuit(concentrated, input), evalCircuit(dispersed, input))
-assert.deepEqual(circuitWireCost(concentrated), { operands: 14, effectivePairs: 49 / 29 })
-assert.equal(circuitWireCost(dispersed).effectivePairs, 49 / 25)
-assert.equal(circuitWireCost([not]).effectivePairs, 0)
-assert.equal(circuitWireCost([{ a: 0, b: 0, target: 1, gate_i: 1 }]).operands, 2)
-assert.equal(formatCircuitSize(7, circuitWireCost(concentrated).effectivePairs), '7G 1.69W')
-assert.equal(roundSearchResult([dispersed, concentrated], true), concentrated)
-const pairCheckpoint = new AsyncReductionCheckpoint(dispersed, async gates => assert.equal(gates, concentrated))
-assert.equal(await pairCheckpoint.saveIfReduced(concentrated), true)
-assert.equal(await pairCheckpoint.saveIfReduced(dispersed), false)
+assert.deepEqual(circuitWireCost(concentrated), { operands: 14, pairUses: 7 })
+assert.deepEqual(circuitWireCost(dispersed), circuitWireCost(concentrated))
+assert.equal(circuitWireCost([not]).pairUses, 0)
+assert.deepEqual(circuitWireCost([{ a: 0, b: 0, target: 1, gate_i: 1 }]), { operands: 2, pairUses: 1 })
+assert.equal(formatCircuitSize(7, circuitWireCost(concentrated).pairUses), '7G 7P')
+assert.equal(roundSearchResult([dispersed, concentrated], true), dispersed)
 assert.equal(isBetterCircuit(concentrated, [ab]), false, 'gate count still takes precedence')
 
-const chunks = [pairCircuit(10, 0), pairCircuit(0, 2)]
-const splitCost = new SplitCircuitCost(chunks)
-const replacements = [
-	{ index: 1, candidate: pairCircuit(2, 0) },
-	{ index: 1, candidate: pairCircuit(0, 2) },
-	{ index: 0, candidate: pairCircuit(0, 8) },
-	{ index: 1, candidate: pairCircuit(0, 2) },
-	{ index: 0, candidate: pairCircuit(8, 0) },
-	{ index: 1, candidate: [not, not] },
-	{ index: 0, candidate: [] },
-]
-for (const { index, candidate } of replacements) {
-	const before = chunks.flat()
-	const after = chunks.map((part, i) => i === index ? candidate : part).flat()
-	for (const input of generateCombinations(3)) assert.deepEqual(evalCircuit(before, input), evalCircuit(after, input))
-	const better = isBetterCircuit(after, before)
-	assert.equal(splitCost.accept(index, candidate), better, 'split selection agrees with the complete-circuit score')
-	assert.deepEqual(chunks.flat(), better ? after : before)
-}
+const and = { a: 0, b: 1, target: 2, gate_i: 1 }
+assert.equal(isBetterCircuit([ab, ab], [and, and]), true, 'fewer operands still win at equal gate count')
+assert.equal(circuitWireCost([and, and]).pairUses - circuitWireCost([ab, ab]).pairUses, 4)
+const morePairs = [and, and, not, not]
+const fewerPairs = pairCircuit(4, 0)
+assert.deepEqual(circuitWireCost(morePairs), { operands: 8, pairUses: 6 })
+assert.deepEqual(circuitWireCost(fewerPairs), { operands: 8, pairUses: 4 })
+for (const input of generateCombinations(3)) assert.deepEqual(evalCircuit(morePairs, input), evalCircuit(fewerPairs, input))
+assert.equal(roundSearchResult([morePairs, fewerPairs], true), fewerPairs)
+const pairCheckpoint = new AsyncReductionCheckpoint(morePairs, async gates => assert.equal(gates, fewerPairs))
+assert.equal(await pairCheckpoint.saveIfReduced(fewerPairs), true)
+assert.equal(await pairCheckpoint.saveIfReduced(morePairs), false)

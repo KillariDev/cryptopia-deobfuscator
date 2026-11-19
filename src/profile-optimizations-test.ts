@@ -98,7 +98,7 @@ try {
    assert.fail('a single no-op should finish before initializing rainbow tables')
   })
  } finally { console.log = log }
- assert.ok(startupLog.some(line => line.includes('Circuit: 1G 0.00W | verifying input checkpoint')))
+ assert.ok(startupLog.some(line => line.includes('Circuit: 1G 0P | verifying input checkpoint')))
  assert.equal(JSON.parse(await readFile(outputPaths(noOpPuzzle).latest, 'utf8')).gate_count, 0)
  const wideGates = fixture.before.map(([a, b, target, gate_i]: number[]) => ({ a, b, target, gate_i }))
  const wide = new CheckpointWriter(wideGates, 64, 1)

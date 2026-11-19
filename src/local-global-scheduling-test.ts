@@ -6,7 +6,6 @@ import { setTimeout as wait } from 'node:timers/promises'
 import { config } from './config.js'
 import { WorkerPool } from './threads.js'
 import { splitTaskAndRun } from './processing.js'
-import { circuitWireCost } from './circuit-cost.js'
 import { outputPaths } from './storage.js'
 import type { CircuitData } from './types.js'
 
@@ -30,7 +29,7 @@ try {
 		reports.length = 0
 		const expectCheckpointAndStatus = async (removed: number, delta: number) => {
 			const count = circuit.gates.length - removed
-			const expectedStatus = `Circuit: ${count}G 0.00W -${delta}G -0.00W (`
+			const expectedStatus = `Circuit: ${count}G 0P -${delta}G -0P (`
 			const deadline = performance.now() + 5000
 			while (performance.now() < deadline) {
 				const latest = JSON.parse(await readFile(path + '-latest.json', 'utf8'))
@@ -121,7 +120,7 @@ try {
 	await assert.rejects(splitTaskAndRun(path, 'unused', { originalCircuit: splitFixture, inputCircuit: splitFixture }), error => error === done)
 	const result: CircuitData = JSON.parse(await readFile(path + '-latest.json', 'utf8'))
 	assert.equal(result.gate_count, original.length)
-	assert.equal(circuitWireCost(result.gates.map(([a, b, target, gate_i]) => ({ a, b, target, gate_i }))).effectivePairs, 1)
+	assert.deepEqual(result.gates, splitFixture.gates)
 
 	Object.assign(config.workers, { keepBusy: true, broadSearchSeconds: 60 })
 	Object.assign(config.synthesis, { satSweeping: false, mixedBasis: false, blockCancellation: true, affine: false, quadratic: false, factored: false })

@@ -68,7 +68,7 @@ export type SolverStatus = {
 	roundStart: number
 	roundImproved?: boolean
 	candidate: number
-	effectivePairs: number
+	pairUses: number
 	previous: number
 	previousPairs: number
 	statuses: WorkerStatus[]
@@ -86,7 +86,7 @@ export function formatStatus(status: SolverStatus) {
 	const broad = statuses.filter(worker => !worker.done && worker.started !== false && worker.activity?.scope === 'broad').length
 	const queued = statuses.filter(worker => !worker.done && worker.started === false).length
 	const late = statuses.filter(worker => !worker.done && worker.started !== false && elapsedMs - worker.updatedAtMs > Math.max(config.timing.summarySeconds * 2000, config.timing.workerReportSeconds * 3000)).length
-	return `${formatGateCount(candidate, status.effectivePairs, previous, status.previousPairs, original)} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${preparing ? `; ${preparing} preparing regions` : ''}${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${formatTopStrategy(statuses)}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
+	return `${formatGateCount(candidate, status.pairUses, previous, status.previousPairs, original)} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${preparing ? `; ${preparing} preparing regions` : ''}${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${formatTopStrategy(statuses)}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
 }
 
 const strategyLabels: Record<string, string> = { 'dependency-cuts': 'cuts', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', z3: 'Z3' }
@@ -144,12 +144,12 @@ export function formatRoundStrategies(activities: Iterable<WorkerActivity>, side
 	return summary ? `${side ?? 'Round'} strategies: ${summary}` : undefined
 }
 
-export const formatCircuitSize = (gates: number, pairs: number) => `${gates}G ${pairs.toFixed(2)}W`
+export const formatCircuitSize = (gates: number, pairs: number) => `${gates}G ${pairs}P`
 
 function formatGateCount(gates: number, pairs: number, previous: number, previousPairs: number, original: number) {
 	const reduction = original > 0 ? Math.max(0, (original - gates) / original * 100) : 0
 	const delta = (value: number, last: number) => value > last ? `+${value - last}` : `-${last - value}`
-	return `Circuit: ${formatCircuitSize(gates, pairs)} ${delta(gates, previous)}G ${pairs > previousPairs ? '+' : '-'}${Math.abs(pairs - previousPairs).toFixed(2)}W (${reduction.toFixed(2)}%)`
+	return `Circuit: ${formatCircuitSize(gates, pairs)} ${delta(gates, previous)}G ${pairs > previousPairs ? '+' : '-'}${Math.abs(pairs - previousPairs)}P (${reduction.toFixed(2)}%)`
 }
 
 export function formatCoordinatorPhase(gates: number, pairs: number, original: number, previous: number, previousPairs: number, phase: string, elapsedMs: number) {

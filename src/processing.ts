@@ -1,4 +1,4 @@
-import { circuitWireCost, isBetterCircuit, SplitCircuitCost } from './circuit-cost.js'
+import { circuitWireCost, isBetterCircuit } from './circuit-cost.js'
 import { CheckpointWriter } from './checkpoint-writer.js'
 import { opaqueRainbow } from './opaque-rainbow.js'
 import { RoundStrategyPicker, StrategyPicker } from './strategy-picker.js'
@@ -1114,7 +1114,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 	const gates: Gate[] = inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
 	if (originalCircuit.wire_count !== inputCircuit.wire_count) throw new Error('Latest circuit wire count differs from original')
 	if (originalGates.length < gates.length) throw new Error('Latest circuit has more gates than original')
-	const inputPairs = circuitWireCost(gates).effectivePairs
+	const inputPairs = circuitWireCost(gates).pairUses
 	const startupPhase = 'verifying input checkpoint'
 	onPhase(startupPhase)
 	logTimed(`Circuit: ${formatCircuitSize(gates.length, inputPairs)} | ${startupPhase}`)
@@ -1180,9 +1180,9 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 		const started = performance.now()
 		reportStatus = (force = false) => {
 			if (!summaryThrottle.allow(performance.now(), force || verboseLogging())) return
-			const effectivePairs = circuitWireCost(currentGates).effectivePairs
-			logTimed(formatCoordinatorPhase(currentGates.length, effectivePairs, originalGates.length, lastReportedGates, lastReportedPairs, phase, performance.now() - started))
-			lastReportedPairs = effectivePairs
+			const pairUses = circuitWireCost(currentGates).pairUses
+			logTimed(formatCoordinatorPhase(currentGates.length, pairUses, originalGates.length, lastReportedGates, lastReportedPairs, phase, performance.now() - started))
+			lastReportedPairs = pairUses
 			lastReportedGates = currentGates.length
 		}
 	}
@@ -1238,7 +1238,6 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 			const approxGates = wholeCircuit ? Array.from({ length: jobCount }, () => currentGates.slice()) : config.search.balancedWorkers ? balancedChunks(currentGates, jobCount, wireCosts) : splitArrayIntoApproximatelyChunks(currentGates, jobCount)
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
-			const splitCost = wholeCircuit ? undefined : new SplitCircuitCost(snapshots)
 			const stopSignal = new Int32Array(new SharedArrayBuffer(4))
 			const checkpoint = new AsyncReductionCheckpoint(currentGates, async snapshot => {
 				await writer.write([paths.progress(snapshot.length), paths.latest], snapshot)
@@ -1283,10 +1282,10 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 				const candidate = roundResult?.length ?? bestCount()
 				if (summaryThrottle.allow(performance.now(), force || verboseLogging() || candidate === 0)) {
 					const best = roundResult ?? (broadBest.length < localGates ? broadBest : roundSearchResult([localCandidate(), broadBest], true))
-					const effectivePairs = circuitWireCost(best).effectivePairs
-					logTimed(formatStatus({ effectivePairs, previousPairs: lastReportedPairs, original: originalGates.length, roundStart: nPrevGates, candidate, roundImproved: candidate < nPrevGates, previous: lastReportedGates, statuses, elapsedMs: elapsed }))
+					const pairUses = circuitWireCost(best).pairUses
+					logTimed(formatStatus({ pairUses, previousPairs: lastReportedPairs, original: originalGates.length, roundStart: nPrevGates, candidate, roundImproved: candidate < nPrevGates, previous: lastReportedGates, statuses, elapsedMs: elapsed }))
 					lastReportedGates = candidate
-					lastReportedPairs = effectivePairs
+					lastReportedPairs = pairUses
 				}
 				if (roundTimeReached(elapsed, candidate) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
@@ -1358,7 +1357,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 						const accept = (candidate: Gate[]) => {
 							// Several idle lanes may retry the same remaining chunk. Their
 							// results are alternatives, never additional chunks to concatenate.
-							if (!(splitCost ? splitCost.accept(target, candidate) : isBetterCircuit(candidate, snapshots[target]))) return
+							if (!isBetterCircuit(candidate, snapshots[target])) return
 							snapshots[target] = candidate; candidateCounts[target] = candidate.length
 							pendingCheckpoint = true
 							if (!candidate.length && !localCount()) Atomics.store(stopSignal, 0, 1)
@@ -1433,7 +1432,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 			const globalReduction = runBroad ? ` | Global: ${nPrevGates - broadBest.length} gates removed` : ''
 			const gatesPerHour = roundElapsedMs > 0 ? Math.floor(gatesRemoved * 3_600_000 / roundElapsedMs) : 0
 			const combinedReduction = winner === 'combined' ? ` | Combined: ${gatesRemoved} gates removed` : ''
-			logTimed(`Round winner: ${winner} | Local: ${localRemoved} gates removed${globalReduction}${combinedReduction} | Result: ${formatCircuitSize(currentGates.length, circuitWireCost(currentGates).effectivePairs)} | ${gatesPerHour} gates/hour`)
+			logTimed(`Round winner: ${winner} | Local: ${localRemoved} gates removed${globalReduction}${combinedReduction} | Result: ${formatCircuitSize(currentGates.length, circuitWireCost(currentGates).pairUses)} | ${gatesPerHour} gates/hour`)
 			for (const side of ['Local', 'Global'] as const) {
 				const counts = formatRoundStrategies(roundStrategies[side].values(), side)
 				if (counts) logTimed(counts)
