@@ -141,11 +141,11 @@
     // "quadratic", "rainbow", "variables", "forward-semantic-search", "equality-saturation",
     // "gf2-affine", "factored", "block-cancellation", "sat-sweeping", "mixed-basis",
     // "z3", "meet-in-the-middle", "quadratic-shear"
-    "localStrategyOrder": [], // Example ["quadratic-shear", "rainbow"]
+    "localStrategyOrder": ["quadratic-shear"], // Example ["quadratic-shear", "rainbow"]
     // Broad options in default order
     // "sat-sweeping", "quadratic-shear", "mixed-basis", "block-cancellation",
     // "symbolic", "factored", "dependency-cuts"
-    "broadStrategyOrder": [], // Example ["quadratic-shear", "sat-sweeping"]
+    "broadStrategyOrder": ["quadratic-shear"], // Example ["quadratic-shear", "sat-sweeping"]
     "subsetMinimum": 2, // Smallest local dependency subset in gates.
     "subsetMaximum": 199, // Largest local dependency subset in gates.
     "sliceMinimum": 2, // Smallest search window inside a local subset.
