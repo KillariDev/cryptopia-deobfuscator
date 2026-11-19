@@ -497,12 +497,25 @@ for (let round = 1; round < 30; round++) assert.equal(summaryThrottle.allow(roun
 assert.equal(summaryThrottle.allow(30_000), true)
 assert.equal(summaryThrottle.allow(30_001, true), true, 'verbose and final reports bypass the interval')
 const compact = formatStatus({ effectivePairs: 12, previousPairs: 15, original: 1000, roundStart: 200, candidate: 100, previous: 163, statuses: [status, { updatedAtMs: 0, done: true }], elapsedMs: 60_000 })
-assert.match(compact, /Circuit: 100G 12.00W -63G -3.00W \(90\.00% fewer than original\)/)
+assert.match(compact, /Circuit: 100G 12.00W -63G -3.00W \(90\.00%\)/)
 assert.ok(!compact.includes('Checkpoint'))
 assert.match(compact, /1 worker active/)
 assert.match(compact, /Round time: 1m 0s \/ 5m 0s$/)
 assert.ok(!compact.includes('oldest'))
 assert.ok(!compact.includes('subsets'))
+const strategyStatus = formatStatus({
+	effectivePairs: 12, previousPairs: 15, original: 1000, roundStart: 200, candidate: 100, previous: 163, elapsedMs: 60_000,
+	statuses: [
+		{ ...status, activity: { ...status.activity, strategies: [
+			{ strategy: 'sat-sweeping', settings: '{}', attempts: 4, rewrites: 1, gatesRemoved: 4, elapsedMs: 100 },
+			{ strategy: 'z3', settings: '{}', attempts: 4, rewrites: 2, gatesRemoved: 6, elapsedMs: 100 },
+		] } },
+		{ ...status, done: true, activity: { ...status.activity, strategies: [
+			{ strategy: 'sat-sweeping', settings: '{"limit":2}', attempts: 4, rewrites: 1, gatesRemoved: 4, elapsedMs: 100 },
+		] } },
+	],
+})
+assert.match(strategyStatus, / \| Top: SAT sweep$/)
 const completedStatus = formatStatus({ effectivePairs: 12, previousPairs: 10, original: 100, roundStart: 100, candidate: 50, previous: 60, statuses: [{ updatedAtMs: 0, done: true }], elapsedMs: 300_000 })
 assert.match(completedStatus, /All workers finished/)
 assert.match(completedStatus, /Round finished in 5m 0s/)

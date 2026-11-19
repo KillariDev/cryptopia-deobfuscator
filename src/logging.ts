@@ -85,7 +85,23 @@ export function formatStatus(status: SolverStatus) {
 	const broad = statuses.filter(worker => !worker.done && worker.started !== false && worker.activity?.scope === 'broad').length
 	const queued = statuses.filter(worker => !worker.done && worker.started === false).length
 	const late = statuses.filter(worker => !worker.done && worker.started !== false && elapsedMs - worker.updatedAtMs > Math.max(config.timing.summarySeconds * 2000, config.timing.workerReportSeconds * 3000)).length
-	return `${formatGateCount(candidate, status.effectivePairs, previous, status.previousPairs, original)} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${preparing ? `; ${preparing} preparing regions` : ''}${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
+	return `${formatGateCount(candidate, status.effectivePairs, previous, status.previousPairs, original)} | ${finished === statuses.length ? 'All workers finished' : `${active} worker${active === 1 ? '' : 's'} active${preparing ? `; ${preparing} preparing regions` : ''}${broad ? ` (${broad} broad)` : ''}${queued ? `; ${queued} job${queued === 1 ? '' : 's'} queued` : ''}`} | ${round}${formatTopStrategy(statuses)}${late ? ` | Warning: ${late} worker update${late === 1 ? '' : 's'} delayed` : ''}`
+}
+
+const strategyLabels: Record<string, string> = { 'dependency-cuts': 'cuts', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', z3: 'Z3' }
+
+function formatTopStrategy(statuses: WorkerStatus[]) {
+	const totals = new Map<string, { gatesRemoved: number, rewrites: number }>()
+	for (const status of statuses) for (const stat of status.activity?.strategies ?? []) {
+		if (stat.rewrites === 0 && stat.gatesRemoved === 0) continue
+		const total = totals.get(stat.strategy) ?? { gatesRemoved: 0, rewrites: 0 }
+		total.gatesRemoved += stat.gatesRemoved
+		total.rewrites += stat.rewrites
+		totals.set(stat.strategy, total)
+	}
+	const [top] = [...totals].sort(([a, left], [b, right]) =>
+		right.gatesRemoved - left.gatesRemoved || right.rewrites - left.rewrites || a.localeCompare(b))
+	return top ? ` | Top: ${strategyLabels[top[0]] ?? top[0]}` : ''
 }
 
 /** Per-job snapshots are summed once, including completed jobs in this round. */
@@ -122,9 +138,8 @@ export function formatRoundStrategies(activities: Iterable<WorkerActivity>, side
 		ids.add(workerId)
 	}
 	const counts = [...workers].map(([strategy, ids]) => [strategy, ids.size] as const)
-	const labels: Record<string, string> = { 'dependency-cuts': 'cuts', 'block-cancellation': 'blocks', 'sat-sweeping': 'SAT sweep', 'gf2-affine': 'GF2', 'forward-semantic-search': 'forward', 'meet-in-the-middle': 'MITM', 'equality-saturation': 'equality', z3: 'Z3' }
 	const summary = [...counts].sort(([a, countA], [b, countB]) => countB - countA || a.localeCompare(b))
-		.map(([strategy, count]) => `${labels[strategy] ?? strategy}:${count}`).join(', ')
+		.map(([strategy, count]) => `${strategyLabels[strategy] ?? strategy}:${count}`).join(', ')
 	return summary ? `${side ?? 'Round'} strategies: ${summary}` : undefined
 }
 
@@ -133,7 +148,7 @@ export const formatCircuitSize = (gates: number, pairs: number) => `${gates}G ${
 function formatGateCount(gates: number, pairs: number, previous: number, previousPairs: number, original: number) {
 	const reduction = original > 0 ? Math.max(0, (original - gates) / original * 100) : 0
 	const delta = (value: number, last: number) => value > last ? `+${value - last}` : `-${last - value}`
-	return `Circuit: ${formatCircuitSize(gates, pairs)} ${delta(gates, previous)}G ${pairs > previousPairs ? '+' : '-'}${Math.abs(pairs - previousPairs).toFixed(2)}W (${reduction.toFixed(2)}% fewer than original)`
+	return `Circuit: ${formatCircuitSize(gates, pairs)} ${delta(gates, previous)}G ${pairs > previousPairs ? '+' : '-'}${Math.abs(pairs - previousPairs).toFixed(2)}W (${reduction.toFixed(2)}%)`
 }
 
 export function formatCoordinatorPhase(gates: number, pairs: number, original: number, previous: number, previousPairs: number, phase: string, elapsedMs: number) {
