@@ -191,11 +191,16 @@ an ordered quadratic map whose target updates read their controls before those
 controls change. If both quadratic attempts fail, it tries degrees three and
 higher in order, up to `strategies.polynomialShearInterpolation.maximumDegree`
 (default 8). A degree-`d` fit checks all input subsets of up to `d` controls.
-The emitter groups terms that share a product and requires `d - 2` unused,
-unchanged wires to compute and restore that product. Higher-degree fitting
-stops at 65,536 probes per fit, 64 million packed gate evaluations across the
-higher-degree attempts, or when even one term would exceed the available gate
-budget. Worker deadlines also apply. The solver stops at the first verified
+The emitter groups terms that share a product. A group needs `d - 2`
+temporary wires outside its own controls. A restored wire can be used by later
+groups, including groups where it acts as a control. Earlier probe evaluations
+are reused across attempts. Higher-degree fitting stops at 65,536 probes per
+fit, 64 million packed gate evaluations across new higher-degree probes, or when
+even one term would exceed the available gate budget. If a global fit hits the
+probe limit, the solver samples which controls each output responds to and
+tries fitting the outputs on those smaller sets. Mismatches on preliminary
+checks can suggest controls to add back. The normal verification step still
+checks the entire replacement. Worker deadlines also apply. The solver stops at the first verified
 improvement. The emitter packs compatible terms into a single gate and
 tries a shared-output basis change when overlapping target expressions can
 justify the cost of changing and restoring the basis. Broad search checks the

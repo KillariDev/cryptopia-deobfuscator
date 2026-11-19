@@ -189,6 +189,41 @@ try {
 
 
 
+	// The global degree-four domain already exceeds the probe cap across these
+	// 48 controls. Each target only requires five controls, and every stable
+	// wire is used somewhere, so borrowing must happen within each group.
+	const wideSparse = Array.from({ length: 16 }, (_, i) => {
+		const controls = Array.from({ length: 5 }, (_, offset) => (3 * i + offset) % 48)
+		const scratch = Array.from({ length: 3 }, (_, offset) => (3 * i + 5 + offset) % 48)
+		return [
+			...toggleProduct(controls, 48 + i, scratch),
+			...controls.map(a => ({ a, b: 0, target: 48 + i, gate_i: 3 })),
+		]
+	}).flat()
+	let wideVerification: string | undefined
+	const wideResult = synthesizePolynomialShear(wideSparse, 64, 100000, 10000000, () => false, 0,
+		outcome => { wideVerification = outcome.verification })
+	assert.ok(wideResult && wideResult.length < wideSparse.length)
+	assert.equal(wideVerification, 'polynomial')
+
+	// Repeated fitting from zero would exceed the cumulative work cap at
+	// degree nine. Reusing all lower-weight probes keeps this region in budget.
+	const ninthControls = Array.from({ length: 9 }, (_, i) => i)
+	const ninthScratch = Array.from({ length: 7 }, (_, i) => i + 9)
+	const ninth = [16, 17].flatMap(target => [
+		...toggleProduct(ninthControls, target, ninthScratch), { a: 0, b: 0, target, gate_i: 3 },
+	])
+	while (ninth.length < 20_000) {
+		const padding = { a: 0, b: 0, target: 0, gate_i: 15 }
+		ninth.push(padding, padding)
+	}
+	let ninthVerification: string | undefined
+	const ninthResult = synthesizePolynomialShear(ninth, 18, 100000, 10000000, () => false, 0,
+		outcome => { ninthVerification = outcome.verification }, 9)
+	assert.equal(ninthResult?.length, 386)
+	assert.equal(ninthVerification, 'polynomial')
+
+
 	Object.assign(config.synthesis, { factored: true, satSweeping: true, mixedBasis: true, blockCancellation: true, affine: true })
 	config.search.dependencyCuts = true
 	assert.deepEqual(broadStrategyOrder(), ['sat-sweeping', 'polynomial-shear-interpolation', 'basis-change-cancellation', 'block-cancellation', 'polynomial-region-search', 'factored-synthesis', 'dependency-cuts'])

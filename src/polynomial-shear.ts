@@ -62,11 +62,52 @@ function fittingInputCount(controls: number, degree: number) {
 	return total
 }
 
-function fitPolynomial(gates: Gate[], width: number, controls: number[], targets: number[], stopped: () => boolean, degree = 2) {
-	const samples = fittingInputCount(controls.length, degree)
-	const fitting = new Uint32Array(Math.ceil(samples / 32) * width)
-	const bits = Array.from({ length: width }, (_, i) => 1n << BigInt(i))
-	const masks: bigint[] = [0n]
+const maximumFitInputs = 65_536
+const maximumPackedWork = 64_000_000
+
+type PackedProbe = { outputs: Uint32Array, offset: number, bit: number }
+
+class FittingProbes {
+	private readonly values = new Map<bigint, PackedProbe>()
+	private readonly wireIndices: Map<bigint, number>
+	remainingWork = maximumPackedWork
+	limited = false
+
+	constructor(private readonly gates: Gate[], private readonly width: number, private readonly stopped: () => boolean) {
+		this.wireIndices = new Map(Array.from({ length: width }, (_, i) => [1n << BigInt(i), i]))
+	}
+
+	prepare(masks: Iterable<bigint>, bounded: boolean) {
+		const pending = [...masks].filter(mask => !this.values.has(mask))
+		if (!pending.length) return true
+		const batches = Math.ceil(pending.length / 32)
+		const work = this.gates.length * batches
+		if (bounded && work > this.remainingWork) {
+			this.limited = true
+			return false
+		}
+		const inputs = new Uint32Array(batches * this.width)
+		for (let sample = 0; sample < pending.length; sample++) {
+			if ((sample & 255) === 0 && this.stopped()) return false
+			for (let mask = pending[sample]; mask; mask &= mask - 1n) {
+				const wire = this.wireIndices.get(mask & -mask)!
+				setInputBit(inputs, this.width, wire, sample)
+			}
+		}
+		const outputs = evaluatePacked(this.gates, inputs, this.width, this.stopped)
+		if (!outputs) return false
+		if (bounded) this.remainingWork -= work
+		pending.forEach((mask, sample) => this.values.set(mask, { outputs, offset: (sample >>> 5) * this.width, bit: sample & 31 }))
+		return true
+	}
+
+	resolve(masks: bigint[]) {
+		return masks.map(mask => this.values.get(mask)!)
+	}
+}
+
+function fittingDomain(controls: number[], bits: bigint[], degree: number, stopped: () => boolean) {
+	const masks = [0n]
 	const indices = new Map([[0n, 0]])
 	const transform: number[][] = controls.map(() => [])
 	const chosen: number[] = []
@@ -82,40 +123,130 @@ function fitPolynomial(gates: Gate[], width: number, controls: number[], targets
 		const sample = masks.length
 		masks.push(mask)
 		indices.set(mask, sample)
-		for (const i of chosen) {
-			const wire = controls[i]
-			setInputBit(fitting, width, wire, sample)
-			transform[i].push(sample, indices.get(mask ^ bits[wire])!)
-		}
+		for (const i of chosen) transform[i].push(sample, indices.get(mask ^ bits[controls[i]])!)
 	}
 	for (let size = 1; size <= degree; size++) {
 		if (stopped()) return undefined
 		enumerate(0, size, 0n)
 	}
-	const outputs = evaluatePacked(gates, fitting, width, stopped)
-	if (!outputs) return undefined
+	return { masks, transform }
+}
+
+function fitRow(probes: PackedProbe[], target: number, targetBit: bigint, domain: NonNullable<ReturnType<typeof fittingDomain>>) {
+	const { masks, transform } = domain
+	const coefficients = new Uint8Array(masks.length)
+	for (let sample = 0; sample < masks.length; sample++) {
+		const { outputs, offset, bit } = probes[sample]
+		coefficients[sample] = ((outputs[offset + target] >>> bit) & 1) ^ Number((masks[sample] & targetBit) !== 0n)
+	}
+	// Low-weight inputs are closed under removing a bit, so the Boolean
+	// Möbius transform only visits the sampled inputs.
+	for (const pairs of transform) {
+		for (let i = 0; i < pairs.length; i += 2) coefficients[pairs[i]] ^= coefficients[pairs[i + 1]]
+	}
+	const row = new Set([targetBit])
+	for (let sample = 0; sample < masks.length; sample++) {
+		if (coefficients[sample] && !row.delete(masks[sample])) row.add(masks[sample])
+	}
+	return row
+}
+
+function fitPolynomial(probes: FittingProbes, gates: Gate[], bits: bigint[], controls: number[], targets: number[], stopped: () => boolean, degree = 2) {
+	const domain = fittingDomain(controls, bits, degree, stopped)
+	if (!domain || !probes.prepare(domain.masks, degree > 2)) return undefined
 	const rows = bits.map(bit => new Set([bit]))
+	const packed = probes.resolve(domain.masks)
 	for (const target of targets) {
 		if (stopped()) return undefined
-		const coefficients = new Uint8Array(samples)
-		for (let sample = 0; sample < samples; sample++) {
-			const index = (sample >>> 5) * width + target
-			coefficients[sample] = ((outputs[index] ^ fitting[index]) >>> (sample & 31)) & 1
-		}
-		// Low-weight inputs are closed under removing a bit, so the Boolean
-		// Möbius transform only visits the sampled inputs.
-		for (const pairs of transform) {
-			for (let i = 0; i < pairs.length; i += 2) coefficients[pairs[i]] ^= coefficients[pairs[i + 1]]
-		}
-		for (let sample = 0; sample < samples; sample++) {
-			if (coefficients[sample] && !rows[target].delete(masks[sample])) rows[target].add(masks[sample])
-		}
+		rows[target] = fitRow(packed, target, bits[target], domain)
 	}
 	const wires = bits.map((_, i) => i)
 	if (degree > 2) return emitPolynomialShear(rows, wires, gates.length, stopped)
-	return controls.length === width
+	return controls.length === bits.length
 		? emitQuadraticMap(rows, wires, gates.length, stopped)
 		: emitShear(rows, wires, targets, gates.length, stopped)
+}
+
+function* fitPerOutput(probes: FittingProbes, gates: Gate[], bits: bigint[], controls: number[], targets: number[], maximumDegree: number, validationInputs: Uint32Array, validationOutputs: Uint32Array, stopped: () => boolean): Generator<Gate[] | undefined> {
+	const width = bits.length
+	const discoveryBatches = 8
+	const discoveryWork = gates.length * discoveryBatches * (controls.length + 1)
+	if (discoveryWork >= probes.remainingWork) return
+	probes.remainingWork -= discoveryWork
+	const backgrounds = randomFillSync(new Uint32Array(discoveryBatches * width))
+	const baseline = evaluatePacked(gates, backgrounds, width, stopped)
+	if (!baseline) return
+	const supports = targets.map(() => [] as number[])
+	const discover = (inputs: Uint32Array, observed: Uint32Array, mismatch?: Uint32Array) => {
+		let expanded = false
+		for (const control of controls) {
+			if (mismatch && targets.every((_, i) => supports[i].includes(control))) continue
+			if (mismatch && probes.remainingWork < gates.length * (inputs.length / width)) break
+			if (mismatch) probes.remainingWork -= gates.length * (inputs.length / width)
+			const flipped = inputs.slice()
+			for (let offset = 0; offset < flipped.length; offset += width) flipped[offset + control] ^= -1
+			const output = evaluatePacked(gates, flipped, width, stopped)
+			if (!output) break
+			targets.forEach((target, i) => {
+				if (supports[i].includes(control)) return
+				for (let offset = 0; offset < output.length; offset += width) {
+					const index = offset + target
+					if (!((output[index] ^ observed[index]) & (mismatch?.[index] ?? -1))) continue
+					supports[i].push(control)
+					expanded = true
+					break
+				}
+			})
+		}
+		return expanded
+	}
+	discover(backgrounds, baseline)
+	let refined = false
+	if (supports.every(support => support.length === controls.length)) return
+	const wires = bits.map((_, i) => i)
+	for (let degree = 2; degree <= Math.min(maximumDegree, Math.max(2, ...supports.map(support => support.length))) && !stopped(); degree++) {
+		const masks = new Set<bigint>()
+		const domains = new Map<string, NonNullable<ReturnType<typeof fittingDomain>>>()
+		const perTarget = []
+		let domainInputs = 0
+		for (const support of supports) {
+			if (fittingInputCount(support.length, degree) > maximumFitInputs) return
+			const key = support.join(',')
+			let domain = domains.get(key)
+			if (!domain) {
+				domainInputs += fittingInputCount(support.length, degree)
+				if (domainInputs > 2 * maximumFitInputs) return
+				domain = fittingDomain(support, bits, degree, stopped)
+				if (!domain) return
+				domains.set(key, domain)
+				for (const mask of domain.masks) masks.add(mask)
+				if (masks.size > maximumFitInputs) return
+			}
+			perTarget.push(domain)
+		}
+		if (!probes.prepare(masks, true)) return
+		const rows = bits.map(bit => new Set([bit]))
+		const packed = new Map([...domains.values()].map(domain => [domain, probes.resolve(domain.masks)]))
+		for (let i = 0; i < targets.length; i++) {
+			if (stopped()) return
+			const target = targets[i]
+			rows[target] = fitRow(packed.get(perTarget[i])!, target, bits[target], perTarget[i])
+		}
+		const candidate = degree === 2
+			? emitShear(rows, wires, targets, gates.length, stopped)
+			: emitPolynomialShear(rows, wires, gates.length, stopped)
+		if (candidate && !refined && probes.remainingWork >= gates.length * (validationInputs.length / width)) {
+			probes.remainingWork -= gates.length * (validationInputs.length / width)
+			const predicted = evaluatePacked(candidate, validationInputs, width, stopped)
+			if (!predicted) return
+			const mismatch = predicted.map((value, i) => value ^ validationOutputs[i])
+			if (mismatch.some(Boolean)) {
+				refined = true
+				if (discover(validationInputs, validationOutputs, mismatch)) { degree--; continue }
+			}
+		}
+		yield candidate
+	}
 }
 
 export type PolynomialShearVerification = { verification: 'polynomial' | 'exhaustive' | 'sampled', validationInputs?: number }
@@ -161,12 +292,14 @@ export function synthesizePolynomialShear(gates: Gate[], maximumWires: number, m
 		else controls.push(wire)
 	}
 
+	const bits = wires.map((_, i) => 1n << BigInt(i))
+	const fitting = new FittingProbes(mapped, width, stopped)
 	const candidates = function* () {
-		yield targets.length ? fitPolynomial(mapped, width, controls, targets, stopped) : []
+		yield targets.length ? fitPolynomial(fitting, mapped, bits, controls, targets, stopped) : []
 		if (targets.length && controls.length < width && !stopped()) {
-			yield fitPolynomial(mapped, width, wires.map((_, i) => i), targets, stopped)
+			yield fitPolynomial(fitting, mapped, bits, wires.map((_, i) => i), targets, stopped)
 		}
-		let remainingWork = 64_000_000
+		let reachedProbeLimit = false
 		for (let degree = 3; degree <= maximumDegree && 2 * degree - 2 <= controls.length && !stopped(); degree++) {
 			if (degree === 5) {
 				// High-degree terms can flip infrequently. Refine the partition
@@ -189,9 +322,13 @@ export function synthesizePolynomialShear(gates: Gate[], maximumWires: number, m
 				continue
 			}
 			const samples = fittingInputCount(controls.length, degree)
-			remainingWork -= gates.length * Math.ceil(samples / 32)
-			if (2 * degree - 2 > controls.length || samples > 65_536 || remainingWork < 0 || borrowedProductGateCount(degree) >= gates.length) break
-			yield fitPolynomial(mapped, width, controls, targets, stopped, degree)
+			if (2 * degree - 2 > controls.length || borrowedProductGateCount(degree) >= gates.length) break
+			if (samples > maximumFitInputs) { reachedProbeLimit = true; break }
+			yield fitPolynomial(fitting, mapped, bits, controls, targets, stopped, degree)
+			if (fitting.limited) { reachedProbeLimit = true; break }
+		}
+		if (reachedProbeLimit && targets.length && !stopped()) {
+			yield* fitPerOutput(fitting, mapped, bits, controls, targets, maximumDegree, probes, observed, stopped)
 		}
 	}
 	const equivalent = createPolynomialEquivalenceChecker(mapped, width, maximumTerms, maximumOperations, stopped)

@@ -147,9 +147,9 @@ export function emitPolynomialShear(rows: Set<bigint>[], wires: number[], maximu
 	const { bits, indices } = emitterBasis(wires.length)
 	const middle = rows.map(row => new Set(row))
 	const stable = bits.reduce((mask, bit, i) => rows[i].size === 1 && rows[i].has(bit) ? mask | bit : mask, 0n)
-	let used = 0n, maximumDegree = 2
+	let used = 0n
 	const terms: { term: bigint, target: number }[] = []
-	const groups = new Map<bigint, { indices: number[], computeGates: number }>()
+	const groups = new Map<bigint, { indices: number[], computeGates: number, scratchCount: number }>()
 	for (let target = 0; target < rows.length; target++) for (const term of rows[target]) {
 		if (stopped()) return undefined
 		if (term === bits[target]) continue
@@ -158,27 +158,26 @@ export function emitPolynomialShear(rows: Set<bigint>[], wires: number[], maximu
 		const factors: bigint[] = []
 		for (let pending = term; pending; pending &= pending - 1n) factors.push(pending & -pending)
 		if (factors.length <= 2) continue
-		maximumDegree = Math.max(maximumDegree, factors.length)
 		const index = terms.length
 		terms.push({ target, term })
 		for (const factor of factors) {
 			const product = term ^ factor
 			const group = groups.get(product)
 			if (group) group.indices.push(index)
-			else groups.set(product, { indices: [index], computeGates: borrowedProductGateCount(factors.length - 1) })
+			else groups.set(product, { indices: [index], computeGates: borrowedProductGateCount(factors.length - 1), scratchCount: factors.length - 2 })
 		}
 		middle[target].delete(term)
 	}
 	if (!terms.length || 2 * terms.length >= maximumGates) return undefined
-	const scratch = bits.flatMap((bit, i) => bit & stable && !(bit & used) ? [wires[i]] : [])
-	if (scratch.length < maximumDegree - 2) return undefined
+	const stableWires = bits.flatMap((bit, i) => bit & stable ? [i] : [])
+	const available = [...stableWires.filter(i => !(bits[i] & used)), ...stableWires.filter(i => bits[i] & used)]
 
-	const productToggle = (product: bigint, target: number, depth: number): Gate[] => {
+	const productToggle = (product: bigint, target: number, scratch: number[], depth: number): Gate[] => {
 		const first = product & -product
 		const rest = product ^ first
 		const a = wires[indices.get(first)!]
 		if (!(rest & (rest - 1n))) return [{ a, b: wires[indices.get(rest)!], target, gate_i: 1 }]
-		const compute = productToggle(rest, scratch[depth], depth + 1)
+		const compute = productToggle(rest, scratch[depth], scratch, depth + 1)
 		const flip = { a: scratch[depth], b: a, target, gate_i: 1 }
 		return [...compute, flip, ...compute, flip]
 	}
@@ -186,17 +185,35 @@ export function emitPolynomialShear(rows: Set<bigint>[], wires: number[], maximu
 	const remaining = new Set(terms.map((_, i) => i))
 	while (remaining.size) {
 		if (stopped()) return undefined
-		let bestProduct = 0n, bestComputeGates = Infinity, best: number[] = []
+		let bestProduct = 0n, bestComputeGates = Infinity, best: number[] = [], scratch: number[] = []
 		for (const [product, group] of groups) {
-			const pending = group.indices.filter(index => remaining.has(index))
-			if (pending.length && (!best.length || group.computeGates * best.length < bestComputeGates * pending.length)) {
+			if (stopped()) return undefined
+			let needed = product
+			let free = stableWires.length - 2 * group.scratchCount - 1
+			if (free < 1) continue
+			// Reserve enough temporary wires even when different terms use
+			// different last factors. Restored wires can serve later groups.
+			const pending: number[] = []
+			for (const index of group.indices) {
+				if (!remaining.has(index)) continue
+				const factor = terms[index].term ^ product
+				if (!(needed & factor)) {
+					if (!free) continue
+					free--
+					needed |= factor
+				}
+				pending.push(index)
+			}
+			if (free < 0 || !pending.length) continue
+			if (!best.length || group.computeGates * best.length < bestComputeGates * pending.length) {
 				bestProduct = product
 				bestComputeGates = group.computeGates
 				best = pending
+				scratch = available.filter(i => !(bits[i] & needed)).slice(0, group.scratchCount).map(i => wires[i])
 			}
 		}
-		if (body.length + 2 * (bestComputeGates + best.length) >= maximumGates) return undefined
-		const compute = productToggle(bestProduct, scratch[0], 1)
+		if (!best.length || body.length + 2 * (bestComputeGates + best.length) >= maximumGates) return undefined
+		const compute = productToggle(bestProduct, scratch[0], scratch, 1)
 		const flips = best.map(index => {
 			remaining.delete(index)
 			const { target, term } = terms[index]
