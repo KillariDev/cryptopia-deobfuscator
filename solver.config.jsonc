@@ -136,6 +136,9 @@
   // Region selection and search infrastructure shared by strategies.
   "search": {
     "strategyAdaptive": true, // Keep productive strategies across rounds and rotate after misses.
+    // Listed solvers run first in order. Omitted enabled solvers follow in their default order.
+    "localStrategyOrder": [], // Example ["rainbow", "quadratic"]
+    "broadStrategyOrder": [], // Example ["quadratic-shear", "sat-sweeping"]
     "subsetMinimum": 2, // Smallest local dependency subset in gates.
     "subsetMaximum": 199, // Largest local dependency subset in gates.
     "sliceMinimum": 2, // Smallest search window inside a local subset.

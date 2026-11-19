@@ -89,7 +89,7 @@ The solver combines several approaches:
   expose simplifications that were not adjacent before.
 - **Local search:** prioritize recently changed regions. Adaptive search modes
   remain available through `search.adaptive`, but are off by default.
-- **Strategy rotation:** in split-circuit mode, local workers start with quadratic synthesis when enabled,
+- **Strategy rotation:** by default in split-circuit mode, local workers start with quadratic synthesis when enabled,
   followed by rainbow lookup in the rotation. When quadratic is disabled, local
   workers start at offset positions in the enabled strategy order. A worker keeps
   its strategy for the entire round and advances after a round without a gate
@@ -99,6 +99,27 @@ The solver combines several approaches:
 The round summary reports worker counts by strategy. Set `search.strategyAdaptive` to false to use the fixed pipeline and
 synthesis rotation. Failed-region caches are separate by strategy so each method
 can try the same region.
+
+Set `search.localStrategyOrder` or `search.broadStrategyOrder` to give
+specific strategies priority. For example, this tries rainbow before quadratic
+in local search and quadratic shear before SAT sweeping in broad search.
+
+```jsonc
+"search": {
+  "localStrategyOrder": ["rainbow", "quadratic"],
+  "broadStrategyOrder": ["quadratic-shear", "sat-sweeping"]
+}
+```
+
+Omitted enabled strategies follow in their default order. Disabled and ineligible
+strategies are skipped. The local order applies to adaptive rounds and to queuing
+whole-circuit local jobs. With adaptive strategy selection disabled, split local
+jobs use the fixed pipeline. The broad order applies in both modes.
+
+| Scope | Strategy names in default order |
+| --- | --- |
+| Local | `quadratic`, `rainbow`, `variables`, `forward-semantic-search`, `equality-saturation`, `gf2-affine`, `factored`, `block-cancellation`, `sat-sweeping`, `mixed-basis`, `z3`, `meet-in-the-middle` |
+| Broad | `sat-sweeping`, `quadratic-shear`, `mixed-basis`, `block-cancellation`, `symbolic`, `factored`, `dependency-cuts` |
 
 Local GF(2) affine synthesis (`strategies.gf2Affine.enabled`, enabled by default) is selected among
 the eligible synthesis choices. It is not an unconditional startup or worker
@@ -131,7 +152,7 @@ any limit declines that candidate without dropping terms or accepting an
 approximate equivalence.
 
 A broad worker starts with the full circuit and scans overlapping coarse-to-fine
-regions. Its strategy order is SAT sweeping with bounded dependency cuts,
+regions. Its default strategy order is SAT sweeping with bounded dependency cuts,
 quadratic shear interpolation, mixed-basis simplification, block cancellation,
 whole-region symbolic synthesis, factored synthesis, and dependency cuts.
 Rainbow lookup and variable elimination remain available inside dependency cuts
