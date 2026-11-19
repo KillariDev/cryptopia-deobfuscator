@@ -109,7 +109,7 @@
   "timing": {
     "checkpointSeconds": 30, // Seconds between attempts to save the best candidate.
     "roundMinutes": 25, // Round target in minutes when local search has no gate reduction.
-    "improvedRoundMinutes": 5, // Round target in minutes once local search removes gates.
+    "improvedRoundMinutes": 1, // Round target in minutes once local search removes gates.
     "summarySeconds": 30, // Seconds between console progress summaries.
     "workerReportSeconds": 5, // Seconds between worker progress reports.
     "databaseLogSeconds": 60, // Seconds between database-generation status updates.
