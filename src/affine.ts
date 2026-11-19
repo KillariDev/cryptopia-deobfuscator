@@ -11,16 +11,15 @@ function expressions(gates: Gate[], wires: number[], stopped: () => boolean) {
 	for (let index = 0; index < gates.length; index++) {
 		if (index % 256 === 0 && stopped()) return undefined
 		const gate = gates[index]
-		const a = () => rows[indices.get(gate.a)!], b = () => rows[indices.get(gate.b)!]
 		let control: bigint
 		switch (gate.gate_i) {
 			case 0: control = 0n; break
-			case 3: control = a(); break
-			case 5: control = b(); break
-			case 6: control = a() ^ b(); break
-			case 9: control = a() ^ b() ^ constant; break
-			case 10: control = b() ^ constant; break
-			case 12: control = a() ^ constant; break
+			case 3: control = rows[indices.get(gate.a)!]; break
+			case 5: control = rows[indices.get(gate.b)!]; break
+			case 6: control = rows[indices.get(gate.a)!] ^ rows[indices.get(gate.b)!]; break
+			case 9: control = rows[indices.get(gate.a)!] ^ rows[indices.get(gate.b)!] ^ constant; break
+			case 10: control = rows[indices.get(gate.b)!] ^ constant; break
+			case 12: control = rows[indices.get(gate.a)!] ^ constant; break
 			case 15: control = constant; break
 			default: throw new Error('Non-affine gate in affine synthesis')
 		}
@@ -36,7 +35,8 @@ export function synthesizeAffine(input: Gate[], maximumWires = 64, deadline = In
 	const gates: Gate[] = [], used = new Set<number>()
 	for (let index = 0; index < input.length; index++) {
 		if (index % 256 === 0 && stopped()) return undefined
-		const gate = simplifyGate(input[index])
+		const inputGate = input[index]
+		const gate = inputGate.a === inputGate.b ? simplifyGate(inputGate) : inputGate
 		if (!affineControls.has(gate.gate_i)) return undefined
 		gates.push(gate)
 		for (const wire of getVars(gate)) used.add(wire)
@@ -50,8 +50,13 @@ export function synthesizeAffine(input: Gate[], maximumWires = 64, deadline = In
 
 /** Synthesize a matrix established by an exact symbolic analysis. */
 export function synthesizeAffineMap(original: bigint[], wires: number[], maximumGates: number, stopped: () => boolean): Gate[] | undefined {
-	const rows = original.slice()
 	const bits = wires.map((_, index) => 1n << BigInt(index))
+	let changed = 0
+	// Each changed output needs at least one gate targeting its wire.
+	for (let i = 0; i < original.length; i++) {
+		if (original[i] !== bits[i] && ++changed >= maximumGates) return undefined
+	}
+	const rows = original.slice()
 	const constant = 1n << BigInt(wires.length)
 	const operations: Gate[] = []
 	const addRow = (source: number, target: number) => {

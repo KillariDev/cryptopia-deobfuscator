@@ -4,22 +4,41 @@ import { Gate } from './types.js'
  * Cyclic dependencies, target-dependent deltas and higher degrees are declined. */
 export function emitQuadraticMap(rows: Set<bigint>[], wires: number[], maximumGates: number, stopped: () => boolean): Gate[] | undefined {
 	const bits = wires.map((_, i) => 1n << BigInt(i))
-	const deltas = rows.map((row, i) => {
-		const delta = new Set(row)
-		if (delta.has(bits[i])) delta.delete(bits[i]); else delta.add(bits[i])
-		return delta
-	})
-	const changed = deltas.map((delta, i) => delta.size ? i : -1).filter(i => i >= 0)
+	const bitIndices = new Map(bits.map((bit, i) => [bit, i]))
+	const changed = rows.map((row, i) => row.size === 1 && row.has(bits[i]) ? -1 : i).filter(i => i >= 0)
+	const changedWires = new Set(changed)
 	const dependencies = wires.map(() => new Set<number>()), incoming = wires.map(() => 0)
-	for (const target of changed) for (const monomial of deltas[target]) {
-		if (stopped()) return undefined
-		if ((monomial & bits[target]) !== 0n) return undefined
-		const controls = bits.flatMap((bit, i) => (monomial & bit) !== 0n ? [i] : [])
-		if (controls.length > 2) return undefined
-		for (const control of controls) if (deltas[control].size && !dependencies[target].has(control)) {
-			// This output must read the control before that control is changed.
-			dependencies[target].add(control); incoming[control]++
+	const terms = new Map<number, { constant: boolean, singles: number[], pairs: [number, number][] }>()
+	let gateCount = 0
+	for (const target of changed) {
+		const row = rows[target], targetBit = bits[target]
+		// A missing identity term makes the delta depend on the target.
+		if (!row.has(targetBit) || stopped()) return undefined
+		const constant = row.has(0n)
+		const singles: number[] = [], pairs: [number, number][] = []
+		const uses = dependencies[target]
+		for (const term of row) {
+			if (stopped()) return undefined
+			if (term === 0n || term === targetBit) continue
+			if ((term & targetBit) !== 0n) return undefined
+			const lowBit = term & -term
+			const a = bitIndices.get(lowBit)
+			if (a === undefined) return undefined
+			const rest = term ^ lowBit
+			if (rest === 0n) singles.push(a)
+			else {
+				const b = bitIndices.get(rest)
+				if (b === undefined) return undefined
+				pairs.push([a, b])
+				if (changedWires.has(b)) uses.add(b)
+			}
+			if (changedWires.has(a)) uses.add(a)
 		}
+		gateCount += Math.max(Number(constant), pairs.length + Math.ceil(singles.length / 2))
+		if (gateCount >= maximumGates) return undefined
+		// This output must read its controls before they change.
+		for (const control of uses) incoming[control]++
+		terms.set(target, { constant, singles, pairs })
 	}
 	const ready = changed.filter(i => incoming[i] === 0), order: number[] = []
 	while (ready.length) {
@@ -32,21 +51,20 @@ export function emitQuadraticMap(rows: Set<bigint>[], wires: number[], maximumGa
 	const result: Gate[] = []
 	for (const target of order) {
 		if (stopped()) return undefined
-		let constant = deltas[target].has(0n)
-		const singles: number[] = [], pairs: number[][] = []
-		for (const monomial of [...deltas[target]].sort((a, b) => a < b ? -1 : a > b ? 1 : 0)) {
-			if (!monomial) continue
-			const controls = bits.flatMap((bit, i) => (monomial & bit) !== 0n ? [wires[i]] : [])
-			if (controls.length === 1) singles.push(controls[0]); else pairs.push(controls)
+		let { constant, singles, pairs } = terms.get(target)!
+		singles.sort((a, b) => a - b)
+		// Sorting by high bit, then low bit, preserves monomial order.
+		pairs.sort(([a, b], [c, d]) => b - d || a - c)
+		for (const [a, b] of pairs) {
+			result.push({ a: wires[a], b: wires[b], target: wires[target], gate_i: constant ? 14 : 1 })
+			constant = false
 		}
-		for (const [a, b] of pairs) { result.push({ a, b, target: wires[target], gate_i: constant ? 14 : 1 }); constant = false }
 		for (let i = 0; i < singles.length; i += 2) {
-			const a = singles[i], b = singles[i + 1]
+			const a = wires[singles[i]], b = wires[singles[i + 1]]
 			result.push({ a, b: b ?? 0, target: wires[target], gate_i: b === undefined ? (constant ? 12 : 3) : (constant ? 9 : 6) })
 			constant = false
 		}
 		if (constant) result.push({ a: 0, b: 0, target: wires[target], gate_i: 15 })
-		if (result.length >= maximumGates) return undefined
 	}
 	return result
 }

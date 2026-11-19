@@ -19,18 +19,17 @@ const sameControlCoefficients = coefficients.map(({ c }, gate) => ({
 }))
 const nonlinear = (gate: Gate) => gate.a !== gate.b && coefficients[gate.gate_i].ab !== 0
 
-function composePolynomials(input: Gate[], wires: number[], maximumTerms: number, stopped: () => boolean, spend: () => boolean) {
-	const indices = new Map(wires.map((wire, i) => [wire, i]))
+function composePolynomials(input: Gate[], indices: ReadonlyMap<number, number>, maximumTerms: number, stopped: () => boolean, spend: () => boolean) {
 	// A set is a polynomial over GF(2); 0 is the constant monomial.
 	// Multiplication unions variable masks because Boolean x*x equals x.
-	const rows = wires.map((_, i) => new Set([1n << BigInt(i)]))
+	const rows = Array.from({ length: indices.size }, (_, i) => new Set([1n << BigInt(i)]))
 	let terms = rows.length
 	if (terms > maximumTerms) return undefined
 	const toggle = (row: Set<bigint>, monomial: bigint) => {
 		if (!row.delete(monomial)) row.add(monomial)
 	}
 	for (let index = 0; index < input.length; index++) {
-		if (stopped()) return undefined
+		if ((index & 31) === 0 && stopped()) return undefined
 		const gate = input[index]
 		// For one repeated control, evaluate the diagonal of the truth table.
 		// Boolean p*p is p, so multiplying the same ANF by itself is unnecessary.
@@ -62,14 +61,14 @@ function composePolynomials(input: Gate[], wires: number[], maximumTerms: number
 		if (terms > maximumTerms) return undefined
 		rows[target] = result // Aliased controls must read the old target until here.
 	}
-	return rows
+	return stopped() ? undefined : rows
 }
 
 /** Exact admission check after sampling. Inconclusive/resource-limited checks
  * return undefined, never permission to rewrite. Cache the original ANF only
  * for this candidate search, and compute it lazily after samples agree. */
 export function createPolynomialEquivalenceChecker(input: Gate[], nVariables: number, maximumTerms: number, maximumOperations: number, shouldStop: () => boolean = () => false) {
-	const wires = Array.from({ length: nVariables }, (_, i) => i)
+	const indices = new Map(Array.from({ length: nVariables }, (_, i) => [i, i]))
 	let attempted = false, expected: Set<bigint>[] | undefined
 	return (candidate: Gate[]): boolean | undefined => {
 		if (shouldStop()) return undefined
@@ -77,14 +76,14 @@ export function createPolynomialEquivalenceChecker(input: Gate[], nVariables: nu
 		const spend = () => ++operations > maximumOperations || (operations % 256 === 0 && shouldStop())
 		if (!attempted) {
 			attempted = true
-			expected = composePolynomials(input, wires, maximumTerms, shouldStop, spend)
+			expected = composePolynomials(input, indices, maximumTerms, shouldStop, spend)
 		}
 		if (!expected) return undefined
 		for (let i = 0; i < candidate.length; i++) {
 			if (i % 256 === 0 && shouldStop()) return undefined
 			if (getVars(candidate[i]).some(wire => !Number.isInteger(wire) || wire < 0 || wire >= nVariables)) return false
 		}
-		const actual = composePolynomials(candidate, wires, maximumTerms, shouldStop, spend)
+		const actual = composePolynomials(candidate, indices, maximumTerms, shouldStop, spend)
 		if (!actual) return undefined
 		let checked = 0
 		for (let i = 0; i < actual.length; i++) {
@@ -110,23 +109,23 @@ export function synthesizeMixedAffine(input: Gate[], maximumWires: number, maxim
 		if (used.size > maximumWires) return undefined
 	}
 	const wires = [...used].sort((a, b) => a - b)
+	const indices = new Map(wires.map((wire, i) => [wire, i]))
 	let operations = 0
 	const spend = () => ++operations > maximumOperations || (operations % 256 === 0 && stopped())
-	const rows = composePolynomials(input, wires, maximumTerms, stopped, spend)
+	const rows = composePolynomials(input, indices, maximumTerms, stopped, spend)
 	if (!rows) return undefined
 	const constant = 1n << BigInt(wires.length)
 	const affine: bigint[] = []
-	let allAffine = true
-	for (const row of rows) {
+	affineRows: for (const row of rows) {
 		let expression = 0n
 		for (const monomial of row) {
 			if (spend()) return undefined
-			if (monomial !== 0n && (monomial & (monomial - 1n)) !== 0n) allAffine = false
+			if (monomial !== 0n && (monomial & (monomial - 1n)) !== 0n) break affineRows
 			expression ^= monomial === 0n ? constant : monomial
 		}
 		affine.push(expression)
 	}
-	if (allAffine) {
+	if (affine.length === rows.length) {
 		const result = synthesizeAffineMap(affine, wires, input.length, stopped)
 		if (result) return result
 	}
@@ -134,9 +133,17 @@ export function synthesizeMixedAffine(input: Gate[], maximumWires: number, maxim
 	const result = emitQuadraticMap(rows, wires, input.length, stopped)
 		?? emitSharedCubicMap(rows, wires, input.length, stopped, spend)
 	if (!result) return undefined
-	const actual = composePolynomials(result, wires, maximumTerms, stopped, spend)
+	const actual = composePolynomials(result, indices, maximumTerms, stopped, spend)
 	if (!actual) return undefined
-	if (actual.some((row, i) => row.size !== rows[i].size || [...row].some(term => !rows[i].has(term)))) throw new Error('Polynomial synthesis failed exact polynomial verification')
+	let checked = 0
+	for (let i = 0; i < actual.length; i++) {
+		const expected = rows[i], row = actual[i]
+		if (row.size !== expected.size) throw new Error('Polynomial synthesis failed exact polynomial verification')
+		for (const term of row) {
+			if ((checked++ & 255) === 0 && stopped()) return undefined
+			if (!expected.has(term)) throw new Error('Polynomial synthesis failed exact polynomial verification')
+		}
+	}
 	return result
 }
 
