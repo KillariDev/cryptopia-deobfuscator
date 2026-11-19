@@ -40,7 +40,7 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 		`Requested working file: ${resolve(working + '.json')}`,
 		`Latest verified circuit: ${resolve(paths.latest)}`,
 		`Progress checkpoints: ${resolve(dirname(paths.progress(inputCircuit.gates.length)))}`,
-		`Worker snapshots: ${resolve(dirname(paths.worker(0)))}`,
+		`Worker snapshots: ${config.files.workerSnapshots ? resolve(dirname(paths.worker(0))) : 'disabled'}`,
 		`Worker limit: ${configuredWorkerCount()} (${process.env.OPTIMIZER_WORKERS === undefined ? 'automatic CPU-based limit' : 'OPTIMIZER_WORKERS override'}); ${config.workers.keepBusy ? 'continuously refill configured worker slots' : 'actual count depends on circuit size and adaptive concurrency'}`,
 		`Round budget: ${config.timing.roundSeconds} seconds; worker job budget: ${config.workers.jobSeconds} seconds; ${config.workers.keepBusy ? 'jobs refill until the round ends' : `up to ${config.workers.jobsPerWorker} jobs per worker`} (checked between optimization steps)`,
 		...config.database.tables.map(table => `Rainbow table: ${resolve(databaseFilename(table.wires, table.gates))} (${table.wires} wires, up to ${table.gates} gates)`),

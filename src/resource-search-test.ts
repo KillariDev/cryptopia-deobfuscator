@@ -126,6 +126,8 @@ try {
 	assert.deepEqual(report.results.map((result: { variant: string }) => result.variant), ['reference', 'tuned'])
 	assert.equal(report.results[0].seed, report.results[1].seed)
 	assert.equal(report.results[0].sharedBytes, 0); assert.ok(report.results[1].sharedBytes > 0)
+	assert.ok(report.results.every((result: { verificationMs: number, workerMs: number }) =>
+		Number.isFinite(result.verificationMs) && result.verificationMs >= 0 && result.verificationMs <= result.workerMs))
 	assert.ok(report.results.every((result: { checks: number, controls: { adaptiveConcurrency: boolean } }) => result.checks <= config.benchmark.maximumChecks && result.controls.adaptiveConcurrency === false))
 	assert.ok(report.results.every((result: { validation: string, databaseMs: number, workerMs: number, finalGates: number }) => result.validation === 'exhaustive' && result.finalGates <= 12 && result.databaseMs <= result.workerMs + 0.01))
 } finally { Object.assign(config, saved); await rm(directory, { recursive: true, force: true }) }

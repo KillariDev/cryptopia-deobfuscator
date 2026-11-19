@@ -20,7 +20,7 @@ import { IncrementalGraph } from './incremental-graph.js'
 import { retainWindowKey, WindowFingerprints } from './fingerprints.js'
 import { createHash } from 'node:crypto'
 import { advancedRewrite, wholeCircuitAffineSearch, SynthesisBudget } from './strategies.js'
-import { IncrementalEvaluator, PackedInputs } from './packed.js'
+import { IncrementalEvaluator, PackedInputs, sameGate } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, workerRegionSeed, createSearchArms, independentComponents } from './search.js'
 import { config, minimumBroadGates } from './config.js'
 import { formatCircuitSize, formatCoordinatorPhase, SummaryThrottle, verboseLogging, formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
@@ -847,11 +847,11 @@ const standaloneStructural = () => [
 const variableStrategy = () => config.search.variableElimination && config.search.sliceMaximum >= 3 ? ['variables'] : []
 const smallSynthesisStrategies = new Set(['forward-semantic-search', 'equality-saturation', 'z3', 'meet-in-the-middle'])
 const localStrategyOrder = () => [
+	...(config.synthesis.quadratic ? ['quadratic'] : []),
 	...(config.search.rainbow ? ['rainbow'] : []), ...(config.search.subsetMaximum >= 3 ? variableStrategy() : []),
 	...(config.synthesis.forwardSemanticSearch ? ['forward-semantic-search'] : []),
 	...(config.synthesis.equalitySaturation ? ['equality-saturation'] : []),
 	...(config.synthesis.affine ? ['gf2-affine'] : []),
-	...(config.synthesis.quadratic ? ['quadratic'] : []),
 	...standaloneStructural(),
 	...(config.synthesis.smt ? ['z3'] : []),
 	...(config.synthesis.meetInMiddle ? ['meet-in-the-middle'] : []),
@@ -866,7 +866,7 @@ export const broadStrategyOrder = () => [
 ]
 export const createOptimizerCaches = (workerIndex = 0) => ({
 	workerIndex,
-	strategyPicker: new RoundStrategyPicker(localStrategyOrder(), workerIndex),
+	strategyPicker: new RoundStrategyPicker(localStrategyOrder(), config.synthesis.quadratic ? 0 : workerIndex),
 	broadStrategyPicker: new RoundStrategyPicker(broadStrategyOrder(), workerIndex),
 	broadFallbackPicker: new StrategyPicker(broadStrategyOrder()),
 	ioIdentifierCache: new LimitedMap<string, Gate[] | null>(config.cache.lookupEntries, config.cache.lookupPolicy),
@@ -886,7 +886,12 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	optimizedVersion = gateSimplifier(optimizedVersion)
 	if (isSingleNoOp(optimizedVersion)) optimizedVersion = []
 	recordStrategy('gate-simplification', {}, simplifyStarted, originalGates.length, optimizedVersion.length, optimizedVersion.length < originalGates.length)
-	verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
+	const startupVerificationStarted = performance.now()
+	if (optimizedVersion.length !== originalGates.length ||
+		!optimizedVersion.every((gate, index) => sameGate(gate, originalGates[index]))) {
+		verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
+	}
+	let verificationMs = performance.now() - startupVerificationStarted
 	let lastSaved = performance.now()
 	const { ioIdentifierCache, processedGatesCache } = caches
 	
@@ -905,7 +910,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	const arms = !config.search.adaptive ? [] : config.search.stableSearchArms ? caches.arms : createSearchArms(config.search.searchArms, config.search.subsetMinimum, config.search.subsetMaximum, config.search.sliceMinimum, config.search.sliceMaximum).map(arm => ({ ...arm, subset: getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1), slice: getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1) }))
 	//logTimed(`optimizer started with subset ${subsetSize}`)
 	const activity: WorkerActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
-	const progressActivity = (): WorkerActivity => ({ ...activity, activeStrategy: config.search.strategyAdaptive ? caches.strategyPicker.activeStrategy : undefined, strategies: strategySnapshot(), rainbowTables: tables.statistics(), resources: { databaseMs: lookupDatabaseTime() - databaseStarted, elapsedMs: performance.now() - jobStarted, heapUsedBytes: process.memoryUsage().heapUsed } })
+	const progressActivity = (): WorkerActivity => ({ ...activity, activeStrategy: config.search.strategyAdaptive ? caches.strategyPicker.activeStrategy : undefined, strategies: strategySnapshot(), rainbowTables: tables.statistics(), resources: { databaseMs: lookupDatabaseTime() - databaseStarted, verificationMs, elapsedMs: performance.now() - jobStarted, heapUsedBytes: process.memoryUsage().heapUsed } })
 	let lastProgress = performance.now()
 	let publishedReduction = false
 	let candidateParts = new LazyCircuit([optimizedVersion])
@@ -913,8 +918,10 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	const finishWorker = () => {
 		if (isSingleNoOp(optimizedVersion)) optimizedVersion = []
 		activity.stage = 'verifying'
-		onProgress?.(optimizedVersion.length, progressActivity(), optimizedVersion)
+		const verificationStarted = performance.now()
 		verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
+		verificationMs += performance.now() - verificationStarted
+		onProgress?.(optimizedVersion.length, progressActivity(), optimizedVersion)
 		return optimizedVersion
 	}
 	const checkLimitReached = () => typeof checkBudget === 'number'
@@ -1325,7 +1332,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 						: completed < jobCount && Atomics.load(stopSignal, 0) === 0))
 				})().finally(() => pool.setBroadReservation(false)) : Promise.resolve()
 				const local = Promise.all(approxGates.map(async (_initial, index) => {
-					const workerFile = paths.worker(index)
+					const workerFile = config.files.workerSnapshots ? paths.worker(index) : undefined
 					let chunk = index
 					do {
 						if (Atomics.load(stopSignal, 0) !== 0) break
@@ -1335,7 +1342,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 							chunk = next
 						}
 						const target = chunk, dataChunk = snapshots[target]
-						writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
+						if (workerFile) writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
 						let executionStarted: number | undefined
 						const accept = (candidate: Gate[]) => {
 							// Several idle lanes may retry the same remaining chunk. Their
@@ -1360,7 +1367,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 						accept(result)
 						completed++
 						statuses[index].done = true
-						writeCircuit(workerFile, inputCircuit.wire_count, result)
+						if (workerFile) writeCircuit(workerFile, inputCircuit.wire_count, result)
 						if (!canContinue()) break
 						statuses[index] = { updatedAtMs: performance.now() - lastIterationTime, done: false, started: false }
 						await yieldToCoordinator()

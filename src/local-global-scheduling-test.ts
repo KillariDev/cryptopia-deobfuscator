@@ -7,6 +7,7 @@ import { config } from './config.js'
 import { WorkerPool } from './threads.js'
 import { splitTaskAndRun } from './processing.js'
 import { circuitWireCost } from './circuit-cost.js'
+import { outputPaths } from './storage.js'
 import type { CircuitData } from './types.js'
 
 const saved = structuredClone(config), run = WorkerPool.prototype.run, log = console.log
@@ -86,6 +87,7 @@ try {
 			return gates
 		}
 		await assert.rejects(splitTaskAndRun(path, 'unused', { originalCircuit: circuit, inputCircuit: circuit }), error => error === done)
+		await assert.rejects(readFile(outputPaths(path).worker(0)), { code: 'ENOENT' })
 		const latest = JSON.parse(await readFile(path + '-latest.json', 'utf8'))
 		assert.equal(latest.gates.length, circuit.gates.length - (wholeCircuit ? Math.max(broadRemoved, 4) : broadRemoved + 4))
 		const resultLine = reports.find(line => line.includes(`Round winner: ${winner} | Local: 4 gates removed | Global: ${broadRemoved} gates removed`))
@@ -139,6 +141,7 @@ try {
 	assert.equal(broadDispatches, 1, 'unchanged rounds do not dispatch an exhausted broad scan again')
 	const zeroCircuit: CircuitData = { ...circuit, gate_count: 5000, gates: circuit.gates.slice(1) }
 	const zeroPath = join(directory, 'broad-solved')
+	config.files.workerSnapshots = true
 	let finishLocal!: () => void
 	const localStarted = new Promise<void>(resolve => { finishLocal = resolve })
 	let localJobs = 0
@@ -157,6 +160,7 @@ try {
 	}
 	await splitTaskAndRun(zeroPath, 'unused', { originalCircuit: zeroCircuit, inputCircuit: zeroCircuit })
 	assert.ok(localJobs > 0)
+	assert.equal(JSON.parse(await readFile(outputPaths(zeroPath).worker(0), 'utf8')).gate_count, zeroCircuit.gate_count)
 	assert.equal(JSON.parse(await readFile(zeroPath + '-latest.json', 'utf8')).gate_count, 0)
 
 } finally {

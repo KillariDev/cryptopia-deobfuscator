@@ -69,7 +69,8 @@ beside it by default, so each puzzle keeps its own saved work. Set
 `files.progressDirectory` to place snapshots in per-puzzle folders under
 `files.dataDirectory`.
 
-Worker snapshots are for inspection; use a verified full circuit to resume.
+Set `files.workerSnapshots` to `true` to save worker chunks for inspection.
+Use a verified full circuit to resume.
 Interrupted lookup-table generation resumes from its own database checkpoint.
 
 ## How it optimizes circuits
@@ -88,10 +89,11 @@ The solver combines several approaches:
   expose simplifications that were not adjacent before.
 - **Local search:** prioritize recently changed regions. Adaptive search modes
   remain available through `search.adaptive`, but are off by default.
-- **Strategy rotation:** each worker starts at a different point in the solver order.
-  It keeps that strategy for the entire optimizer round and keeps it for the next
-  round if it removed any gates. After a round without a reduction it moves to
-  the next strategy. Local and broad searches have separate strategy orders.
+- **Strategy rotation:** local workers start with quadratic synthesis when enabled,
+  followed by rainbow lookup in the rotation. When quadratic is disabled, local
+  workers start at offset positions in the enabled strategy order. A worker keeps
+  its strategy for the entire round and advances after a round without a gate
+  reduction. Local and broad searches have separate strategy orders.
   The broad lane keeps its strategy whenever it removes gates, regardless of which result wins.
 
 The round summary reports worker counts by strategy. Set `search.strategyAdaptive` to false to use the fixed pipeline and

@@ -40,7 +40,7 @@ export type WorkerActivity = {
 	stage: 'preparing' | 'searching' | 'shuffling' | 'verifying'
 	strategies?: StrategyStat[]
 	rainbowTables?: RainbowTableStats[]
-	resources?: { databaseMs: number, elapsedMs: number, heapUsedBytes: number }
+	resources?: { databaseMs: number, verificationMs?: number, elapsedMs: number, heapUsedBytes: number }
 }
 export type WorkerStatus = { activity?: WorkerActivity, updatedAtMs: number, done: boolean, started?: boolean }
 

@@ -85,6 +85,7 @@
   "files": {
     "dataDirectory": "data", // Base directory for working data.
     "workerDirectory": "worker", // Name of the worker scratch directory under dataDirectory.
+    "workerSnapshots": false, // Save inspection copies before and after local worker jobs.
     "latestName": "latest.json", // Checkpoint suffix beside the input, after the puzzle name and a hyphen.
     "progressDirectory": "progress", // Default snapshots sit beside the input. A custom name creates per-puzzle folders under dataDirectory.
     "databaseDirectory": "." // Directory containing rainbow databases.

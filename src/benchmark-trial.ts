@@ -28,11 +28,11 @@ process.once('message', async (message: { input: CircuitData, original: CircuitD
 		const monitor = setInterval(() => { peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss) }, 50)
 		const timer = setTimeout(() => Atomics.store(stop, 0, 1), config.benchmark.seconds * 1000)
 		const chunks = gates.length ? chunkArray(gates, Math.min(gates.length, message.workers * config.workers.jobsPerWorker)) : []
-		const activities = chunks.map(() => ({ checks: 0, databaseMs: 0, workerMs: 0 }))
+		const activities = chunks.map(() => ({ checks: 0, databaseMs: 0, verificationMs: 0, workerMs: 0 }))
 		let result = gates
 		try {
 			result = (await Promise.all(chunks.map((chunk, i) => pool.run(chunk, message.input.wire_count, (_, activity) => {
-				if (activity) activities[i] = { checks: activity.checks, databaseMs: activity.resources?.databaseMs ?? 0, workerMs: activity.resources?.elapsedMs ?? 0 }
+				if (activity) activities[i] = { checks: activity.checks, databaseMs: activity.resources?.databaseMs ?? 0, verificationMs: activity.resources?.verificationMs ?? 0, workerMs: activity.resources?.elapsedMs ?? 0 }
 			}, stop.buffer as SharedArrayBuffer, config.benchmark.seconds * 1000)))).flat()
 		} finally {
 			clearTimeout(timer); clearInterval(monitor)
@@ -48,7 +48,7 @@ process.once('message', async (message: { input: CircuitData, original: CircuitD
 			if (before.some((bit, i) => bit !== after[i])) throw new Error('Benchmark result failed exhaustive validation')
 			validation = 'exhaustive'
 		}
-		process.send?.({ result: { workers: message.workers, seed: message.seed, startupMs, wallMs, budgetSeconds: config.benchmark.seconds, initialGates: gates.length, finalGates: result.length, removed: gates.length - result.length, gatesPerSecond: (gates.length - result.length) * 1000 / Math.max(1, wallMs), peakRssBytes, sharedBytes: shared.reduce((sum, table) => sum + sharedTableBytes(table), 0), checks: activities.reduce((sum, activity) => sum + activity.checks, 0), databaseMs: activities.reduce((sum, activity) => sum + activity.databaseMs, 0), workerMs: activities.reduce((sum, activity) => sum + activity.workerMs, 0), validation } })
+		process.send?.({ result: { workers: message.workers, seed: message.seed, startupMs, wallMs, budgetSeconds: config.benchmark.seconds, initialGates: gates.length, finalGates: result.length, removed: gates.length - result.length, gatesPerSecond: (gates.length - result.length) * 1000 / Math.max(1, wallMs), peakRssBytes, sharedBytes: shared.reduce((sum, table) => sum + sharedTableBytes(table), 0), checks: activities.reduce((sum, activity) => sum + activity.checks, 0), databaseMs: activities.reduce((sum, activity) => sum + activity.databaseMs, 0), verificationMs: activities.reduce((sum, activity) => sum + activity.verificationMs, 0), workerMs: activities.reduce((sum, activity) => sum + activity.workerMs, 0), validation } })
 		process.disconnect()
 	} catch (error) {
 		process.send?.({ error: String(error) }); process.exitCode = 1; process.disconnect()

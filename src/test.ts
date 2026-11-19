@@ -170,7 +170,7 @@ try {
 	const summary = describeJob('original', 'original', loadJob('original'))
 	assert.match(summary, /resume saved circuit/)
 	assert.match(summary, /1 gates, 4 wires/)
-	assert.ok(summary.includes(join(temporaryDirectory, 'data', 'worker')))
+	assert.match(summary, /Worker snapshots: disabled/)
 	assert.ok(summary.includes(join(temporaryDirectory, 'original-progress')))
 	assert.ok(summary.includes(join(temporaryDirectory, 'original-latest.json')))
 	assert.notEqual(outputPaths('alpha/puzzle').worker(0), outputPaths('beta/puzzle').worker(0))

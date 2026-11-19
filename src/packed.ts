@@ -1,6 +1,6 @@
 import { Gate } from './types.js'
 
-const sameGate = (a: Gate, b: Gate) => a.a === b.a && a.b === b.b && a.target === b.target && a.gate_i === b.gate_i
+export const sameGate = (a: Gate, b: Gate) => a.a === b.a && a.b === b.b && a.target === b.target && a.gate_i === b.gate_i
 export function packedControl(f: number, a: number, b: number) {
 	return ((f & 8) ? ~a & ~b : 0) | ((f & 4) ? ~a & b : 0) | ((f & 2) ? a & ~b : 0) | ((f & 1) ? a & b : 0)
 }
@@ -37,7 +37,6 @@ export class IncrementalEvaluator {
 	private initial: Uint32Array
 	private masks: Uint32Array
 	constructor(gates: Gate[], inputs: boolean[][] | PackedInputs, prefixBytes: number, stride: number) {
-		this.gates = gates.map(gate => ({ ...gate }))
 		const packed = inputs instanceof PackedInputs ? inputs : new PackedInputs(inputs)
 		this.inputs = packed.inputs
 		this.wires = packed.wires
@@ -45,6 +44,7 @@ export class IncrementalEvaluator {
 		this.initial = packed.initial
 		this.masks = packed.masks
 		const capacity = this.initial.byteLength ? Math.floor(prefixBytes / this.initial.byteLength) : 0
+		this.gates = capacity ? gates.map(gate => ({ ...gate })) : gates
 		const spacing = Math.max(stride, Math.ceil(gates.length / Math.max(1, capacity)))
 		const state = this.initial.slice()
 		gates.forEach((gate, i) => {
@@ -64,6 +64,7 @@ export class IncrementalEvaluator {
 		for (let batch = 0; batch < this.batches; batch++) this.applyAt(state, gate, batch * this.wires, this.masks[batch])
 	}
 	private prefix(candidate: Gate[]) {
+		if (!this.checkpoints.size) return { start: 0, prefix: this.initial }
 		let common = 0
 		while (common < candidate.length && common < this.gates.length && sameGate(candidate[common], this.gates[common])) common++
 		let start = 0, prefix = this.initial

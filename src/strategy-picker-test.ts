@@ -8,6 +8,7 @@ import { synthesizeSMT } from './smt.js'
 import { Gate } from './types.js'
 import { WorkerPool } from './threads.js'
 import { createSharedTable } from './shared-table.js'
+import { createOptimizerCaches } from './processing.js'
 const picker = new StrategyPicker(['GF2', 'forward', 'Z3'])
 const choices = ['GF2', 'forward', 'Z3'].map(name => ({ name }))
 assert.deepEqual(Array.from({ length: 6 }, () => picker.pick(choices)?.name), ['GF2', 'forward', 'Z3', 'GF2', 'forward', 'Z3'])
@@ -38,6 +39,15 @@ const table = { wires: 2, gates: 1 }
 const pool = new WorkerPool(2, undefined, [createSharedTable(table, [], 1024)!])
 try {
 	Object.assign(config.search, { rainbow: true, strategyAdaptive: true })
+	config.synthesis.quadratic = true
+	for (const index of [0, 1, 7]) {
+		const { strategyPicker } = createOptimizerCaches(index)
+		strategyPicker.beginRound(1)
+		assert.equal(strategyPicker.activeStrategy, 'quadratic')
+		strategyPicker.beginRound(2)
+		assert.equal(strategyPicker.activeStrategy, 'rainbow')
+	}
+	config.synthesis.quadratic = false
 	config.database.tables = [table]
 	pool.setBroadReservation(true)
 	await pool.run([not], 2, undefined, undefined, 100, false, 'broad', 1)
@@ -57,6 +67,7 @@ try {
 } finally {
 	await pool.close()
 	Object.assign(config.search, search)
+	config.synthesis.quadratic = saved.quadratic
 	config.database.tables = tables
 }
 
