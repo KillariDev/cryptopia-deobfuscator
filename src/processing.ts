@@ -7,7 +7,7 @@ import { setImmediate as yieldToCoordinator } from 'node:timers/promises'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
 import { mergeDisjointRoundResults, RoundCutPatches, roundSearchPlan, roundSearchResult } from './round-search.js'
-import { formatRoundStrategies } from './logging.js'
+import { formatRoundStrategies, formatWorkerStart } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
 import { AdaptiveConcurrency, MemoryConcurrency, memoryPressure, memorySnapshot } from './concurrency.js'
@@ -617,6 +617,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 }
 
 const gateSimplifier = (gates: Gate[]) => gates.map((gate) => simplifyGate(gate))
+const isSingleNoOp = (gates: Gate[]) => gates.length === 1 && simplifyGate(gates[0]).gate_i === 0
 
 const save = (filenames: string[], gates: Gate[], wires: number, originalGates: Gate[]) => {
 	gates = gateSimplifier(gates)
@@ -761,7 +762,7 @@ function appendMissingNumbers(arr: number[], n: number): number[] {
 	return [...Array.from(allNumbers), ...arr]
 }
 
-export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method'], onLazyCandidate?: (gates: ChunkedSequence<Gate>) => void, synthesisBudget?: SynthesisBudget, strategyPicker?: StrategyPicker | RoundStrategyPicker, initialSeed?: number, sliceResults?: SliceResults): Promise<Gate[]> => {
+export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method'], onLazyCandidate?: (gates: ChunkedSequence<Gate>) => void, synthesisBudget?: SynthesisBudget, strategyPicker?: StrategyPicker | RoundStrategyPicker, initialSeed?: number, sliceResults?: SliceResults, maximumChecks = 0): Promise<Gate[]> => {
 	// No convex region can reach the requested size in this chunk.
 	if (subsetSize > slicedVersion.length) return slicedVersion.slice()
 	const useProbabilistically = method !== 'rainbow' && phase === 'heavy' && config.search.probabilistic
@@ -804,6 +805,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 					if (timeToEndWorker()) return circuit.toArray()
 					const attemptKey = active ? `${active}:${method}:${phase}:${slice}:${gateKey}` : undefined
 					if (attemptKey && testedSubsets.has(attemptKey)) continue
+					if (maximumChecks > 0 && activity.checks >= maximumChecks) return circuit.toArray()
 					activity.checks++
 					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables', preparation ??= new SubsetPreparation(inGates, sliceResults), attemptBudget, strategyPicker)
 					if (!optimizationOutput.changed) {
@@ -875,13 +877,14 @@ export const createOptimizerCaches = (workerIndex = 0) => ({
 	methodCaches: new Map<string, LimitedMap<string, boolean>>(),
 })
 
-export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number, improvements: number) => boolean, reportOnImprovement = false) => {
+export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number, improvements: number) => boolean, reportOnImprovement = false, maximumChecks = 0) => {
 	resetStrategyStats()
 	const jobStarted = performance.now(), jobDeadline = jobStarted + roundDurationMs, databaseStarted = lookupDatabaseTime()
 	let optimizedVersion = originalGates.slice()
 	let prevSavedLength = originalGates.length
 	const simplifyStarted = performance.now()
 	optimizedVersion = gateSimplifier(optimizedVersion)
+	if (isSingleNoOp(optimizedVersion)) optimizedVersion = []
 	recordStrategy('gate-simplification', {}, simplifyStarted, originalGates.length, optimizedVersion.length, optimizedVersion.length < originalGates.length)
 	verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
 	let lastSaved = performance.now()
@@ -908,11 +911,13 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	let candidateParts = new LazyCircuit([optimizedVersion])
 	onProgress?.(optimizedVersion.length, progressActivity(), optimizedVersion)
 	const finishWorker = () => {
+		if (isSingleNoOp(optimizedVersion)) optimizedVersion = []
 		activity.stage = 'verifying'
 		onProgress?.(optimizedVersion.length, progressActivity(), optimizedVersion)
 		verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
 		return optimizedVersion
 	}
+	const checkLimitReached = () => maximumChecks > 0 && activity.checks >= maximumChecks
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
 		if (onProgress) {
@@ -936,7 +941,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	}, config.timing.workerReportSeconds * 1000) : undefined
 	try {
 	while (true) {
-		if (workerMode && optimizedVersion.length === 0) return finishWorker()
+		if (workerMode && (!optimizedVersion.length || isSingleNoOp(optimizedVersion))) return finishWorker()
 		//shuffleRows(optimizedVersion, 20)
 		let method: SearchArm['method'] = 'all'
 		if (config.search.adaptive) {
@@ -966,7 +971,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 			// rainbow. Graph search still covers longer and noncontiguous windows.
 			const last = strategy === 'variables' ? first : first + 1
 			for (let size = first; size <= Math.min(last, maxSlice, optimizedVersion.length); size++) {
-				if (timeToEndWorker()) break
+				if (timeToEndWorker() || checkLimitReached()) break
 				const attempt = `contiguous:${strategy}:${phase}:${size}:${key}`
 				if (caches.testedSubsets.has(attempt)) continue
 				activity.subsets++
@@ -992,7 +997,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 				if (timeToEndWorker()) break
 				if (!result.changed && !result.unavailable) caches.testedSubsets.set(attempt, true)
 			}
-			if (workerMode && (!optimizedVersion.length || timeToEndWorker())) return finishWorker()
+			if (workerMode && (!optimizedVersion.length || checkLimitReached() || timeToEndWorker())) return finishWorker()
 		}
 		const nChunks = Math.max(1, Math.min(config.search.maximumInnerChunks, Math.floor(optimizedVersion.length / config.search.minimumInnerChunkGates)))
 		const components = config.search.independentComponents ? independentComponents(optimizedVersion) : [optimizedVersion]
@@ -1002,7 +1007,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 			const result = await optimizeSubset(tables, data, ioIdentifierCache, methodCache!, subsetSize, maxSlice, phase, timeToEndWorker, activity, () => {}, caches.testedSubsets, method, gates => {
 				candidateParts.update(index, gates)
 				timeToEndWorker()
-			}, { deadline: jobDeadline, shouldStop: () => shouldFinish?.(activity) === true }, caches.strategyPicker, workerRegionSeed(data.length, caches.workerIndex), sliceResults)
+			}, { deadline: jobDeadline, shouldStop: () => shouldFinish?.(activity) === true }, caches.strategyPicker, workerRegionSeed(data.length, caches.workerIndex), sliceResults, maximumChecks)
 			candidateParts.update(index, result)
 			return result
 		}))
@@ -1016,7 +1021,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		}*/
 		//else if (optimizedVersion.length < startLength) {
 			activity.stage = 'shuffling'
-			if (!timeToEndWorker()) shuffleRowsWithDependentGateSwap(optimizedVersion, config.search.workerShufflePasses, timeToEndWorker)
+			if (!checkLimitReached() && !timeToEndWorker()) shuffleRowsWithDependentGateSwap(optimizedVersion, config.search.workerShufflePasses, timeToEndWorker)
 			subsetSize = chooseSubsetSize()
 			maxSlice = getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1)
 		/*} else {
@@ -1027,7 +1032,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		
 		const gatesRemoved = prevSavedLength - optimizedVersion.length
 		if (workerMode) {
-			if (timeToEndWorker()) {
+			if (checkLimitReached() || timeToEndWorker()) {
 				logVerbose(`Total Removed Gates Since Terminating: ${ gatesRemoved }`)
 				return finishWorker()
 			}
@@ -1088,14 +1093,18 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 	if (originalGates.length < gates.length) throw new Error('Latest circuit has more gates than original')
 	onPhase('verifying input checkpoint')
 	const writer = new CheckpointWriter(originalGates, inputCircuit.wire_count, config.validation.checkpointInputs)
+	const paths = outputPaths(pathToFileWithoutExt)
+	const solvedAtStartup = isSingleNoOp(gates)
+	const seed = solvedAtStartup ? [] : gates
 	try {
-		await writer.write([outputPaths(pathToFileWithoutExt).latest], gates, inputCircuit !== originalCircuit)
-		if (gates.length) await initializeTables?.()
+		const checkpoints = solvedAtStartup ? [paths.progress(0), paths.latest] : [paths.latest]
+		await writer.write(checkpoints, seed, inputCircuit !== originalCircuit)
+		if (seed.length) await initializeTables?.()
 	} catch (error) {
 		await writer.close()
 		throw error
 	}
-	if (!gates.length) { await writer.close(); return }
+	if (!seed.length) { await writer.close(); return }
 	const nMaxWorkers = configuredWorkerCount()
 	onPhase('loading shared rainbow table snapshots')
 	const sharedTables = config.search.rainbow ? await loadSharedTables() : []
@@ -1128,7 +1137,6 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 		finally { adjustingMemory = false }
 	}
 	const concurrency = new AdaptiveConcurrency(nMaxWorkers, config.workers.initialConcurrency, config.workers.concurrencySampleRounds, config.workers.concurrencyDatabaseFraction, config.workers.concurrencyRateTolerance)
-	const paths = outputPaths(pathToFileWithoutExt)
 	prepareOutputDirectories()
 	let currentGates = gates.slice()
 	const wireCosts = new Map<number, number>()
@@ -1161,11 +1169,16 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 				Local: new Map<string, WorkerActivity>(),
 				Global: new Map<string, WorkerActivity>(),
 			}
+			const startedWorkers = new Set<string>()
 			const observeStrategy = (side: keyof typeof roundStrategies, activity?: WorkerActivity) => {
-				const assignments = roundStrategies[side]
-				if (activity?.workerId !== undefined && activity.activeStrategy) {
-					assignments.set(`${activity.workerId}:${activity.activeStrategy}`, activity)
+				if (activity?.workerId === undefined) return
+				const { workerId, activeStrategy } = activity
+				const startKey = `${side}:${workerId}`
+				if (!startedWorkers.has(startKey)) {
+					startedWorkers.add(startKey)
+					logTimed(formatWorkerStart(optimizerRound, side, workerId, activeStrategy))
 				}
+				if (activeStrategy) roundStrategies[side].set(`${workerId}:${activeStrategy}`, activity)
 			}
 			beginPhase('preparing next round')
 			currentGates = gateSimplifier(currentGates)

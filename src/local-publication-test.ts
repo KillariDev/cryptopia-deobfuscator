@@ -45,6 +45,19 @@ try{
  assert.deepEqual(stopped,shuffleInput,'honor cancellation inside the shuffle before swapping any gates')
 
  Object.assign(config.search,{strategyAdaptive:true,subsetMinimum:2,subsetMaximum:2,sliceMinimum:2,sliceMaximum:2})
+ const noOp={...cn,gate_i:0}
+ assert.deepEqual(await optimize(tables,[noOp],3,'single no-op',true,undefined,100),[])
+ const aliasNoOp={...cn,gate_i:6}
+ assert.deepEqual(await optimize(tables,[aliasNoOp],3,'single aliased no-op',true,undefined,100),[])
+ for(const strategyAdaptive of [true,false]){
+  config.search.strategyAdaptive=strategyAdaptive
+  let checks=0
+  const limited=await optimize(tables,[cn,cn],3,'one allowed check',true,undefined,100,
+   (_,activity)=>{checks=activity.checks},undefined,undefined,false,1)
+  assert.deepEqual(limited,[],'the last allowed check runs to completion')
+  assert.equal(checks,1)
+ }
+ config.search.strategyAdaptive=true
  const repeated=await optimize(tables,[cn,cn,cn,cn],3,'contiguous rainbow',true,undefined,1000)
  assert.deepEqual(repeated,[])
  assert.equal(tables.statistics()[0].windows,1,'one rainbow evaluation covers all matching positions')

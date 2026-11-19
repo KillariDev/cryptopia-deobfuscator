@@ -46,6 +46,10 @@ let ticks=0;const heartbeat=setInterval(()=>ticks++,1)
 try{
  await writer.write([file],[])
  assert.ok(ticks>0,'main-thread timers run while a large checkpoint is verified')
+ const idleWorker = Reflect.get(writer, 'worker')
+ await idleWorker.terminate()
+ await writer.write([file],[])
+ assert.notEqual(Reflect.get(writer, 'worker'),idleWorker,'the next write replaces an exited idle worker')
  const before=await readFile(file,'utf8')
  await assert.rejects(writer.write([file],[{a:0,b:0,target:0,gate_i:15}]),/CORRUPTION/)
  await assert.rejects(writer.write([file],[{a:0,b:0,target:3,gate_i:15}]),/CORRUPTION: invalid gate.*checkpoint candidate/)
@@ -82,6 +86,12 @@ try {
  }), /CORRUPTION: checkpoint differs/)
  assert.equal(initialized, false)
  await assert.rejects(readFile(outputPaths(puzzle).latest), { code: 'ENOENT' })
+ const noOpPuzzle = join(proofDir, 'single-no-op')
+ const noOpCircuit = circuit([[0, 0, 0, 6]])
+ await splitTaskAndRun(noOpPuzzle, noOpPuzzle, { originalCircuit: noOpCircuit, inputCircuit: noOpCircuit }, undefined, async () => {
+  assert.fail('a single no-op should finish before initializing rainbow tables')
+ })
+ assert.equal(JSON.parse(await readFile(outputPaths(noOpPuzzle).latest, 'utf8')).gate_count, 0)
  const wideGates = fixture.before.map(([a, b, target, gate_i]: number[]) => ({ a, b, target, gate_i }))
  const wide = new CheckpointWriter(wideGates, 64, 1)
  try {

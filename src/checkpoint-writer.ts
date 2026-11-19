@@ -12,12 +12,23 @@ export class CheckpointWriter {
   this.tail=work.catch(()=>{})
   return work
  }
+ private getWorker() {
+  if (this.worker && this.worker.threadId !== -1) return this.worker
+  const worker = new Worker(new URL('./checkpoint-worker.js', import.meta.url), {
+   workerData: {original:this.original,wires:this.wires,checks:this.checks,solverConfig:config},
+  })
+  const invalidate = () => { if (this.worker === worker) this.worker = undefined }
+  worker.on('error', invalidate)
+  worker.once('exit', invalidate)
+  this.worker = worker
+  return worker
+ }
  private submit(filenames:string[],gates:Gate[],requireExact:boolean):Promise<void>{
-  const worker=this.worker??=new Worker(new URL('./checkpoint-worker.js',import.meta.url),{workerData:{original:this.original,wires:this.wires,checks:this.checks,solverConfig:config}})
+  const worker = this.getWorker()
   worker.ref()
   return new Promise((resolve,reject)=>{
    const clean=()=>{worker.removeListener('message',message);worker.removeListener('error',error);worker.removeListener('exit',exit);worker.unref()}
-   const error=(error:Error)=>{clean();this.worker=undefined;reject(error)}
+   const error=(error:Error)=>{clean();reject(error)}
    const exit=(code:number)=>error(new Error(`Checkpoint worker exited (${code})`))
    const message=(value:{error?:string})=>{clean();value.error?reject(new Error(value.error)):resolve()}
    worker.once('message',message);worker.once('error',error);worker.once('exit',exit)

@@ -94,7 +94,8 @@ The solver combines several approaches:
   the next strategy. Local and broad searches have separate strategy orders.
   The broad lane keeps its strategy whenever it removes gates, regardless of which result wins.
 
-The summary reports worker counts by strategy. Set `search.strategyAdaptive` to false to use the fixed pipeline and
+Workers announce their assigned strategy when they first report in each round.
+The round summary reports worker counts by strategy. Set `search.strategyAdaptive` to false to use the fixed pipeline and
 synthesis rotation. Failed-region caches are separate by strategy so each method
 can try the same region.
 
