@@ -33,11 +33,15 @@ const cases = [
 ]
 const modes = ['off', 'adaptive', 'upfront']
 
-async function compareBroadWorkers() {
+async function compareBroadWorkers(compareReclaim) {
 	config.search.rainbow = false
 	config.search.strategyAdaptive = true
-	for (const mode of modes) {
+	const scenarios = compareReclaim
+		? [false, true, true, false, false, true].map(reclaim => ({ mode: 'adaptive', reclaim }))
+		: modes.map(mode => ({ mode, reclaim: false }))
+	for (const { mode, reclaim } of scenarios) {
 		config.synthesis.decisionDiagramTrialOrdering = mode
+		config.synthesis.decisionDiagramReclaim = reclaim
 		const pool = new WorkerPool(1)
 		const start = performance.now()
 		const counts = []
@@ -54,14 +58,38 @@ async function compareBroadWorkers() {
 		const ms = performance.now() - start
 		const rewrites = counts.filter((count, i) => count < cases[i][1].length).length
 		console.log(JSON.stringify({
-			mode, counts, rewrites, workerWallMs: Math.round(ms),
+			mode, reclaim, counts, rewrites, workerWallMs: Math.round(ms),
 			rewritesPerWorkerSecond: Number((rewrites * 1000 / ms).toFixed(2)),
 		}))
 	}
 }
 
+function compareReclamation() {
+	for (const [name, gates, expected] of cases) {
+		for (const reclaim of [false, true]) {
+			const times = []
+			let result
+			for (let i = 0; i < 5; i++) {
+				const start = performance.now()
+				result = synthesizeDecisionDiagramProduct(gates, 64, () => false, 'adaptive', reclaim)
+				times.push(performance.now() - start)
+				if (result?.gates.length !== expected) throw new Error(`${name}: unexpected replacement length`)
+			}
+			console.log(JSON.stringify({
+				name, reclaim, gates: result.gates.length, peakNodes: result.peakNodes, allocatedNodes: result.allocatedNodes,
+				liveNodes: result.liveNodes, reclaimedNodes: result.reclaimedNodes, collections: result.collections,
+				retainedMemoEntries: result.retainedMemoEntries, scannedMemoEntries: result.scannedMemoEntries,
+				skippedMemoEntries: result.skippedMemoEntries, applyCalls: result.applyCalls,
+				medianMs: Math.round(times.sort((a, b) => a - b)[2]),
+			}))
+		}
+	}
+}
+
 if (process.argv.includes('--worker')) {
-	await compareBroadWorkers()
+	await compareBroadWorkers(process.argv.includes('--reclaim'))
+} else if (process.argv.includes('--reclaim')) {
+	compareReclamation()
 } else {
 	for (const [name, gates, expected] of cases) {
 		for (const trialOrdering of ['off', 'adaptive', 'upfront']) {
@@ -69,7 +97,7 @@ if (process.argv.includes('--worker')) {
 			let result
 			for (let i = 0; i < 3; i++) {
 				const start = performance.now()
-				result = synthesizeDecisionDiagramProduct(gates, 64, () => false, trialOrdering)
+				result = synthesizeDecisionDiagramProduct(gates, 64, () => false, trialOrdering, false)
 				times.push(performance.now() - start)
 				if ((trialOrdering !== 'off' || result) && result?.gates.length !== expected) throw new Error(`${name}: unexpected replacement length`)
 			}

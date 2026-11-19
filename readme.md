@@ -100,7 +100,11 @@ The solver combines several approaches:
   up to four orders on short windows using progress, live nodes, and allocations,
   then resumes the best order from its saved prefix. Set
   `strategies.decisionDiagramProduct.trialOrdering` to `"upfront"` to rank every
-  region or `"off"` to skip trials.
+  region or `"off"` to skip trials. By default, the pass compacts unreachable
+  nodes at gate boundaries and remaps cached operations whose operands and
+  result all survive. Buckets keyed by the newer operand let it skip entire
+  groups during compaction. Set `strategies.decisionDiagramProduct.reclaimNodes`
+  to `false` to disable compaction.
 - **Strategy rotation:** a worker keeps its strategy for the entire round and
   advances after a round without a gate reduction. The local and broad searches
   have separate strategy orders. The checked-in config starts both with

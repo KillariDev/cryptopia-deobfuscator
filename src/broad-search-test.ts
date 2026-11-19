@@ -298,6 +298,27 @@ try {
 	const pairedResult = await broadSearch(tables, lateMask, 53, createOptimizerCaches(), 5000, () => false, () => {})
 	assert.equal(pairedResult.length, payload.length)
 	assert.equal(createPolynomialEquivalenceChecker(payload, 53, 100000, 10000000)(pairedResult), true)
+	// Vary the order and scratch allocation of each ladder to keep
+	// allocating new nodes even though almost all output functions restore.
+	const churn = Array.from({ length: 61 }, (_, i) => {
+		const f = i % factors.length, b = i % borrowed.length
+		return emitBorrowedProduct([...factors.slice(f), ...factors.slice(0, f)], [...borrowed.slice(b), ...borrowed.slice(0, b)], 38)
+	}).flat()
+	// An asymmetric predicate and its operand-swapped equivalent cancel.
+	churn.push({ a: 5, b: 37, target: 38, gate_i: 2 }, { a: 37, b: 5, target: 38, gate_i: 4 })
+	const retained = synthesizeDecisionDiagramProduct(churn, 64, () => false, 'adaptive', false)
+	const compacted = synthesizeDecisionDiagramProduct(churn, 64, () => false)
+	assert.ok(retained && compacted && compacted.collections > 0)
+	assert.ok(compacted.retainedMemoEntries > 0)
+	assert.ok(compacted.skippedMemoEntries > 0)
+	assert.ok(compacted.peakNodes < retained.peakNodes)
+	assert.equal(compacted.liveNodes, retained.liveNodes)
+	assert.deepEqual(compacted.gates, retained.gates)
+	assert.equal(createPolynomialEquivalenceChecker(churn, 39, 100000, 10000000)(compacted.gates), true)
+	assert.equal(parseConfig({}).synthesis.decisionDiagramReclaim, true)
+	assert.equal(parseConfig({ strategies: { decisionDiagramProduct: { reclaimNodes: false } } }).synthesis.decisionDiagramReclaim, false)
+	const compactedBroad = await broadSearch(tables, churn, 39, createOptimizerCaches(), 5000, () => false, () => {})
+	assert.deepEqual(compactedBroad, compacted.gates)
 	config.search.localStrategyOrder = []
 	config.search.broadStrategyOrder = []
 	config.synthesis.decisionDiagramProduct = false

@@ -6,6 +6,14 @@ const maximumOperations = 1_000_000
 const maximumDiagramWires = 64
 const probeGates = 256
 const probeOperations = 16_000
+const collectionInterval = 48_000
+// Two node IDs and a four-bit gate function fit exactly in a JS number.
+const memoNodeBase = 2 ** Math.ceil(Math.log2(maximumNodes))
+const memoOperationBase = memoNodeBase ** 2
+
+function memoKey(operation: number, a: number, b: number) {
+	return operation * memoOperationBase + a * memoNodeBase + b
+}
 
 export type DiagramOrdering = 'off' | 'adaptive' | 'upfront'
 
@@ -25,17 +33,34 @@ export function emitBorrowedProduct(factors: readonly number[], borrowed: readon
 
 type Decision = { wire: number, low: number, high: number }
 class DiagramLimit extends Error {}
+class DiagramNodeLimit extends DiagramLimit {}
+
+// Bucket by the newer operand. The low bit preserves operand order for
+// asymmetric gates, and the rest encodes the operation and older operand.
+type MemoBuckets = (Map<number, number> | undefined)[]
 
 /** Reduced ordered diagram with canonical integer IDs and two terminal nodes. */
 class DecisionDiagram {
-	private readonly nodes: (Decision | undefined)[] = [undefined, undefined]
-	private readonly unique = new Map<string, number>()
-	private readonly memo = new Map<string, number>()
+	private nodes: (Decision | undefined)[] = [undefined, undefined]
+	private unique = new Map<string, number>()
+	private memo = new Map<number, number>()
+	private memoBuckets?: MemoBuckets
+	private bucketEntries = 0
 	private operations = 0
+	private collectionAt = collectionInterval
+	reclaimedNodes = 0
+	collections = 0
+	retainedMemoEntries = 0
+	scannedMemoEntries = 0
+	skippedMemoEntries = 0
+	private peakBeforeCollection = 2
 
-	constructor(private readonly stopped: () => boolean, public operationLimit = maximumOperations) {}
+	constructor(private readonly stopped: () => boolean, public operationLimit = maximumOperations, reclaim = false) {
+		if (reclaim) this.memoBuckets = []
+	}
 
 	get nodeCount() { return this.nodes.length }
+	get peakNodes() { return Math.max(this.peakBeforeCollection, this.nodes.length) }
 	get operationCount() { return this.operations }
 
 	node(wire: number, low: number, high: number): number {
@@ -43,7 +68,7 @@ class DecisionDiagram {
 		const key = `${wire},${low},${high}`
 		const existing = this.unique.get(key)
 		if (existing !== undefined) return existing
-		if (this.nodes.length >= maximumNodes) throw new DiagramLimit()
+		if (this.nodes.length >= maximumNodes) throw new DiagramNodeLimit()
 		const id = this.nodes.push({ wire, low, high }) - 1
 		this.unique.set(key, id)
 		return id
@@ -52,8 +77,10 @@ class DecisionDiagram {
 	apply(operation: number, a: number, b: number): number {
 		if (++this.operations > this.operationLimit || ((this.operations & 255) === 0 && this.stopped())) throw new DiagramLimit()
 		if (a < 2 && b < 2) return Number(evalGate(operation, a === 1, b === 1, false))
-		const key = `${operation},${a},${b}`
-		const existing = this.memo.get(key)
+		const buckets = this.memoBuckets
+		const newest = buckets ? Math.max(a, b) : 0
+		const key = buckets ? 2 * (operation * memoNodeBase + Math.min(a, b)) + Number(a > b) : memoKey(operation, a, b)
+		const existing = buckets ? buckets[newest]?.get(key) : this.memo.get(key)
 		if (existing !== undefined) return existing
 		const left = this.nodes[a]
 		const right = this.nodes[b]
@@ -61,7 +88,13 @@ class DecisionDiagram {
 		const low = this.apply(operation, left?.wire === wire ? left.low : a, right?.wire === wire ? right.low : b)
 		const high = this.apply(operation, left?.wire === wire ? left.high : a, right?.wire === wire ? right.high : b)
 		const id = this.node(wire, low, high)
-		this.memo.set(key, id)
+		if (buckets) {
+			const bucket = buckets[newest] ??= new Map()
+			bucket.set(key, id)
+			this.bucketEntries++
+		} else {
+			this.memo.set(key, id)
+		}
 		return id
 	}
 
@@ -70,7 +103,7 @@ class DecisionDiagram {
 		rows[target] = this.apply(6, rows[target], update)
 	}
 
-	liveNodes(rows: readonly number[]) {
+	private reachable(rows: readonly number[]) {
 		const visited = new Set<number>()
 		const pending = rows.slice()
 		while (pending.length) {
@@ -81,7 +114,73 @@ class DecisionDiagram {
 			visited.add(id)
 			pending.push(node.low, node.high)
 		}
-		return visited.size
+		return visited
+	}
+
+	liveNodes(rows: readonly number[]) {
+		return this.reachable(rows).size
+	}
+
+	collect(initial: number[], rows: number[], forced = false) {
+		if (!forced && this.nodes.length < this.collectionAt) return false
+		const reachable = this.reachable([...initial, ...rows])
+		this.collectionAt = this.nodes.length + collectionInterval
+		const dead = this.nodes.length - reachable.size - 2
+		if (dead < Math.max(1, Math.floor(this.nodes.length / 2))) return false
+
+		// Child IDs precede their parents. Compact in that order and commit
+		// only after the roots and surviving cache entries can be remapped.
+		const ids = new Int32Array(this.nodes.length).fill(-1)
+		ids[0] = 0
+		ids[1] = 1
+		const nodes: (Decision | undefined)[] = [undefined, undefined]
+		const unique = new Map<string, number>()
+		for (const old of [...reachable].sort((a, b) => a - b)) {
+			if ((nodes.length & 255) === 0 && this.stopped()) throw new DiagramLimit()
+			const { wire, low, high } = this.nodes[old]!
+			const mapped = { wire, low: ids[low], high: ids[high] }
+			const id = nodes.push(mapped) - 1
+			ids[old] = id
+			unique.set(`${wire},${mapped.low},${mapped.high}`, id)
+		}
+		const buckets: MemoBuckets = []
+		const oldBuckets = this.memoBuckets!
+		let scanned = 0
+		let retained = 0
+		// Terminal-only operations bypass the cache, so these buckets
+		// always correspond to a nonterminal operand.
+		for (const node of reachable) {
+			const bucket = oldBuckets[node]
+			if (!bucket) continue
+			for (const [key, oldResult] of bucket) {
+				if ((scanned++ & 255) === 0 && this.stopped()) throw new DiagramLimit()
+				const result = ids[oldResult]
+				if (result < 0) continue
+				const oldOperand = (key >>> 1) % memoNodeBase
+				const operand = ids[oldOperand]
+				if (operand < 0) continue
+				const remapped = buckets[ids[node]] ??= new Map()
+				remapped.set(key + 2 * (operand - oldOperand), result)
+				retained++
+			}
+		}
+		if (this.stopped()) throw new DiagramLimit()
+		for (let i = 0; i < initial.length; i++) {
+			initial[i] = ids[initial[i]]
+			rows[i] = ids[rows[i]]
+		}
+		this.peakBeforeCollection = this.peakNodes
+		this.nodes = nodes
+		this.unique = unique
+		this.skippedMemoEntries += this.bucketEntries - scanned
+		this.memoBuckets = buckets
+		this.bucketEntries = retained
+		this.retainedMemoEntries += retained
+		this.scannedMemoEntries += scanned
+		this.reclaimedNodes += dead
+		this.collections++
+		this.collectionAt = nodes.length + collectionInterval
+		return true
 	}
 
 	positiveProduct(id: number): number[] | undefined {
@@ -96,22 +195,31 @@ class DecisionDiagram {
 	}
 }
 
-function begin(order: number[], stopped: () => boolean, operationLimit = maximumOperations) {
-	const diagram = new DecisionDiagram(stopped, operationLimit)
+function begin(order: number[], stopped: () => boolean, operationLimit = maximumOperations, reclaim = false) {
+	const diagram = new DecisionDiagram(stopped, operationLimit, reclaim)
 	const initial = order.map((_, wire) => diagram.node(wire, 0, 1))
 	return { diagram, initial, rows: initial.slice(), order, completed: 0 }
 }
 
 type Evaluation = ReturnType<typeof begin>
 
-function advance(state: Evaluation, mapped: Gate[], start: number, end = mapped.length) {
+function advance(state: Evaluation, mapped: Gate[], start: number, end = mapped.length, reclaim = false) {
+	const { diagram, initial, rows } = state
 	for (let i = start; i < end; i++) {
-		state.diagram.step(state.rows, mapped[i])
+		if (reclaim && (state.completed & 31) === 0) diagram.collect(initial, rows)
+		try {
+			diagram.step(rows, mapped[i])
+		} catch (error) {
+			// A failed gate leaves its target unchanged. Retry only after
+			// collecting enough space from the last completed gate state.
+			if (!reclaim || !(error instanceof DiagramNodeLimit) || !diagram.collect(initial, rows, true)) throw error
+			diagram.step(rows, mapped[i])
+		}
 		state.completed++
 	}
 }
 
-function synthesizeInOrder(gates: Gate[], state: Evaluation, stopped: () => boolean, adaptive = false) {
+function synthesizeInOrder(gates: Gate[], state: Evaluation, stopped: () => boolean, adaptive = false, reclaim = false) {
 	const { diagram, initial, rows, order: wires } = state
 	const reusedPrefixGates = state.completed
 	const mapped = mapCircuit(state.completed ? gates.slice(state.completed) : gates, wires)
@@ -126,12 +234,12 @@ function synthesizeInOrder(gates: Gate[], state: Evaluation, stopped: () => bool
 				diagram.operationCount + 64_000,
 				Math.floor(180_000 + (maximumOperations - 180_000) * progress),
 			)
-			advance(state, mapped, start, end)
+			advance(state, mapped, start, end, reclaim)
 			if (diagram.nodeCount > maximumNodes * (0.32 + 0.68 * progress)) throw new DiagramLimit()
 		}
 		diagram.operationLimit = maximumOperations
 	} else {
-		advance(state, mapped, 0)
+		advance(state, mapped, 0, mapped.length, reclaim)
 	}
 	const changed = rows.flatMap((row, wire) => row === initial[wire] ? [] : [wire])
 	if (changed.length !== 1) return undefined
@@ -148,6 +256,10 @@ function synthesizeInOrder(gates: Gate[], state: Evaluation, stopped: () => bool
 	if (!rows.every((row, wire) => row === actual[wire])) throw new Error('Decision diagram synthesis failed exact equivalence verification')
 	return {
 		gates: reverseMapCircuit(replacement, wires), diagramNodes: diagram.nodeCount, liveNodes: diagram.liveNodes(rows),
+		allocatedNodes: diagram.nodeCount + diagram.reclaimedNodes, peakNodes: diagram.peakNodes,
+		reclaimedNodes: diagram.reclaimedNodes, collections: diagram.collections,
+		retainedMemoEntries: diagram.retainedMemoEntries, scannedMemoEntries: diagram.scannedMemoEntries,
+		skippedMemoEntries: diagram.skippedMemoEntries, applyCalls: diagram.operationCount,
 		output: wires[output], factors: factors.map(wire => wires[wire]), reusedPrefixGates,
 	}
 }
@@ -169,8 +281,8 @@ function neighborhoodOrder(wires: number[], interactions: Map<number, Map<number
 	return ordered
 }
 
-function probe(gates: Gate[], order: number[], stopped: () => boolean) {
-	const state = begin(order, stopped, probeOperations)
+function probe(gates: Gate[], order: number[], stopped: () => boolean, reclaim = false) {
+	const state = begin(order, stopped, probeOperations, reclaim)
 	const mapped = mapCircuit(gates, order)
 	let live = 0
 	try {
@@ -207,7 +319,7 @@ function compareTrials(a: TrialScore, b: TrialScore) {
 	return b.completed - a.completed || a.live - b.live || a.nodes - b.nodes || a.operations - b.operations
 }
 
-function rankOrders(gates: Gate[], orders: number[][], stopped: () => boolean) {
+function rankOrders(gates: Gate[], orders: number[][], stopped: () => boolean, reclaim: boolean) {
 	const first = gates.slice(0, probeGates)
 	const laterStart = Math.max(0, Math.floor(gates.length / 2) - 32)
 	const later = gates.slice(laterStart, laterStart + probeGates)
@@ -216,7 +328,7 @@ function rankOrders(gates: Gate[], orders: number[][], stopped: () => boolean) {
 	let prefix: Evaluation | undefined
 	for (const order of orders) {
 		if (stopped()) break
-		const lead = probe(first, order, stopped)
+		const lead = probe(first, order, stopped, reclaim)
 		// The later window is a ranking probe. Only the real prefix can be resumed.
 		const tail = laterStart && !stopped() ? probe(later, order, stopped) : undefined
 		const score = {
@@ -235,7 +347,7 @@ function rankOrders(gates: Gate[], orders: number[][], stopped: () => boolean) {
 }
 
 /** Recover and prove a single positive product update by exact composition. */
-export function synthesizeDecisionDiagramProduct(gates: Gate[], maximumWires: number, stopped: () => boolean, ordering: DiagramOrdering = 'adaptive') {
+export function synthesizeDecisionDiagramProduct(gates: Gate[], maximumWires: number, stopped: () => boolean, ordering: DiagramOrdering = 'adaptive', reclaim = true) {
 	if (gates.length < 2 || stopped()) return undefined
 	const active = new Set<number>()
 	const written = new Set<number>()
@@ -254,9 +366,9 @@ export function synthesizeDecisionDiagramProduct(gates: Gate[], maximumWires: nu
 
 	let initialAttempt: Evaluation | undefined
 	if (ordering !== 'upfront') {
-		initialAttempt = begin(primary, stopped)
+		initialAttempt = begin(primary, stopped, maximumOperations, reclaim)
 		try {
-			const result = synthesizeInOrder(gates, initialAttempt, stopped, ordering === 'adaptive')
+			const result = synthesizeInOrder(gates, initialAttempt, stopped, ordering === 'adaptive', reclaim)
 			return result && { ...result, orderingTrials: 0 }
 		} catch (error) {
 			if (!(error instanceof DiagramLimit)) throw error
@@ -270,7 +382,7 @@ export function synthesizeDecisionDiagramProduct(gates: Gate[], maximumWires: nu
 	} else {
 		const orders = [primary, numeric, neighborhoodOrder(firstUse, collectInteractions(gates, stopped)), firstUse]
 		const unique = new Map(orders.map(order => [order.join(','), order]))
-		ranked = rankOrders(gates, [...unique.values()], stopped)
+		ranked = rankOrders(gates, [...unique.values()], stopped, reclaim)
 	}
 
 	// A completed analysis is conclusive in any order. Keep at most two
@@ -283,10 +395,10 @@ export function synthesizeDecisionDiagramProduct(gates: Gate[], maximumWires: nu
 		const canResumeInitial = initialAttempt?.order === order &&
 			initialAttempt.completed >= (prefix?.completed ?? 0) &&
 			initialAttempt.diagram.operationCount < maximumOperations && initialAttempt.diagram.nodeCount < maximumNodes
-		const state = (canResumeInitial ? initialAttempt : prefix) ?? begin(order, stopped)
+		const state = (canResumeInitial ? initialAttempt : prefix) ?? begin(order, stopped, maximumOperations, reclaim)
 		state.diagram.operationLimit = maximumOperations
 		try {
-			const result = synthesizeInOrder(gates, state, stopped)
+			const result = synthesizeInOrder(gates, state, stopped, false, reclaim)
 			return result && { ...result, orderingTrials: ranked.trials }
 		} catch (error) {
 			if (!(error instanceof DiagramLimit)) throw error

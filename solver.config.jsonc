@@ -50,7 +50,8 @@
     // Enumerate short replacements by forward semantic search.
     "decisionDiagramProduct": {
       "enabled": true, // Exactly recover single-product updates with a bounded decision diagram.
-      "trialOrdering": "adaptive" // Rank orders under diagram pressure. Use "upfront" to always rank or "off" to skip ranking.
+      "trialOrdering": "adaptive", // Rank orders under diagram pressure. Use "upfront" to always rank or "off" to skip ranking.
+      "reclaimNodes": true // Compact unreachable nodes between completed gates.
     },
     "forwardSemantic": {
       "enabled": true // Run this strategy when eligible.
