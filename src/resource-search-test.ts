@@ -126,7 +126,7 @@ try {
 	assert.deepEqual(report.results.map((result: { variant: string }) => result.variant), ['reference', 'tuned'])
 	assert.equal(report.results[0].seed, report.results[1].seed)
 	assert.equal(report.results[0].sharedBytes, 0); assert.ok(report.results[1].sharedBytes > 0)
-	assert.ok(report.results.every((result: { checks: number, controls: { adaptiveConcurrency: boolean } }) => result.checks <= config.workers.jobsPerWorker * config.benchmark.maximumChecks && result.controls.adaptiveConcurrency === false))
+	assert.ok(report.results.every((result: { checks: number, controls: { adaptiveConcurrency: boolean } }) => result.checks <= config.benchmark.maximumChecks && result.controls.adaptiveConcurrency === false))
 	assert.ok(report.results.every((result: { validation: string, databaseMs: number, workerMs: number, finalGates: number }) => result.validation === 'exhaustive' && result.finalGates <= 12 && result.databaseMs <= result.workerMs + 0.01))
 } finally { Object.assign(config, saved); await rm(directory, { recursive: true, force: true }) }
 for (const invalid of [{ search: { schedulerHistoryEntries: 0 } }, { cache: { lookupPolicy: 'unknown' } }, { workers: { initialConcurrency: 0 } }, { workers: { concurrencyDatabaseFraction: 1.1 } }, { workers: { concurrencyRateTolerance: 1 } }, { database: { sharedTableBytes: 0x80000000 } }, { benchmark: { workerCounts: [] } }, { benchmark: { workerCounts: [1, 1] } }, { benchmark: { seconds: 0 } }, { benchmark: { outputName: '../input.json' } }]) assert.throws(() => parseConfig(invalid))

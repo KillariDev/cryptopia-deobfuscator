@@ -45,6 +45,15 @@ try {
 	await pool.run([not], 2, (_, activity) => { firstLocalStrategy ??= activity?.activeStrategy },
 		undefined, 20, false, 'local', 1)
 	assert.equal(firstLocalStrategy, 'rainbow', 'starting a broad worker first preserves the first local strategy')
+	Object.assign(config.search, { subsetMinimum: 2, subsetMaximum: 2, sliceMinimum: 2, sliceMaximum: 2 })
+	const limitedPool = new WorkerPool(2, undefined, [createSharedTable(table, [], 1024)!], undefined, 1)
+	try {
+		const checks = [0, 0, 0]
+		await Promise.all(checks.map((_, i) => limitedPool.run([not, not], 2, (_count, activity) => {
+			checks[i] = activity?.checks ?? 0
+		}, undefined, 1000)))
+		assert.equal(checks.reduce((sum, count) => sum + count, 0), 1)
+	} finally { await limitedPool.close() }
 } finally {
 	await pool.close()
 	Object.assign(config.search, search)

@@ -54,7 +54,7 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 			if (candidate) lastConsideredImprovement = activity.improvements
 			if (snapshot) lastSnapshot = snapshot
 			parentPort!.postMessage({ progress: count, activity, snapshot })
-		}, () => (restartOnImprovement && lastSnapshot.length < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0), (count, improvements) => count < lastSnapshot.length || (count === lastSnapshot.length && improvements > lastConsideredImprovement), true, workerData?.maximumChecks)
+		}, () => (restartOnImprovement && lastSnapshot.length < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0), (count, improvements) => count < lastSnapshot.length || (count === lastSnapshot.length && improvements > lastConsideredImprovement), true, workerData?.remainingChecks)
 		parentPort!.postMessage({ gates: result })
 	} catch (error) {
 		parentPort!.postMessage({ error: String(error) })

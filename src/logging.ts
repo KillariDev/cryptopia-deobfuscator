@@ -60,7 +60,7 @@ export function formatWorkerActivity(statuses: WorkerStatus[], elapsedMs: number
 	return `Work: ${totals.passes} passes, ${totals.subsets} subsets visited, ${totals.checks} optimization checks, ${totals.improvements} improving rewrites; workers: ${stages.preparing} preparing, ${stages.searching} searching, ${stages.shuffling} shuffling, ${stages.verifying} verifying, ${stages.waiting} awaiting report, ${stages.completed} completed; round time budget ${budget}% elapsed (not search completion); oldest active report ${Math.max(0, Math.floor(oldest / 1000))}s ago.`
 }
 
-export const shouldFinishReducedRound = (elapsedMs: number, initialCount: number, currentCount: number) => elapsedMs >= config.timing.improvedRoundMinutes * 60_000 && currentCount < initialCount
+export const shouldFinishReducedRound = (elapsedMs: number, initialCount: number, currentCount: number) => elapsedMs >= config.timing.improvedRoundSeconds * 1000 && currentCount < initialCount
 
 const duration = (ms: number) => `${Math.floor(Math.max(0, ms) / 60_000)}m ${Math.floor(Math.max(0, ms) / 1000) % 60}s`
 export type SolverStatus = {
@@ -77,7 +77,7 @@ export type SolverStatus = {
 export function formatStatus(status: SolverStatus) {
 	const { original, roundStart, candidate, previous, statuses, elapsedMs } = status
 	const finished = statuses.filter(worker => worker.done).length
-	const targetMs = ((status.roundImproved ?? candidate < roundStart) ? config.timing.improvedRoundMinutes : config.timing.roundMinutes) * 60_000
+	const targetMs = ((status.roundImproved ?? candidate < roundStart) ? config.timing.improvedRoundSeconds : config.timing.roundSeconds) * 1000
 	const round = finished === statuses.length
 		? `Round finished in ${duration(elapsedMs)}`
 		: `Round time: ${duration(elapsedMs)} / ${duration(targetMs)}`

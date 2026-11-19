@@ -6,7 +6,7 @@ import { searchDependencyCuts } from './dependency-cuts.js'
 import { setImmediate as yieldToCoordinator } from 'node:timers/promises'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
-import { mergeDisjointRoundResults, RoundCutPatches, roundSearchPlan, roundSearchResult } from './round-search.js'
+import { mergeDisjointRoundResults, RoundCutPatches, roundChunkSize, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { formatRoundStrategies } from './logging.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { selectIntervals } from './intervals.js'
@@ -762,7 +762,7 @@ function appendMissingNumbers(arr: number[], n: number): number[] {
 	return [...Array.from(allNumbers), ...arr]
 }
 
-export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method'], onLazyCandidate?: (gates: ChunkedSequence<Gate>) => void, synthesisBudget?: SynthesisBudget, strategyPicker?: StrategyPicker | RoundStrategyPicker, initialSeed?: number, sliceResults?: SliceResults, maximumChecks = 0): Promise<Gate[]> => {
+export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Gate[], ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, subsetSize: number, maxSlice: number, phase: 'simplest' | 'heavy', timeToEndWorker: () => boolean, activity: WorkerActivity, onCandidate: (gates: Gate[]) => void, testedSubsets: LimitedMap<string, boolean>, method: SearchArm['method'], onLazyCandidate?: (gates: ChunkedSequence<Gate>) => void, synthesisBudget?: SynthesisBudget, strategyPicker?: StrategyPicker | RoundStrategyPicker, initialSeed?: number, sliceResults?: SliceResults, claimCheck: () => boolean = () => true): Promise<Gate[]> => {
 	// No convex region can reach the requested size in this chunk.
 	if (subsetSize > slicedVersion.length) return slicedVersion.slice()
 	const useProbabilistically = method !== 'rainbow' && phase === 'heavy' && config.search.probabilistic
@@ -805,7 +805,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 					if (timeToEndWorker()) return circuit.toArray()
 					const attemptKey = active ? `${active}:${method}:${phase}:${slice}:${gateKey}` : undefined
 					if (attemptKey && testedSubsets.has(attemptKey)) continue
-					if (maximumChecks > 0 && activity.checks >= maximumChecks) return circuit.toArray()
+					if (!claimCheck()) return circuit.toArray()
 					activity.checks++
 					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables', preparation ??= new SubsetPreparation(inGates, sliceResults), attemptBudget, strategyPicker)
 					if (!optimizationOutput.changed) {
@@ -877,7 +877,7 @@ export const createOptimizerCaches = (workerIndex = 0) => ({
 	methodCaches: new Map<string, LimitedMap<string, boolean>>(),
 })
 
-export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number, improvements: number) => boolean, reportOnImprovement = false, maximumChecks = 0) => {
+export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number, improvements: number) => boolean, reportOnImprovement = false, checkBudget: number | BigInt64Array = 0) => {
 	resetStrategyStats()
 	const jobStarted = performance.now(), jobDeadline = jobStarted + roundDurationMs, databaseStarted = lookupDatabaseTime()
 	let optimizedVersion = originalGates.slice()
@@ -917,7 +917,19 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		verifyCircuit(originalGates, optimizedVersion, wires, config.validation.checkpointInputs)
 		return optimizedVersion
 	}
-	const checkLimitReached = () => maximumChecks > 0 && activity.checks >= maximumChecks
+	const checkLimitReached = () => typeof checkBudget === 'number'
+		? checkBudget > 0 && activity.checks >= checkBudget
+		: Atomics.load(checkBudget, 0) === 0n
+	const claimCheck = () => {
+		if (typeof checkBudget === 'number') return !checkLimitReached()
+		let remaining = Atomics.load(checkBudget, 0)
+		while (remaining > 0n) {
+			const observed = Atomics.compareExchange(checkBudget, 0, remaining, remaining - 1n)
+			if (observed === remaining) return true
+			remaining = observed
+		}
+		return false
+	}
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
 		if (onProgress) {
@@ -974,6 +986,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 				if (timeToEndWorker() || checkLimitReached()) break
 				const attempt = `contiguous:${strategy}:${phase}:${size}:${key}`
 				if (caches.testedSubsets.has(attempt)) continue
+				if (!claimCheck()) break
 				activity.subsets++
 				activity.checks++
 				let published = false
@@ -1007,7 +1020,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 			const result = await optimizeSubset(tables, data, ioIdentifierCache, methodCache!, subsetSize, maxSlice, phase, timeToEndWorker, activity, () => {}, caches.testedSubsets, method, gates => {
 				candidateParts.update(index, gates)
 				timeToEndWorker()
-			}, { deadline: jobDeadline, shouldStop: () => shouldFinish?.(activity) === true }, caches.strategyPicker, workerRegionSeed(data.length, caches.workerIndex), sliceResults, maximumChecks)
+			}, { deadline: jobDeadline, shouldStop: () => shouldFinish?.(activity) === true }, caches.strategyPicker, workerRegionSeed(data.length, caches.workerIndex), sliceResults, claimCheck)
 			candidateParts.update(index, result)
 			return result
 		}))
@@ -1039,8 +1052,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		} else {
 			if (gatesRemoved > 0) {
 				const endTime = performance.now()
-				const timeDiffMins = (endTime - lastSaved) / 60000
-				if (timeDiffMins >= config.timing.standaloneSaveSeconds / 60) {
+				if (endTime - lastSaved >= config.timing.standaloneSaveSeconds * 1000) {
 					logVerbose(`Total Removed Gates Since last save: ${ gatesRemoved }`)
 					const filename = outputPaths(problemName).progress(optimizedVersion.length)
 					save([filename, outputPaths(problemName).latest], optimizedVersion, wires, originalGates)
@@ -1185,7 +1197,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 			let lastIterationTime = performance.now()
 			const nPrevGates = currentGates.length
 			let winner: 'local' | 'global' | 'combined' = 'local'
-			const workersSize = getRandomNumberInRange(Math.min(config.workers.minimumChunkGates, currentGates.length), Math.max(1, currentGates.length * config.workers.maximumChunkFraction))
+			const workersSize = roundChunkSize(currentGates.length, config.workers.minimumChunkGates, config.workers.maximumChunkFraction)
 			const broadEnabled = nMaxWorkers > 1 && currentGates.length >= minimumBroadGates() && config.workers.broadSearchSeconds > 0 && globalStrategyPicker.activeStrategy !== undefined
 			if (broadEnabled) globalStrategyPicker.beginRound(optimizerRound)
 			const broadInput = currentGates

@@ -21,9 +21,14 @@ export class WorkerPool {
 	private failure?: Error
 	private concurrency: number
 	private reserveBroad = false
-	constructor(private size: number, private workerUrl = new URL('./worker.js', import.meta.url), private sharedTables: SharedTable[] = [], private seed?: number, private maximumChecks = 0) {
+	private readonly remainingChecks?: BigInt64Array
+	constructor(private size: number, private workerUrl = new URL('./worker.js', import.meta.url), private sharedTables: SharedTable[] = [], private seed?: number, maximumChecks = 0) {
 		if (!Number.isSafeInteger(size) || size < 1) throw new Error('Invalid worker pool size')
 		this.concurrency = size
+		if (maximumChecks > 0) {
+			this.remainingChecks = new BigInt64Array(new SharedArrayBuffer(BigInt64Array.BYTES_PER_ELEMENT))
+			Atomics.store(this.remainingChecks, 0, BigInt(maximumChecks))
+		}
 	}
 	setConcurrency(limit: number) {
 		if (!Number.isSafeInteger(limit) || limit < 1 || limit > this.size) throw new Error('Invalid worker concurrency')
@@ -71,7 +76,8 @@ export class WorkerPool {
 	private dispatch() {
 		while (this.queue.length) {
 			const next = this.queue[0]
-			if (next.stopSignal && Atomics.load(new Int32Array(next.stopSignal), 0) !== 0) {
+			if ((next.stopSignal && Atomics.load(new Int32Array(next.stopSignal), 0) !== 0) ||
+				(next.solver === 'local' && this.remainingChecks && Atomics.load(this.remainingChecks, 0) === 0n)) {
 				this.queue.shift()!.resolve(next.gates)
 				continue
 			}
@@ -88,7 +94,7 @@ export class WorkerPool {
 				if (this.slots.length >= this.size) return
 				let index = 0
 				while (this.slots.some(slot => slot.index === index)) index++
-				const worker = new Worker(this.workerUrl, { workerData: { solverConfig: config, workerIndex: index, sharedTables: this.sharedTables, solverSeed: this.seed === undefined ? undefined : this.seed + index, maximumChecks: this.maximumChecks } })
+				const worker = new Worker(this.workerUrl, { workerData: { solverConfig: config, workerIndex: index, sharedTables: this.sharedTables, solverSeed: this.seed === undefined ? undefined : this.seed + index, remainingChecks: this.remainingChecks } })
 				slot = { worker, index }
 				const current = slot
 				this.slots.push(current)
@@ -96,9 +102,14 @@ export class WorkerPool {
 					if (current.retiring) return
 					const job = current.job
 					const activity = message.activity ? { ...message.activity, workerId: current.worker.threadId } : undefined
-					if (message.progress !== undefined) { job?.onProgress?.(message.progress, activity, message.snapshot); return }
-					if (message.gates === undefined && message.error === undefined) return
-					if (message.gates !== undefined && activity) job?.onProgress?.(message.gates.length, activity)
+					try {
+						if (message.progress !== undefined) { job?.onProgress?.(message.progress, activity, message.snapshot); return }
+						if (message.gates === undefined && message.error === undefined) return
+						if (message.gates !== undefined && activity) job?.onProgress?.(message.gates.length, activity)
+					} catch (error) {
+						this.fail(error instanceof Error ? error : new Error(String(error)))
+						return
+					}
 					current.job = undefined
 					if (message.error) { this.fail(new Error(message.error)); job?.reject(this.failure!); return }
 					job?.resolve(message.gates!)

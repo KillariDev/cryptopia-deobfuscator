@@ -166,8 +166,8 @@ strict gate-count improvement is immediately verified and saved, then active
 searches stop cooperatively and queued jobs are discarded. The next round starts
 from the new best; any better result returned while stopping is retained. The
 coordinator verifies combined results before saving them. By default, improving
-rounds aim to finish after five minutes; rounds without reductions retain a
-25-minute budget. Later rounds repartition and shuffle the circuit.
+rounds use the `timing.improvedRoundSeconds` target. Rounds without reductions
+use `timing.roundSeconds`. Later rounds repartition and shuffle the circuit.
 
 Checkpoint verification is exhaustive when the original and candidate together
 use at most eight wires. On wider resumes, the solver first tries an exact
@@ -180,7 +180,9 @@ During a run, new wide checkpoints are checked against the original on
 ## Configuration
 
 Edit [solver.config.jsonc](solver.config.jsonc), then restart. The checked-in file
-documents each setting. Omitted values use defaults. Set a strategy’s
+documents each setting. Time settings use seconds, including fractional seconds
+for short intervals. Existing minute and millisecond settings are still read
+when their seconds equivalents are omitted. Omitted values use defaults. Set a strategy’s
 `enabled` field under `strategies` to false to disable it. Shared solver limits
 are listed in the same section. A file selected with `OPTIMIZER_CONFIG` can use
 JSONC or the legacy JSON layout. When both layouts provide the same setting,

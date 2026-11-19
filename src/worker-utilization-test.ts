@@ -24,7 +24,7 @@ try {
 	config.files.dataDirectory = directory
 	config.database.sharedTables = false
 	Object.assign(config.workers, { broadSearchIdleSeconds: 0, maximum: 4, keepBusy: true, adaptiveConcurrency: true, initialConcurrency: 1, jobsPerWorker: 1, broadSearchSeconds: 0.04 })
-	Object.assign(config.timing, { roundMinutes: 0.01, improvedRoundMinutes: 0.005, summarySeconds: 0.025 })
+	Object.assign(config.timing, { roundSeconds: 0.6, improvedRoundSeconds: 0.3, summarySeconds: 0.025 })
 	config.logging.verbose = false
 	console.log = () => {}
 	let firstSignal: SharedArrayBuffer | undefined

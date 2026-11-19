@@ -59,7 +59,7 @@ export async function hasCanonicalCoverage(db: sqlite3.Database, wires: number, 
 const lookupReplacers = async (db: sqlite3.Database, cache: LimitedMap<string, Gate[] | null>, identifiers: string[], namespace: string) => {
 	let batcher = lookupBatchers.get(db)
 	if (!batcher) {
-		batcher = new LookupBatcher(config.database.queryBatchSize, config.database.lookupBatchMilliseconds, async ids => {
+		batcher = new LookupBatcher(config.database.queryBatchSize, config.database.lookupBatchSeconds * 1000, async ids => {
 			let statements = lookupStatements.get(db)
 			if (!statements) { statements = new LookupStatements(db, config.database.statementCacheEntries); lookupStatements.set(db, statements) }
 			const rows = await statements.query<{ ioIdentifier: Buffer, replacerGates: Buffer }>(ids.map(keyToSql))
@@ -154,7 +154,7 @@ async function buildRainbowTable(db: sqlite3.Database, wires: number, gates: num
 	let diagnostics: GenerationDiagnostics | undefined
 	try {
 		if (verboseLogging() && config.logging.generationDiagnostics) {
-			try { diagnostics = new GenerationDiagnostics(db, config.logging.eventLoopResolutionMilliseconds, config.logging.generationDiagnosticsMinimumSeconds) }
+			try { diagnostics = new GenerationDiagnostics(db, Math.max(1, Math.round(config.logging.eventLoopResolutionSeconds * 1000)), config.logging.generationDiagnosticsMinimumSeconds) }
 			catch (error) { logVerbose(`Generation diagnostics unavailable: ${String(error)}`) }
 		}
 		const reportDiagnostics = (profile?: GenerationProfile, activity?: GenerationActivity, phase?: string) => {

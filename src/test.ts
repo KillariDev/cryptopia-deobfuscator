@@ -198,7 +198,7 @@ try {
 	assert.throws(() => loadJob('original'), /Invalid gate at index 0.*original-latest\.json/)
 	assert.equal(loadJob('original', 'original', true).inputCircuit.gates.length, 1)
 	assert.match(summary, /Worker limit:/)
-	assert.match(summary, /25 minutes/)
+	assert.match(summary, /1500 seconds/)
 	assert.match(summary, /4 wires, up to 5 gates/)
 	assert.deepEqual(await realPool.run([], 4), [])
 	assert.deepEqual(await realPool.run([], 4), [])
@@ -310,7 +310,7 @@ assert.match(detail, /3 passes, 120 subsets visited, 900 optimization checks, 4 
 assert.match(detail, /1 searching/)
 assert.match(detail, /1 completed/)
 assert.match(detail, /5s ago/)
-const improvedRoundMs = config.timing.improvedRoundMinutes * 60_000
+const improvedRoundMs = config.timing.improvedRoundSeconds * 1000
 assert.equal(shouldFinishReducedRound(improvedRoundMs - 1, 100, 99), false)
 assert.equal(shouldFinishReducedRound(improvedRoundMs, 100, 99), true)
 assert.equal(shouldFinishReducedRound(improvedRoundMs, 100, 100), false)
@@ -357,8 +357,15 @@ assert.equal(grouped.files.databaseDirectory, 'https://example.test/tables')
 assert.throws(() => parseConfig({ strategies: { rainbow: { enabld: false } } }), /Unknown config setting/)
 assert.throws(() => parseConfigDocument('{"workers": /* unfinished'))
 assert.equal(parseConfig({ synthesis: { satSweeping: false } }).synthesis.satSweeping, false)
-const custom = parseConfig({ timing: { summarySeconds: 10, improvedRoundMinutes: 2 }, workers: { maximum: 3 }, logging: { verbose: true } })
+const custom = parseConfig({ timing: { summarySeconds: 10, improvedRoundSeconds: 120 }, workers: { maximum: 3 }, logging: { verbose: true } })
 assert.equal(custom.timing.summarySeconds, 10)
+assert.equal(custom.timing.improvedRoundSeconds, 120)
+const oldTiming = parseConfig({ timing: { roundMinutes: 2, improvedRoundMinutes: 1 }, logging: { eventLoopResolutionMilliseconds: 20 }, database: { lookupBatchMilliseconds: 15 } })
+assert.equal(oldTiming.timing.roundSeconds, 120)
+assert.equal(oldTiming.timing.improvedRoundSeconds, 60)
+assert.equal(oldTiming.logging.eventLoopResolutionSeconds, 0.02)
+assert.equal(oldTiming.database.lookupBatchSeconds, 0.015)
+assert.equal(parseConfig({ timing: { roundMinutes: 2, roundSeconds: 90, improvedRoundSeconds: 30 } }).timing.roundSeconds, 90)
 assert.equal(custom.workers.maximum, 3)
 assert.deepEqual(custom.database.tables, defaults.database.tables)
 assert.equal(defaults.timing.summarySeconds, 30)
@@ -867,6 +874,18 @@ try {
 	assert.equal(peak, 2)
 	assert.ok(results.every(gates => gates[0].b === 9))
 } finally { await schedulingPool.close() }
+const throwingProgressPool = new WorkerPool(1, new URL('data:text/javascript,' + encodeURIComponent(`
+import {parentPort} from 'node:worker_threads';
+parentPort.on('message', () => parentPort.postMessage({progress:1}));
+`)))
+try {
+	const failure = new Error('progress observer failed')
+	await Promise.all([
+		assert.rejects(throwingProgressPool.run(singleGate, 4, () => { throw failure }), failure),
+		assert.rejects(throwingProgressPool.run(singleGate, 4), failure),
+	])
+} finally { await throwingProgressPool.close() }
+
 const cancellationFixture = new URL('data:text/javascript,' + encodeURIComponent(`
 import {parentPort} from 'node:worker_threads';
 parentPort.on('message', async ({gates,stopSignal}) => {

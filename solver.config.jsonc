@@ -109,8 +109,8 @@
   // Round, status and checkpoint intervals.
   "timing": {
     "checkpointSeconds": 30, // Seconds between attempts to save the best candidate.
-    "roundMinutes": 25, // Round target in minutes when local search has no gate reduction.
-    "improvedRoundMinutes": 1, // Round target in minutes once local search removes gates.
+    "roundSeconds": 1500, // Round target in seconds when local search has no gate reduction.
+    "improvedRoundSeconds": 60, // Round target in seconds once local search removes gates.
     "summarySeconds": 30, // Seconds between console progress summaries.
     "workerReportSeconds": 5, // Seconds between worker progress reports.
     "databaseLogSeconds": 60, // Seconds between database-generation status updates.
@@ -121,7 +121,7 @@
     "verbose": false, // Enable detailed optimizer logging.
     "generationDiagnostics": true, // Enable database generation diagnostics.
     "generationDiagnosticsMinimumSeconds": 5, // Minimum generation duration for detailed diagnostics.
-    "eventLoopResolutionMilliseconds": 20 // Event-loop sampling interval in milliseconds.
+    "eventLoopResolutionSeconds": 0.02 // Event-loop sampling interval in seconds.
   },
   // Shared equivalence checking limits.
   "validation": {
@@ -192,7 +192,7 @@
     "etaWindowSamples": 5, // Recent generation samples used for ETA.
     "etaWarmupSamples": 3, // Sample count before calculating an ETA.
     "etaSmoothing": 0.2, // Weight of the latest generation rate in the ETA estimate.
-    "lookupBatchMilliseconds": 0, // Delay for coalescing concurrent lookup requests.
+    "lookupBatchSeconds": 0, // Delay in seconds for coalescing concurrent lookup requests.
     "generationWorkers": 8, // Maximum database-generation workers.
     "generationQueueBatches": 2, // Maximum queued generation batches.
     "generationMinimumWork": 100000, // Minimum candidate work before generation uses parallel slots.

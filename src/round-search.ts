@@ -2,6 +2,13 @@ import type { CutPatch } from './dependency-cuts.js'
 import { Gate } from './types.js'
 import { isBetterCircuit } from './circuit-cost.js'
 
+import { getRandomNumberInRange } from './utils.js'
+
+export function roundChunkSize(gates: number, minimum: number, maximumFraction: number) {
+	const maximum = Math.max(1, Math.floor(gates * maximumFraction))
+	return getRandomNumberInRange(Math.min(minimum, maximum), maximum + 1)
+}
+
 /** Small circuits use independent full-context searches instead of tiny chunks. */
 export function roundSearchPlan(gates: number, maximumWorkers: number, chunkSize: number, wholeCircuitMaximumGates: number) {
 	const wholeCircuit = gates > 0 && gates <= wholeCircuitMaximumGates && maximumWorkers > 1

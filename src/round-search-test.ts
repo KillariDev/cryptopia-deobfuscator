@@ -2,11 +2,14 @@ import { circuitWireCost, isBetterCircuit, SplitCircuitCost } from './circuit-co
 import { formatCircuitSize } from './logging.js'
 import { AsyncReductionCheckpoint } from './storage.js'
 import assert from 'node:assert/strict'
-import { RoundCutPatches, mergeDisjointRoundResults, PeriodicStrategy, WholeCircuitRestart, roundSearchPlan, roundSearchResult } from './round-search.js'
+import { RoundCutPatches, mergeDisjointRoundResults, PeriodicStrategy, WholeCircuitRestart, roundChunkSize, roundSearchPlan, roundSearchResult } from './round-search.js'
 import { parseConfig } from './config.js'
 import { evalCircuit, generateCombinations } from './utils.js'
 import { Gate } from './types.js'
 
+assert.equal(roundChunkSize(100, 100, 0.5), 50)
+assert.equal(roundChunkSize(5, 10, 0.5), 2)
+assert.equal(roundChunkSize(1, 100, 0.5), 1)
 assert.deepEqual(roundSearchPlan(1000, 24, 450, 2000), { wholeCircuit: true, capacity: 24 })
 assert.deepEqual(roundSearchPlan(1000, 24, 450, 0), { wholeCircuit: false, capacity: 2 })
 assert.equal(roundSearchPlan(2000, 8, 500, 2000).wholeCircuit, true)

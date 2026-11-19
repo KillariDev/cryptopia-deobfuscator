@@ -9,7 +9,7 @@ import { configuredWorkerCount } from './threads.js'
 import { databaseFilename } from './rainbowtable.js'
 import { assertCircuitData } from './circuit-validation.js'
 
-export const WORKER_ROUND_MS = config.timing.roundMinutes * 60_000
+export const WORKER_ROUND_MS = config.timing.roundSeconds * 1000
 export type JobCircuits = { originalCircuit: CircuitData, inputCircuit: CircuitData }
 
 export function loadJob(working: string, original = working, startOver = false): JobCircuits {
@@ -42,12 +42,12 @@ export function describeJob(working: string, original: string, circuits: JobCirc
 		`Progress checkpoints: ${resolve(dirname(paths.progress(inputCircuit.gates.length)))}`,
 		`Worker snapshots: ${resolve(dirname(paths.worker(0)))}`,
 		`Worker limit: ${configuredWorkerCount()} (${process.env.OPTIMIZER_WORKERS === undefined ? 'automatic CPU-based limit' : 'OPTIMIZER_WORKERS override'}); ${config.workers.keepBusy ? 'continuously refill configured worker slots' : 'actual count depends on circuit size and adaptive concurrency'}`,
-		`Round budget: ${WORKER_ROUND_MS / 60_000} minutes; worker job budget: ${config.workers.jobSeconds} seconds; ${config.workers.keepBusy ? 'jobs refill until the round ends' : `up to ${config.workers.jobsPerWorker} jobs per worker`} (checked between optimization steps)`,
+		`Round budget: ${config.timing.roundSeconds} seconds; worker job budget: ${config.workers.jobSeconds} seconds; ${config.workers.keepBusy ? 'jobs refill until the round ends' : `up to ${config.workers.jobsPerWorker} jobs per worker`} (checked between optimization steps)`,
 		...config.database.tables.map(table => `Rainbow table: ${resolve(databaseFilename(table.wires, table.gates))} (${table.wires} wires, up to ${table.gates} gates)`),
 		`Logging: ${verboseLogging() ? 'verbose' : `summaries every ${config.timing.summarySeconds} seconds (OPTIMIZER_VERBOSE=1 enables details)`}`,
 		`Optimization: probabilistic=${config.search.probabilistic}; subset sizes ${config.search.subsetMinimum}-${config.search.subsetMaximum}; slice sizes ${config.search.sliceMinimum}-${config.search.sliceMaximum}`,
 		`Validation: exhaustive for checkpoints using up to 8 wires; wider resumes try an exact polynomial proof, then use at least 1024 random inputs if the proof is inconclusive; ${config.validation.checkpointInputs} random inputs for new wide checkpoints and worker checks; probabilistic replacements use ${config.validation.probabilisticInputs} inputs`,
-		`Checkpoints: every ${config.timing.checkpointSeconds} seconds when the best circuit improves; rounds finish after ${config.timing.improvedRoundMinutes} minutes with reductions, otherwise use the ${config.timing.roundMinutes}-minute budget. Stop requests are checked between steps. Ctrl+C stops the job.`,
+		`Checkpoints: every ${config.timing.checkpointSeconds} seconds when the best circuit improves; rounds finish after ${config.timing.improvedRoundSeconds} seconds with reductions, otherwise use the ${config.timing.roundSeconds}-second budget. Stop requests are checked between steps. Ctrl+C stops the job.`,
 	].join('\n')
 }
 
