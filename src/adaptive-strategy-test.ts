@@ -2,22 +2,24 @@ import assert from 'node:assert/strict'
 import { RoundStrategyPicker } from './strategy-picker.js'
 
 const choices = ['rainbow', 'variables', 'forward-semantic-search'].map(name => ({ name }))
+const and = { a: 0, b: 1, target: 2, gate_i: 1 }
+const not = { a: 0, b: 0, target: 2, gate_i: 15 }
 const first = new RoundStrategyPicker(choices.map(choice => choice.name))
 const second = new RoundStrategyPicker(choices.map(choice => choice.name), 1)
 first.beginRound(1)
 second.beginRound(1)
 assert.equal(first.pick(choices)?.name, 'rainbow')
 assert.equal(second.pick(choices)?.name, 'variables')
-first.observe('rainbow', 1)
-first.observe('rainbow', 0)
+first.observe('rainbow', [and], [not])
+first.observe('rainbow', [not], [and])
 first.beginRound(1)
 assert.equal(first.pick(choices)?.name, 'rainbow', 'new jobs in the same round preserve the strategy and reductions')
 first.beginRound(2)
 second.beginRound(2)
-assert.equal(first.pick(choices)?.name, 'rainbow', 'a reduction keeps the strategy for the next round')
+assert.equal(first.pick(choices)?.name, 'rainbow', 'a P reduction at the same gate count keeps the strategy')
 assert.equal(second.pick(choices)?.name, 'forward-semantic-search', 'a dry round moves to the next strategy')
 assert.equal(second.pick(choices.slice(0, 2)), undefined, 'ineligible regions do not switch strategies mid-round')
-first.observe('variables', 9)
+first.observe('variables', [and], [])
 first.beginRound(3)
 assert.equal(first.pick(choices)?.name, 'variables', 'another solver cannot credit the active strategy')
 second.beginRound(3)
@@ -26,9 +28,16 @@ assert.equal(second.pick(choices)?.name, 'rainbow', 'the last strategy wraps to 
 const broadRefill = new RoundStrategyPicker(choices.map(choice => choice.name), 2)
 broadRefill.beginRound(1, 'rainbow')
 assert.equal(broadRefill.pick(choices)?.name, 'rainbow', 'a worker uses the coordinator assignment regardless of its slot')
-broadRefill.observe('rainbow', 4)
+broadRefill.observe('rainbow', [and], [])
 broadRefill.beginRound(2, 'variables')
 assert.equal(broadRefill.pick(choices)?.name, 'variables', 'the assigned rotation takes precedence over local observations')
+
+second.observe('rainbow', [not, not], [and])
+second.beginRound(4)
+assert.equal(second.pick(choices)?.name, 'rainbow', 'a gate reduction still counts when P increases')
+second.observe('rainbow', [not], [and])
+second.beginRound(5)
+assert.equal(second.pick(choices)?.name, 'variables', 'an increase in P does not keep the strategy')
 
 // Trying one method must not hide the same region from another method's cache.
 const { config } = await import('./config.js')

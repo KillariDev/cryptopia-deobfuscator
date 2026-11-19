@@ -1,3 +1,6 @@
+import { circuitWireCost } from './circuit-cost.js'
+import type { Gate } from './types.js'
+
 /** Predictable rotation for each eligible solver group in unpinned searches. */
 export class StrategyPicker {
 	private next = new Map<string, number>()
@@ -43,7 +46,8 @@ export class RoundStrategyPicker {
 	pick<T extends { name: string }>(available: T[]): T | undefined {
 		return available.find(choice => choice.name === this.activeStrategy)
 	}
-	observe(name: string, gatesRemoved: number) {
-		if (name === this.activeStrategy && gatesRemoved > 0) this.reduced = true
+	observe(name: string, before: Gate[], after: Gate[]) {
+		if (this.reduced || name !== this.activeStrategy || before === after) return
+		this.reduced = after.length < before.length || circuitWireCost(after).pairUses < circuitWireCost(before).pairUses
 	}
 }

@@ -92,9 +92,10 @@ The solver combines several approaches:
 - **Strategy rotation:** in split-circuit mode, local workers start with quadratic synthesis when enabled,
   followed by rainbow lookup in the rotation. When quadratic is disabled, local
   workers start at offset positions in the enabled strategy order. A worker keeps
-  its strategy for the entire round and advances after a round without a gate
-  reduction. Local and broad searches have separate strategy orders.
-  The broad lane keeps its strategy whenever it removes gates, regardless of which result wins.
+  its strategy for the entire round and advances after a round without a reduction
+  in gate count or total wire-pair uses (P). Local and broad searches have separate
+  strategy orders. The broad lane gets credit for its own reductions regardless
+  of which result wins.
 
 The round summary reports worker counts by strategy. Set `search.strategyAdaptive` to false to use the fixed pipeline and
 synthesis rotation. Failed-region caches are separate by strategy so each method

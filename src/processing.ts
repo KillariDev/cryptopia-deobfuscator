@@ -472,7 +472,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	}
 	if (selected !== undefined) { findUselessVarsSetting &&= selected === 'variables'; lookup &&= selected === 'rainbow' }
 	const finish = (result: { gates: Gate[], changed: boolean }) => {
-		if (selected && strategyPicker instanceof RoundStrategyPicker) strategyPicker.observe(selected, originalGates.length - result.gates.length)
+		if (result.changed && selected && strategyPicker instanceof RoundStrategyPicker) strategyPicker.observe(selected, originalGates, result.gates)
 		return result
 	}
 	if (selected === 'dependency-cuts') {
@@ -1403,7 +1403,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 					currentGates = bestObserved
 					winner = bestObservedSide
 				}
-				if (globalStrategy) globalStrategyPicker.observe(globalStrategy, nPrevGates - broadBest.length)
+				if (globalStrategy) globalStrategyPicker.observe(globalStrategy, broadInput, broadBest)
 			} finally {
 				clearInterval(checkpointTimer)
 				Atomics.store(stopSignal, 0, 1)
