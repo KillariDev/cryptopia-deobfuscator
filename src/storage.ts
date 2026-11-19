@@ -3,20 +3,22 @@ import { config } from './config.js'
 import { mkdirSync, writeFileSync } from 'fs'
 import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve } from 'path'
-import sqlite3 from 'sqlite3'
-import { runSQL } from './sql.js'
+import { withSQLiteLock } from './sql.js'
 import { Gate } from './types.js'
 import { convertToOriginal } from './utils.js'
 
 export const outputPaths = (problemName: string, dataDirectory = config.files.dataDirectory) => {
 	const name = basename(problemName)
-	const progressDirectory = `${problemName}-progress`
-	const workerKey = createHash('sha256').update(resolve(problemName)).digest('hex')
+	const defaultProgress = `${problemName}-progress`
+	const puzzleKey = createHash('sha256').update(resolve(problemName)).digest('hex')
+	const progressDirectory = config.files.progressDirectory === 'progress'
+		? defaultProgress
+		: join(dataDirectory, config.files.progressDirectory, puzzleKey)
 	return {
-		latest: `${problemName}-latest.json`,
+		latest: `${problemName}-${config.files.latestName}`,
 		progress: (gateCount: number) => join(progressDirectory, `${name}.solved-${gateCount}.json`),
-		worker: (index: number) => join(dataDirectory, config.files.workerDirectory, workerKey, `${name}_worker${index}.json`),
-		lock: join(progressDirectory, '.optimizer-lock.db'),
+		worker: (index: number) => join(dataDirectory, config.files.workerDirectory, puzzleKey, `${name}_worker${index}.json`),
+		lock: join(defaultProgress, '.optimizer-lock.db'),
 	}
 }
 
@@ -24,23 +26,7 @@ export const outputPaths = (problemName: string, dataDirectory = config.files.da
 export async function withPuzzleLock<T>(problemName: string, run: () => Promise<T>): Promise<T> {
 	const { lock } = outputPaths(problemName)
 	mkdirSync(dirname(lock), { recursive: true })
-	const db = await new Promise<sqlite3.Database>((resolve, reject) => {
-		const handle = new sqlite3.Database(lock, error => error ? reject(error) : resolve(handle))
-	})
-	try {
-		db.configure('busyTimeout', 0)
-		try { await runSQL(db, 'BEGIN EXCLUSIVE') }
-		catch (error) {
-			if ((error as NodeJS.ErrnoException).code === 'SQLITE_BUSY') {
-				throw new Error(`An optimizer is already running for ${problemName}.json`)
-			}
-			throw error
-		}
-		return await run()
-	} finally {
-		// Keep the lock file in place so all runners lock the same file.
-		await new Promise<void>((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
-	}
+	return withSQLiteLock(lock, `An optimizer is already running for ${problemName}.json`, run)
 }
 
 export const writeCircuit = (filename: string, wires: number, gates: Gate[]) => {

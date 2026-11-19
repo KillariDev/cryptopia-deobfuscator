@@ -176,6 +176,17 @@ try {
 	assert.notEqual(outputPaths('alpha/puzzle').worker(0), outputPaths('beta/puzzle').worker(0))
 	assert.equal(outputPaths('alpha/puzzle').worker(0), outputPaths(join(temporaryDirectory, 'alpha/puzzle')).worker(0))
 	const { config: jobConfig } = await import('./config.js')
+	const savedPaths = { ...jobConfig.files }
+	try {
+		Object.assign(jobConfig.files, { latestName: 'resume.json', progressDirectory: 'snapshots' })
+		const custom = outputPaths('original')
+		assert.equal(custom.latest, 'original-resume.json')
+		assert.ok(custom.progress(1).startsWith(join(savedPaths.dataDirectory, 'snapshots') + '/'))
+		assert.notEqual(outputPaths('alpha/puzzle').progress(1), outputPaths('beta/puzzle').progress(1))
+		assert.equal(custom.lock, paths.lock)
+		writeCircuit(custom.latest, 4, singleGate)
+		assert.deepEqual(loadJob('original').inputCircuit.gates, initialJob.originalCircuit.gates)
+	} finally { Object.assign(jobConfig.files, savedPaths) }
 	const { summarySeconds, checkpointSeconds } = jobConfig.timing
 	try {
 		Object.assign(jobConfig.timing, { summarySeconds: 10, checkpointSeconds: 55 })

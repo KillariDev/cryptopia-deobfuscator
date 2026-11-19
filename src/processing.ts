@@ -1211,6 +1211,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 			const localCandidate = () => roundSearchResult(snapshots, wholeCircuit)
 			const localCount = () => wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)
 			let broadBest = currentGates
+			const bestCount = () => Math.min(broadBest.length, localCount())
 			const roundPatches = runBroad && !wholeCircuit ? new RoundCutPatches(nPrevGates) : undefined
 			let bestObserved = currentGates
 			let bestObservedSide: 'local' | 'global' = 'local'
@@ -1237,15 +1238,15 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 				else logVerbose(formatProgress(nPrevGates, (wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)), completed, jobCount, elapsed))
 				logVerbose(formatWorkerActivity(statuses, elapsed, WORKER_ROUND_MS))
 				const localGates = localCount()
-				const candidate = roundResult?.length ?? Math.min(broadBest.length, localGates)
+				const candidate = roundResult?.length ?? bestCount()
 				if (summaryThrottle.allow(performance.now(), force || verboseLogging() || candidate === 0)) {
 					const best = roundResult ?? (broadBest.length < localGates ? broadBest : roundSearchResult([localCandidate(), broadBest], true))
 					const effectivePairs = circuitWireCost(best).effectivePairs
-					logTimed(formatStatus({ effectivePairs, previousPairs: lastReportedPairs, original: originalGates.length, roundStart: nPrevGates, candidate, roundImproved: localGates < nPrevGates, previous: lastReportedGates, statuses, elapsedMs: elapsed }))
+					logTimed(formatStatus({ effectivePairs, previousPairs: lastReportedPairs, original: originalGates.length, roundStart: nPrevGates, candidate, roundImproved: candidate < nPrevGates, previous: lastReportedGates, statuses, elapsedMs: elapsed }))
 					lastReportedGates = candidate
 					lastReportedPairs = effectivePairs
 				}
-				if ((elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, localGates)) && Atomics.load(stopSignal, 0) === 0) {
+				if ((elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, candidate)) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
 					logVerbose(`Round time target reached; finishing active jobs and returning queued jobs unchanged.`)
 				}
@@ -1258,7 +1259,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 			try {
 				const canContinue = () => {
 					if (!config.workers.keepBusy || Atomics.load(stopSignal, 0) !== 0) return false
-					const count = localCount()
+					const count = bestCount()
 					const elapsed = performance.now() - lastIterationTime
 					if (!count || elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, count)) {
 						Atomics.store(stopSignal, 0, 1)
@@ -1276,6 +1277,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 							roundPatches?.observe(broadBest, patch)
 							broadBest = candidate
 							pendingCheckpoint = true
+							if (!candidate.length) Atomics.store(stopSignal, 0, 1)
 						}
 						const jobInput = broadBest
 						const result = await pool.run(jobInput, inputCircuit.wire_count, (_, activity, snapshot) => {
@@ -1301,6 +1303,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 					const workerFile = paths.worker(index)
 					let chunk = index
 					do {
+						if (Atomics.load(stopSignal, 0) !== 0) break
 						if (config.workers.keepBusy && !snapshots[chunk].length) {
 							const next = snapshots.findIndex(candidate => candidate.length > 0)
 							if (next === -1) { Atomics.store(stopSignal, 0, 1); break }
@@ -1315,6 +1318,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 							if (!(splitCost ? splitCost.accept(target, candidate) : isBetterCircuit(candidate, snapshots[target]))) return
 							snapshots[target] = candidate; candidateCounts[target] = candidate.length
 							pendingCheckpoint = true
+							if (!candidate.length && !localCount()) Atomics.store(stopSignal, 0, 1)
 						}
 						const result = await pool.run(dataChunk, inputCircuit.wire_count, (_count, activity, snapshot) => {
 								executionStarted ??= performance.now()
@@ -1377,7 +1381,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 				if (reason === 'memory budget pressure') { pool.setConcurrency(concurrency.limit(nMaxWorkers)); await pool.trimIdle() }
 				if (reason) logVerbose(`Next round worker target: ${concurrency.limit(nMaxWorkers)} (${reason})`)
 			}
-			if (!config.workers.keepBusy && !wholeCircuit && !(runBroad && currentGates.length < nPrevGates)) {
+			if (currentGates.length && !config.workers.keepBusy && !wholeCircuit && !(runBroad && currentGates.length < nPrevGates)) {
 				beginPhase('shuffling next round')
 				currentGates = await pool.run(currentGates, inputCircuit.wire_count, undefined, undefined, config.workers.jobSeconds * 1000, false, 'shuffle')
 			}

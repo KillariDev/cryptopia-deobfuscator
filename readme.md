@@ -64,7 +64,10 @@ status summaries default to every 30 seconds. Cancellation is cooperative, so an
 step may take time to finish.
 
 Latest checkpoints and progress folders are named after the input file and stored
-beside it, so each puzzle keeps its own saved work.
+beside it by default, so each puzzle keeps its own saved work. Set
+`files.latestName` to customize the latest checkpoint suffix, or set
+`files.progressDirectory` to place snapshots in per-puzzle folders under
+`files.dataDirectory`.
 
 Worker snapshots are for inspection; use a verified full circuit to resume.
 Interrupted lookup-table generation resumes from its own database checkpoint.
