@@ -508,9 +508,10 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	if (selected === 'quadratic-shear' && config.synthesis.quadraticShear) {
 		const deadline = synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000
 		const stopped = () => performance.now() >= deadline || synthesisBudget?.shouldStop?.() === true
+		const fallbackSamples = config.search.probabilistic ? Math.max(4096, config.validation.probabilisticInputs) : 0
 		const result = synthesizeQuadraticShear(originalGates, config.validation.maximumWires,
-			config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, stopped)
-		recordStrategy(selected, { maximumWires: Math.min(64, config.validation.maximumWires) },
+			config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, stopped, fallbackSamples)
+		recordStrategy(selected, { maximumWires: Math.min(64, config.validation.maximumWires), fallbackSamples },
 			attemptStarted, originalGates.length, result?.length ?? originalGates.length, result !== undefined)
 		return finish({ gates: result ?? originalGates, changed: result !== undefined })
 	}

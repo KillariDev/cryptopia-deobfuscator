@@ -88,11 +88,25 @@ try {
 		assert.ok(strategySnapshot().some(stat => stat.strategy === 'quadratic-shear'))
 	}
 	const { synthesizeQuadraticShear } = await import('./quadratic-shear.js')
+	const proofTermLimit = config.synthesis.affineMaximumTerms
+	try {
+		config.synthesis.affineMaximumTerms = 1
+		config.search.strategyAdaptive = true
+		assert.equal(await broadSearch(tables, fittingInput, 8, createOptimizerCaches(), 5000, () => false, () => {}), fittingInput)
+		config.search.probabilistic = true
+		const fitted = await broadSearch(tables, fittingInput, 8, createOptimizerCaches(), 5000, () => false, () => {})
+		assert.equal(fitted.length, 3)
+		const inputs = generateCombinations(8)
+		assert.deepEqual(calculateAllOutputsArray(fitted, inputs), calculateAllOutputsArray(fittingInput, inputs))
+	} finally {
+		config.synthesis.affineMaximumTerms = proofTermLimit
+		config.search.probabilistic = false
+	}
 	assert.equal(synthesizeQuadraticShear(fittingInput, 64, 1, 10000000, () => false), undefined, 'a fit cannot bypass the proof budget')
 	assert.equal(synthesizeQuadraticShear(fittingInput, 64, 100000, 10000000, () => true), undefined)
 	const compute = { a: 0, b: 1, target: 3, gate_i: 1 }
 	const cubic: Gate[] = [compute, { a: 2, b: 3, target: 4, gate_i: 1 }, compute]
-	assert.equal(synthesizeQuadraticShear(cubic, 64, 100000, 10000000, () => false), undefined)
+	assert.equal(synthesizeQuadraticShear(cubic, 64, 1, 10000000, () => false, 4096), undefined)
 
 	Object.assign(config.synthesis, { factored: true, satSweeping: true, mixedBasis: true, blockCancellation: true, affine: true })
 	config.search.dependencyCuts = true

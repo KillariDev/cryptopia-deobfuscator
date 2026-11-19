@@ -16,8 +16,8 @@ function evaluatePacked(gates: Gate[], inputs: Uint32Array, wires: number, stopp
 	return state
 }
 
-/** Infer a shear from packed examples, then prove the replacement on all inputs. */
-export function synthesizeQuadraticShear(gates: Gate[], maximumWires: number, maximumTerms: number, maximumOperations: number, stopped: () => boolean): Gate[] | undefined {
+/** Infer a shear, then check it exactly or with a fresh set of random samples. */
+export function synthesizeQuadraticShear(gates: Gate[], maximumWires: number, maximumTerms: number, maximumOperations: number, stopped: () => boolean, fallbackSamples = 0): Gate[] | undefined {
 	const active = new Set<number>()
 	for (let i = 0; i < gates.length; i++) {
 		if ((i & 255) === 0 && stopped()) return undefined
@@ -85,5 +85,19 @@ export function synthesizeQuadraticShear(gates: Gate[], maximumWires: number, ma
 	const predicted = evaluatePacked(candidate, probes, width, stopped)
 	if (!predicted || predicted.some((value, i) => value !== observed[i]) || stopped()) return undefined
 	const equivalent = createPolynomialEquivalenceChecker(mapped, width, maximumTerms, maximumOperations, stopped)
-	return equivalent(candidate) === true && !stopped() ? reverseMapCircuit(candidate, wires) : undefined
+	const proof = equivalent(candidate)
+	if (stopped() || proof === false) return undefined
+	if (proof === undefined) {
+		if (fallbackSamples <= 0) return undefined
+		// Use fresh inputs independently of both partition discovery and fitting.
+		for (let remaining = fallbackSamples; remaining > 0; remaining -= 4096) {
+			const batches = Math.ceil(Math.min(remaining, 4096) / 32)
+			const samples = randomFillSync(new Uint32Array(batches * width))
+			const reference = evaluatePacked(mapped, samples, width, stopped)
+			if (!reference) return undefined
+			const replacement = evaluatePacked(candidate, samples, width, stopped)
+			if (!replacement || replacement.some((value, i) => value !== reference[i]) || stopped()) return undefined
+		}
+	}
+	return reverseMapCircuit(candidate, wires)
 }

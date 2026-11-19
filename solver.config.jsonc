@@ -10,8 +10,8 @@
     "variables": {
       "enabled": true, // Run this strategy when eligible.
       "exactMaximumWires": 7, // Exhaustively evaluate variable rewrites up to this wire count.
-      "sampleCandidates": true, // Try sampling larger variable candidates before exact polynomial proof.
-      "samples": 202 // Sample inputs used to reject larger variable candidates.
+      "sampleCandidates": true, // Allow sampling for wide variable candidates and quadratic shear proof fallback.
+      "samples": 202 // Candidate samples. Quadratic shear fallback uses at least 4096.
     },
     // Search noncontiguous dependency regions in global search.
     "dependencyCuts": {
@@ -42,7 +42,7 @@
     "quadratic": {
       "enabled": true // Run this strategy when eligible.
     },
-    // Fit quadratic shears in local and broad regions and prove every replacement.
+    // Fit quadratic shears in local and broad regions and verify each replacement.
     "quadraticShear": {
       "enabled": true // Run this strategy when eligible.
     },

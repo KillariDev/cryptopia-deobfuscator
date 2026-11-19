@@ -165,7 +165,11 @@ samples to identify likely unchanged wires. It evaluates zero-, one-, and
 two-bit inputs to fit flips on the other wires as quadratic functions of those
 unchanged wires. It covers local and broad regions with up to 64 active wires, using the
 shared polynomial term and operation limits for its exact equivalence proof.
-A fit is discarded if the proof fails or runs out of budget.
+An exact mismatch rejects the fit. If the exact checker exhausts its resource
+limits, `strategies.variables.sampleCandidates` also controls whether quadratic
+shear may accept the fit after fresh randomized checks. The fallback uses at
+least 4,096 inputs or `strategies.variables.samples` if higher. A sampled
+replacement can miss differences on rare inputs.
 
 Eligible rounds start one broad worker alongside the chunk workers when the
 configured worker cap is at least two. Broad jobs share that cap and are
