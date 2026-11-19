@@ -14,7 +14,7 @@ import { structuralNames, structuralChoices, structuralRewrite } from './structu
 
 const failed = new LimitedMap<string, boolean>(Math.min(10000, config.cache.processedEntries))
 const picker = new StrategyPicker(['gf2-affine', 'quadratic', ...structuralNames, 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'])
-export type SynthesisBudget = { deadline: number, shouldStop?: () => boolean, broad?: boolean, minimumBroadGates?: number, dependencyRegion?: boolean, onProgress?: () => void, onCut?: (indices: number[], replacement: Gate[]) => void, onCandidate?: (gates: Gate[]) => void, selectedStrategy?: string }
+export type SynthesisBudget = { deadline: number, shouldStop?: () => boolean, broad?: boolean, minimumBroadGates?: number, dependencyRegion?: boolean, onProgress?: () => void, onCut?: (indices: number[], replacement: Gate[]) => void, onCandidate?: (gates: Gate[]) => void, selectedStrategy?: string, exhaustStrategies?: boolean }
 // Serialize synthesis so Z3 initialization and cleanup cannot overlap.
 let pending: Promise<unknown> = Promise.resolve()
 export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = { deadline: performance.now() + config.workers.jobSeconds * 1000 }): Promise<Gate[] | undefined> {
@@ -47,21 +47,25 @@ export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = {
 		} })
 		// Cache failures per strategy: a capped forward semantic search must not exclude Z3.
 		const available = choices.filter(choice => !failed.has(`${choice.name}:${key}`))
-		const choice = budget.selectedStrategy ? available.find(choice => choice.name === budget.selectedStrategy) : picker.pick(available)
-		if (!choice) return undefined
-		const started = performance.now()
-		const result = await choice.run()
-		const isStructural = (structuralNames as readonly string[]).includes(choice.name)
-		const symbolic = isStructural || choice.name === 'gf2-affine' || choice.name === 'quadratic'
-		const accepted = result !== undefined && isReplacementSimpler(result, normalized) &&
-			(symbolic || (result.every(gate => getVars(gate).every(wire => wire >= 0 && wire < wires.length)) &&
-				functionKey(result, wires.length) === functionKey(normalized, wires.length)))
-		const settings = ['gf2-affine', 'quadratic'].includes(choice.name)
-			? { maximumWires: config.validation.maximumWires, maximumWindowGates: options.affineMaximumWindowGates, workerJobSeconds: config.workers.jobSeconds }
-			: { maximumWires: options.maximumWires, maximumWindowGates: options.maximumWindowGates, maximumReplacementGates: options.maximumReplacementGates, ...(choice.name !== 'z3' ? { states: options.states } : {}), workerJobSeconds: config.workers.jobSeconds }
-		if (!isStructural) recordStrategy(choice.name, settings, started, normalized.length, accepted ? result!.length : normalized.length, accepted)
-		if (accepted) return reverseMapCircuit(result!, wires)
-		if (!stopped()) failed.set(`${choice.name}:${key}`, true)
+		while (available.length && !stopped()) {
+			const choice = budget.selectedStrategy ? available.find(choice => choice.name === budget.selectedStrategy) : picker.pick(available)
+			if (!choice) break
+			const started = performance.now()
+			const result = await choice.run()
+			const isStructural = (structuralNames as readonly string[]).includes(choice.name)
+			const symbolic = isStructural || choice.name === 'gf2-affine' || choice.name === 'quadratic'
+			const accepted = result !== undefined && isReplacementSimpler(result, normalized) &&
+				(symbolic || (result.every(gate => getVars(gate).every(wire => wire >= 0 && wire < wires.length)) &&
+					functionKey(result, wires.length) === functionKey(normalized, wires.length)))
+			const settings = ['gf2-affine', 'quadratic'].includes(choice.name)
+				? { maximumWires: config.validation.maximumWires, maximumWindowGates: options.affineMaximumWindowGates, workerJobSeconds: config.workers.jobSeconds }
+				: { maximumWires: options.maximumWires, maximumWindowGates: options.maximumWindowGates, maximumReplacementGates: options.maximumReplacementGates, ...(choice.name !== 'z3' ? { states: options.states } : {}), workerJobSeconds: config.workers.jobSeconds }
+			if (!isStructural) recordStrategy(choice.name, settings, started, normalized.length, accepted ? result!.length : normalized.length, accepted)
+			if (accepted) return reverseMapCircuit(result!, wires)
+			if (!stopped()) failed.set(`${choice.name}:${key}`, true)
+			if (!budget.exhaustStrategies || budget.selectedStrategy || stopped()) break
+			available.splice(available.indexOf(choice), 1)
+		}
 		return undefined
 	})
 	pending = job.catch(() => {})

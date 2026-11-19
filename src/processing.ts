@@ -17,7 +17,7 @@ import { ChunkedSequence } from './chunked-sequence.js'
 import { SlidingWindowWires } from './window-wires.js'
 import { LazyCircuit } from './circuit-edit.js'
 import { IncrementalGraph } from './incremental-graph.js'
-import { WindowFingerprints } from './fingerprints.js'
+import { retainWindowKey, WindowFingerprints } from './fingerprints.js'
 import { createHash } from 'node:crypto'
 import { advancedRewrite, wholeCircuitAffineSearch, SynthesisBudget } from './strategies.js'
 import { IncrementalEvaluator, PackedInputs } from './packed.js'
@@ -345,9 +345,6 @@ class SliceResults {
 	readonly rainbow = new LimitedMap<string, RainbowSliceMatch>(1024)
 }
 
-// Detach retained keys from the full circuit string backing a fingerprint.
-const retainedSliceKey = (key: string) => Buffer.from(key, 'utf16le').toString('utf16le')
-
 /** Reuse fingerprints across attempts on the same subset. */
 export class SubsetPreparation {
 	private fingerprints = new WeakMap<Gate[], WindowFingerprints>()
@@ -364,7 +361,7 @@ type PreparedWindow = { variableIndexMapping: number[], mappedGates: Gate[] }
 const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, rainbowTableWires: number, prepared: Map<number, PreparedWindow>, preparation: SubsetPreparation, shouldStop: () => boolean = () => false, onCandidate?: (gates: Gate[]) => void): { gates: Gate[], changed: boolean } => {
 	if (sliceSize <= 2 || !findUselessVarsSetting) return { gates, changed: false }
 	const replacements: { start: number, end: number, replacement: Gate[] }[] = []
-	const fingerprints = preparation.fingerprint(gates)
+	let fingerprints: WindowFingerprints | undefined
 	let nextStart = 0
 	let preparedRows = 0
 	let uselessVarsFound = 0
@@ -381,8 +378,12 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 		if (shouldStop()) break
 		const { start, end } = window
 		if (start < nextStart) continue
+		const eligible = window.wireCount <= config.search.exactMaximumWires || useProbabilistically
+		const prepareForRainbow = window.wireCount <= rainbowTableWires && preparedRows + sliceSize <= 100_000
+		if (!eligible && !prepareForRainbow) continue
+		fingerprints ??= preparation.fingerprint(gates)
 		if (fingerprints.seen(processedGatesCache, start, end)) continue
-		const key = preparation.results ? fingerprints.exactKey(start, end) : undefined
+		const key = eligible && preparation.results ? fingerprints.exactKey(start, end) : undefined
 		const previous = key === undefined ? undefined : preparation.results?.variables.get(key)
 		if (previous !== undefined) {
 			apply(start, end, previous)
@@ -392,14 +393,15 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 
 		const variableIndexMapping = window.mapping() // counts are maintained across adjacent windows
 		const mappedGates = mapCircuit(sliceGates, variableIndexMapping)
-		if (variableIndexMapping.length <= rainbowTableWires && preparedRows + mappedGates.length <= 100_000) {
+		if (prepareForRainbow) {
 			prepared.set(start, { variableIndexMapping, mappedGates })
 			preparedRows += mappedGates.length
 		}
+		if (!eligible) continue
 		const replacement = findUselessVars(variableIndexMapping, mappedGates, shouldStop)
 		if (replacement !== undefined) {
 			const simplified = gateSimplifier(replacement)
-			if (key !== undefined) preparation.results?.variables.set(retainedSliceKey(key), simplified)
+			if (key !== undefined) preparation.results?.variables.set(retainWindowKey(key), simplified)
 			apply(start, end, simplified)
 			uselessVarsFound++
 			continue
@@ -408,7 +410,7 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 			const replacement = findProbabilisticUselessVars(variableIndexMapping, mappedGates, shouldStop)
 			if (replacement !== undefined) {
 				const simplified = gateSimplifier(replacement)
-				if (key !== undefined) preparation.results?.variables.set(retainedSliceKey(key), simplified)
+				if (key !== undefined) preparation.results?.variables.set(retainWindowKey(key), simplified)
 				apply(start, end, simplified)
 				uselessVarsFoundProb++
 				continue
@@ -570,7 +572,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 				wireSavings: new Set(oldVariables).size - new Set(newVariables).size,
 				readSavings: oldVariables.length - newVariables.length,
 			}
-			remembered?.set(retainedSliceKey(key), result)
+			remembered?.set(retainWindowKey(key), result)
 			for (const position of query.positions) candidates.push({ ...position, ...result })
 		}
 		queries.clear(); queryRows = 0; queuedWindows = 0
@@ -766,6 +768,9 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 	const findUselessVarsSetting = method !== 'rainbow' && config.search.variableElimination
 	const active = config.search.strategyAdaptive && strategyPicker instanceof RoundStrategyPicker ? strategyPicker.activeStrategy : undefined
 	const useLegacyCache = !(config.search.strategyAdaptive && strategyPicker)
+	const attemptBudget = useLegacyCache
+		? { deadline: performance.now() + config.workers.jobSeconds * 1000, ...synthesisBudget, exhaustStrategies: true }
+		: synthesisBudget
 	const firstSlice = active === 'variables' ? Math.max(3, config.search.sliceMinimum) : config.search.sliceMinimum
 	const lastSlice = active && active !== 'rainbow' && active !== 'variables' ? firstSlice : maxSlice
 	let regenerateGraph = false
@@ -800,9 +805,9 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 					const attemptKey = active ? `${active}:${method}:${phase}:${slice}:${gateKey}` : undefined
 					if (attemptKey && testedSubsets.has(attemptKey)) continue
 					activity.checks++
-					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables', preparation ??= new SubsetPreparation(inGates, sliceResults), synthesisBudget, strategyPicker)
+					const optimizationOutput = await massOptimizeStep(tables, ioIdentifierCache, processedGatesCache, inGates, slice, useProbabilistically, findUselessVarsSetting, method !== 'variables', preparation ??= new SubsetPreparation(inGates, sliceResults), attemptBudget, strategyPicker)
 					if (!optimizationOutput.changed) {
-						if (timeToEndWorker() || (synthesisBudget && (performance.now() >= synthesisBudget.deadline || synthesisBudget.shouldStop?.()))) return circuit.toArray()
+						if (timeToEndWorker() || (attemptBudget && (performance.now() >= attemptBudget.deadline || attemptBudget.shouldStop?.()))) return circuit.toArray()
 						if (attemptKey && !optimizationOutput.unavailable) testedSubsets.set(attemptKey, true)
 						continue
 					}
@@ -1043,14 +1048,14 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	} finally { clearInterval(heartbeat) }
 }
 
-export function splitTaskAndRun(pathToFileWithoutExt: string, original: string, input?: JobCircuits | (() => Promise<JobCircuits>), onPhase: (phase: string) => void = () => {}) {
+export function splitTaskAndRun(pathToFileWithoutExt: string, original: string, input?: JobCircuits | (() => Promise<JobCircuits>), onPhase: (phase: string) => void = () => {}, initializeTables?: () => Promise<void>) {
 	return withPuzzleLock(pathToFileWithoutExt, async () => {
 		const circuits = typeof input === 'function' ? await input() : input ?? loadJob(pathToFileWithoutExt, original)
-		await runPuzzle(pathToFileWithoutExt, circuits, onPhase)
+		await runPuzzle(pathToFileWithoutExt, circuits, onPhase, initializeTables)
 	})
 }
 
-async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, onPhase: (phase: string) => void) {
+async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, onPhase: (phase: string) => void, initializeTables?: () => Promise<void>) {
 	const splitArrayIntoApproximatelyChunks = (arr: Gate[], n: number): Gate[][] => {
 		if (n <= 0) throw new Error('Number of chunks must be greater than 0')
 		if (n > arr.length) throw new Error('Number of chunks cannot exceed array length')
@@ -1083,7 +1088,13 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 	if (originalGates.length < gates.length) throw new Error('Latest circuit has more gates than original')
 	onPhase('verifying input checkpoint')
 	const writer = new CheckpointWriter(originalGates, inputCircuit.wire_count, config.validation.checkpointInputs)
-	try { await writer.write([outputPaths(pathToFileWithoutExt).latest], gates) } catch (error) { await writer.close(); throw error }
+	try {
+		await writer.write([outputPaths(pathToFileWithoutExt).latest], gates, inputCircuit !== originalCircuit)
+		if (gates.length) await initializeTables?.()
+	} catch (error) {
+		await writer.close()
+		throw error
+	}
 	if (!gates.length) { await writer.close(); return }
 	const nMaxWorkers = configuredWorkerCount()
 	onPhase('loading shared rainbow table snapshots')

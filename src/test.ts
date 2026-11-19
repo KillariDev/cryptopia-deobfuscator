@@ -895,6 +895,14 @@ firstWindow.remember(bounded,0,1)
 secondWindow.remember(bounded,0,1)
 assert.equal(secondWindow.seen(bounded,0,1), true)
 assert.equal(firstWindow.seen(bounded,0,1), false)
+const largeWindowSource = new WindowFingerprints(Array.from({ length: 1024 }, () => singleGate[0]), 256)
+largeWindowSource.remember(bounded, 0, 2)
+assert.equal(largeWindowSource.seen(bounded, 0, 2), true, 'short keys fit even when the source encoding exceeds the budget')
+const entryBounded = new LimitedMap<string, boolean>(2)
+for (const window of [firstWindow, secondWindow, firstWindow]) {
+	window.remember(entryBounded, 0, 1)
+	assert.equal(window.seen(entryBounded, 0, 1), true, 'entry-count evictions release the byte budget')
+}
 console.log('Out-of-order jobs, cooperative queue cancellation, SQL request sharing and window-cache bounds passed')
 
 // Portfolio routing must use each table's truth-table width and its own cache namespace.

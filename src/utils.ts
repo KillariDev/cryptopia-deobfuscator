@@ -1,3 +1,4 @@
+import { IncrementalEvaluator } from './packed.js'
 import * as fs from 'fs'
 import { createHash } from 'crypto'
 import { DependencyNode, Gate } from './types.js'
@@ -353,8 +354,9 @@ export function generateNRandomBooleanArray(rows: number, columns: number): bool
 }
 
 export const verifyCircuit = (oldGates: Gate[], newGates: Gate[], wires: number, testIterations: number) => {
-	for (let i = 0; i < testIterations; i++) {
-		const input = generateRandomBooleanArray(wires)
+	const inputs = generateNRandomBooleanArray(testIterations, wires)
+	if (new IncrementalEvaluator(oldGates, inputs, 0, 1).equivalent(newGates)) return
+	for (const input of inputs) {
 		const original = evalCircuit(oldGates, input)
 		const optimized = evalCircuit(newGates, input)
 		if (!areBooleanArraysEqual(original, optimized)) {
@@ -370,6 +372,7 @@ export const verifyCircuit = (oldGates: Gate[], newGates: Gate[], wires: number,
 			throw 'Circuit got corrupted!'
 		}
 	}
+	throw 'Circuit got corrupted!'
 }
 
 export const getRandomNumberInRange = (min: number, max: number): number => {

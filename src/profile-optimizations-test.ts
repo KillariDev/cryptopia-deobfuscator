@@ -4,6 +4,8 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {SolverService} from './solver-worker.js'
 import {CheckpointWriter} from './checkpoint-writer.js'
+import {splitTaskAndRun} from './processing.js'
+import {outputPaths} from './storage.js'
 import {AsyncReductionCheckpoint} from './storage.js'
 import {IncrementalGraph} from './incremental-graph.js'
 import {createDependencyGraph} from './lineswapper.js'
@@ -70,6 +72,22 @@ const rareDifference = [flip,left,flip,right,flip,left,flip,right]
 const narrow = new CheckpointWriter(rareDifference,64,1)
 try {
  const path = join(proofDir, 'latest.json')
+ const fixture = JSON.parse(await readFile(new URL('../proofs/nonlinear-basis-maze-corruption.json', import.meta.url), 'utf8'))
+ const circuit = (gates: [number, number, number, number][]) => ({ wire_count: 64, gate_count: gates.length, gates })
+ const originalCircuit = circuit(fixture.before), inputCircuit = circuit(fixture.incorrect_after)
+ const puzzle = join(proofDir, 'wide-resume')
+ let initialized = false
+ await assert.rejects(splitTaskAndRun(puzzle, puzzle, { originalCircuit, inputCircuit }, undefined, async () => {
+  initialized = true
+ }), /CORRUPTION: checkpoint differs/)
+ assert.equal(initialized, false)
+ await assert.rejects(readFile(outputPaths(puzzle).latest), { code: 'ENOENT' })
+ const wideGates = fixture.before.map(([a, b, target, gate_i]: number[]) => ({ a, b, target, gate_i }))
+ const wide = new CheckpointWriter(wideGates, 64, 1)
+ try {
+  const not = { a: 0, b: 0, target: 63, gate_i: 15 }
+  await wide.write([], [...wideGates, not, not], true)
+ } finally { await wide.close() }
  await narrow.write([path],rareDifference)
  const savedProof = await readFile(path,'utf8')
  await assert.rejects(narrow.write([path],[]),/CORRUPTION/)
