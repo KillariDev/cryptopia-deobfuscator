@@ -1101,7 +1101,10 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 	const seed = solvedAtStartup ? [] : gates
 	try {
 		const checkpoints = solvedAtStartup ? [paths.progress(0), paths.latest] : [paths.latest]
-		await writer.write(checkpoints, seed, inputCircuit !== originalCircuit)
+		const { sampledResumeInputs } = await writer.write(checkpoints, seed, inputCircuit !== originalCircuit)
+		if (sampledResumeInputs !== undefined) {
+			logTimed(`Checkpoint proof reached its resource limits. Resuming after ${sampledResumeInputs} sampled inputs matched the original circuit.`)
+		}
 		if (seed.length) await initializeTables?.()
 	} catch (error) {
 		await writer.close()

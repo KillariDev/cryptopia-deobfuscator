@@ -170,11 +170,12 @@ rounds aim to finish after five minutes; rounds without reductions retain a
 25-minute budget. Later rounds repartition and shuffle the circuit.
 
 Checkpoint verification is exhaustive when the original and candidate together
-use at most eight wires. Before resuming a wider checkpoint, the solver proves
-equivalence using Boolean polynomials. If the proof reaches its time or resource
-limit, the checkpoint is left on disk and optimization stops. During a run,
-new wide checkpoints are checked against the original on
-`validation.checkpointInputs` random inputs, which can miss rare mismatches.
+use at most eight wires. On wider resumes, the solver first tries an exact
+Boolean polynomial proof. If the proof reaches a resource limit, the solver
+checks at least 1,024 random inputs and logs when it resumes using that result.
+A detected mismatch stops the run. Sampling can miss rare differences.
+During a run, new wide checkpoints are checked against the original on
+`validation.checkpointInputs` random inputs.
 
 ## Configuration
 

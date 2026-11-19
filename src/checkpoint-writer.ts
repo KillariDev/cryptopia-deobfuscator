@@ -7,8 +7,8 @@ export class CheckpointWriter {
  private worker?:Worker
  private tail:Promise<unknown>=Promise.resolve()
  constructor(private original:Gate[],private wires:number,private checks:number){}
- write(filenames:string[],gates:Gate[],requireExact=false) {
-  const work=this.tail.then(()=>this.submit(filenames,gates,requireExact))
+ write(filenames:string[],gates:Gate[],tryExact=false) {
+  const work=this.tail.then(()=>this.submit(filenames,gates,tryExact))
   this.tail=work.catch(()=>{})
   return work
  }
@@ -23,16 +23,16 @@ export class CheckpointWriter {
   this.worker = worker
   return worker
  }
- private submit(filenames:string[],gates:Gate[],requireExact:boolean):Promise<void>{
+ private submit(filenames:string[],gates:Gate[],tryExact:boolean):Promise<{ sampledResumeInputs?: number }>{
   const worker = this.getWorker()
   worker.ref()
   return new Promise((resolve,reject)=>{
    const clean=()=>{worker.removeListener('message',message);worker.removeListener('error',error);worker.removeListener('exit',exit);worker.unref()}
    const error=(error:Error)=>{clean();reject(error)}
    const exit=(code:number)=>error(new Error(`Checkpoint worker exited (${code})`))
-   const message=(value:{error?:string})=>{clean();value.error?reject(new Error(value.error)):resolve()}
+   const message=(value:{error?:string,sampledResumeInputs?:number})=>{clean();value.error?reject(new Error(value.error)):resolve({sampledResumeInputs:value.sampledResumeInputs})}
    worker.once('message',message);worker.once('error',error);worker.once('exit',exit)
-   try{worker.postMessage({filenames,gates,requireExact})}catch(cause){error(cause as Error)}
+   try{worker.postMessage({filenames,gates,tryExact})}catch(cause){error(cause as Error)}
   })
  }
  async close(){await this.tail;await this.worker?.terminate();this.worker=undefined}

@@ -26,7 +26,7 @@ function activeWires(gates: Gate[], used = new Set<number>()) {
 }
 const sameGate = (a: Gate, b: Gate) => a.a===b.a && a.b===b.b && a.target===b.target && a.gate_i===b.gate_i
 let originalWires: Set<number> | undefined
-parentPort!.on('message',({gates,filenames,requireExact}:{gates:Gate[],filenames:string[],requireExact:boolean})=>{
+parentPort!.on('message',({gates,filenames,tryExact}:{gates:Gate[],filenames:string[],tryExact:boolean})=>{
  try{
   if (!originalWires) {
    original.forEach((gate,index)=>validateGate(gate,index,'original circuit'))
@@ -38,17 +38,18 @@ parentPort!.on('message',({gates,filenames,requireExact}:{gates:Gate[],filenames
   })
   const active=originalWires.size<=exhaustiveWireLimit ? activeWires(normalized,new Set(originalWires)) : originalWires
   const exhaustive=active.size<=exhaustiveWireLimit
-  if (requireExact && !exhaustive) {
-   if (original.length!==normalized.length || !original.every((gate,index)=>sameGate(simplifyGate(gate),normalized[index]))) {
-    const deadline=performance.now()+config.workers.jobSeconds*1000
-    const proof=createPolynomialEquivalenceChecker(original,wires,config.synthesis.affineMaximumTerms,config.synthesis.affineMaximumOperations,()=>performance.now()>=deadline)
-    const equivalent=proof(normalized)
-    if (equivalent===undefined) throw new Error('Checkpoint equivalence proof exceeded its resource limits')
-    if (!equivalent) throw new Error('CORRUPTION: checkpoint differs from original circuit')
-   }
-  } else {
+  let sampledResumeInputs: number | undefined
+  if (tryExact && !exhaustive &&
+      (original.length!==normalized.length || !original.every((gate,index)=>sameGate(simplifyGate(gate),normalized[index])))) {
+   const deadline=performance.now()+config.workers.jobSeconds*1000
+   const proof=createPolynomialEquivalenceChecker(original,wires,config.synthesis.affineMaximumTerms,config.synthesis.affineMaximumOperations,()=>performance.now()>=deadline)
+   const equivalent=proof(normalized)
+   if (equivalent===false) throw new Error('CORRUPTION: checkpoint differs from original circuit')
+   if (equivalent===undefined) sampledResumeInputs=Math.max(1024,checks)
+  }
+  if (exhaustive || !tryExact || sampledResumeInputs!==undefined) {
    const mapping=exhaustive && active.size!==wires ? [...active].sort((a,b)=>a-b) : undefined
-   const inputs=exhaustive ? generateCombinations(active.size) : generateNRandomBooleanArray(checks,wires)
+   const inputs=exhaustive ? generateCombinations(active.size) : generateNRandomBooleanArray(sampledResumeInputs ?? checks,wires)
    const evaluator=new IncrementalEvaluator(mapping ? mapCircuit(original,mapping) : original,inputs,0,1)
    if(!evaluator.equivalent(mapping ? mapCircuit(normalized,mapping) : normalized))throw new Error('CORRUPTION: checkpoint differs from original circuit')
   }
@@ -59,6 +60,6 @@ parentPort!.on('message',({gates,filenames,requireExact}:{gates:Gate[],filenames
    try{writeFileSync(temporary,payload,'utf8');renameSync(temporary,filename)}
    finally{rmSync(temporary,{force:true})}
   }
-  parentPort!.postMessage({ok:true})
+  parentPort!.postMessage({sampledResumeInputs})
  }catch(error){parentPort!.postMessage({error:String(error)})}
 })

@@ -3,6 +3,7 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {SolverService} from './solver-worker.js'
+import {config} from './config.js'
 import {CheckpointWriter} from './checkpoint-writer.js'
 import {splitTaskAndRun} from './processing.js'
 import {outputPaths} from './storage.js'
@@ -105,6 +106,31 @@ try {
   const not = { a: 0, b: 0, target: 63, gate_i: 15 }
   await wide.write([], [...wideGates, not, not], true)
  } finally { await wide.close() }
+ const previousLimit = config.synthesis.affineMaximumTerms
+ config.synthesis.affineMaximumTerms = 1
+ const fallback = new CheckpointWriter(wideGates, 64, 1)
+ const fallbackPath = join(proofDir, 'sampled.json')
+ const not = { a: 0, b: 0, target: 63, gate_i: 15 }
+ try {
+  const result = await fallback.write([fallbackPath], [...wideGates, not, not], true)
+  assert.equal(result.sampledResumeInputs, 1024)
+  const saved = await readFile(fallbackPath, 'utf8')
+  await assert.rejects(fallback.write([fallbackPath], [...wideGates, not], true), /CORRUPTION: checkpoint differs/)
+  assert.equal(await readFile(fallbackPath, 'utf8'), saved)
+
+  const identity = circuit(Array.from({ length: 9 }, (_, wire) => [[0, 0, wire, 15], [0, 0, wire, 15]] as [number, number, number, number][]).flat())
+  const sampledPuzzle = join(proofDir, 'sampled-resume')
+  const sampledLog: string[] = []
+  try {
+   console.log = (...args: unknown[]) => { sampledLog.push(args.join(' ')) }
+   await splitTaskAndRun(sampledPuzzle, sampledPuzzle, { originalCircuit: identity, inputCircuit: circuit([]) })
+  } finally { console.log = log }
+  assert.ok(sampledLog.some(line => line.includes('Resuming after 1024 sampled inputs matched the original circuit')))
+  assert.equal(JSON.parse(await readFile(outputPaths(sampledPuzzle).latest, 'utf8')).gate_count, 0)
+ } finally {
+  await fallback.close()
+  config.synthesis.affineMaximumTerms = previousLimit
+ }
  await narrow.write([path],rareDifference)
  const savedProof = await readFile(path,'utf8')
  await assert.rejects(narrow.write([path],[]),/CORRUPTION/)
