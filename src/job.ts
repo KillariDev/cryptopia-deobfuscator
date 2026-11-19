@@ -7,20 +7,22 @@ import { logTimed, readJsonFile } from './utils.js'
 import { outputPaths } from './storage.js'
 import { configuredWorkerCount } from './threads.js'
 import { databaseFilename } from './rainbowtable.js'
+import { assertCircuitData } from './circuit-validation.js'
 
 export const WORKER_ROUND_MS = config.timing.roundMinutes * 60_000
 export type JobCircuits = { originalCircuit: CircuitData, inputCircuit: CircuitData }
 
 export function loadJob(working: string, original = working, startOver = false): JobCircuits {
-	const originalCircuit = readJsonFile(`${original}.json`) as CircuitData | null
-	if (!originalCircuit) throw new Error(`Cannot load original circuit: ${original}.json`)
+	const originalPath = `${original}.json`
+	const originalCircuit: unknown = readJsonFile(originalPath)
+	if (originalCircuit === null) throw new Error(`Cannot load original circuit: ${originalPath}`)
+	assertCircuitData(originalCircuit, config.validation.maximumWires, originalPath)
 	const latest = outputPaths(working).latest
 	const inputPath = !startOver && existsSync(latest) ? latest : !startOver && working !== original && existsSync(`${working}.json`) ? `${working}.json` : undefined
-	const inputCircuit = inputPath ? readJsonFile(inputPath) as CircuitData | null : originalCircuit
-	if (!inputCircuit) throw new Error(`Cannot load working circuit: ${working}.json`)
-	for (const circuit of [originalCircuit, inputCircuit]) {
-		if (circuit.wire_count > config.validation.maximumWires) throw new Error('Circuit exceeds validation.maximumWires in solver settings')
-	}
+	if (!inputPath) return { originalCircuit, inputCircuit: originalCircuit }
+	const inputCircuit: unknown = readJsonFile(inputPath)
+	if (inputCircuit === null) throw new Error(`Cannot load working circuit: ${inputPath}`)
+	assertCircuitData(inputCircuit, config.validation.maximumWires, inputPath)
 	return { originalCircuit, inputCircuit }
 }
 

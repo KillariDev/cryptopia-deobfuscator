@@ -152,7 +152,7 @@ const replaceNonTargetVar = (gate: Gate, variableToReplace: number, variableToRe
 
 const MAX_DETERMINISTIC_USELESS_VARS = config.search.exactMaximumWires + 1
 const BYTE_ALL_INPUTS = new Map<number, boolean[][]>()
-for (let wires = 2; wires < MAX_DETERMINISTIC_USELESS_VARS; wires++) {
+for (let wires = 1; wires < MAX_DETERMINISTIC_USELESS_VARS; wires++) {
 	BYTE_ALL_INPUTS.set(wires, generateCombinations(wires))
 }
 
@@ -649,6 +649,7 @@ export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number, s
 		const sliceGates = [gates[previous], gates[current]]
 		const variableIndexMapping = mapVariablesToIndexes(sliceGates) // map variables to smaller amount of wires
 		const nVariables = variableIndexMapping.length
+		if (nVariables < 2) return
 		const allInputs = BYTE_ALL_INPUTS.get(nVariables)
 		if (allInputs === undefined) return undefined
 		const mappedGates = mapCircuit(sliceGates, variableIndexMapping)
@@ -679,7 +680,7 @@ export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number, s
 	}
 	for (let time = 0; time < times; time++) {
 		for (let gateI = 1; gateI < gates.length; gateI++) {
-			if (shouldStop()) return
+			if ((gateI & 63) === 1 && shouldStop()) return
 			if (Math.random() < 0.5) continue
 			const [thisAssigned, ...thisOthers] = getVars(gates[gateI])
 			const [previousAssigned, ...previousOthers] = getVars(gates[gateI - 1])
@@ -852,10 +853,16 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	}
 	const timeToEndWorker = () => {
 		const endTime = performance.now()
-		if (onProgress && ((reportOnImprovement && !publishedReduction && wantsSnapshot?.(candidateParts.length, activity.improvements)) || endTime - lastProgress >= config.timing.workerReportSeconds * 1000)) {
-			onProgress(candidateParts.length, progressActivity(), wantsSnapshot && !wantsSnapshot(candidateParts.length, activity.improvements) ? undefined : candidateParts.materialize())
-			lastProgress = endTime
-			if (wantsSnapshot?.(candidateParts.length, activity.improvements)) publishedReduction = true
+		if (onProgress) {
+			const periodic = endTime - lastProgress >= config.timing.workerReportSeconds * 1000
+			if (periodic || (reportOnImprovement && !publishedReduction)) {
+				const improved = wantsSnapshot?.(candidateParts.length, activity.improvements)
+				if (periodic || improved) {
+					if (improved) publishedReduction = true
+					onProgress(candidateParts.length, progressActivity(), improved || !wantsSnapshot ? candidateParts.materialize() : undefined)
+					lastProgress = endTime
+				}
+			}
 		}
 		return shouldFinish?.(activity) === true || endTime >= jobDeadline
 	}
@@ -911,7 +918,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		}*/
 		//else if (optimizedVersion.length < startLength) {
 			activity.stage = 'shuffling'
-			if (!timeToEndWorker()) shuffleRowsWithDependentGateSwap(optimizedVersion, config.search.workerShufflePasses)
+			if (!timeToEndWorker()) shuffleRowsWithDependentGateSwap(optimizedVersion, config.search.workerShufflePasses, timeToEndWorker)
 			subsetSize = chooseSubsetSize()
 			maxSlice = getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1)
 		/*} else {

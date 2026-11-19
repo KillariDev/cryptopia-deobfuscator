@@ -34,6 +34,8 @@ try{
  assert.ok(ticks>0,'main-thread timers run while a large checkpoint is verified')
  const before=await readFile(file,'utf8')
  await assert.rejects(writer.write([file],[{a:0,b:0,target:0,gate_i:15}]),/CORRUPTION/)
+ await assert.rejects(writer.write([file],[{a:0,b:0,target:3,gate_i:15}]),/CORRUPTION: invalid gate.*checkpoint candidate/)
+ await assert.rejects(writer.write([file],[{a:3,b:0,target:0,gate_i:0}]),/CORRUPTION: invalid gate.*checkpoint candidate/)
  assert.equal(await readFile(file,'utf8'),before,'failed verification never overwrites the saved circuit')
  await assert.rejects(writer.write([directory],[]),/EISDIR|EPERM|EACCES/)
  await writer.write([file],[])

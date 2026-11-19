@@ -173,6 +173,9 @@ try {
 	assert.ok(summary.includes(join(temporaryDirectory, 'data', 'worker')))
 	assert.ok(summary.includes(join(temporaryDirectory, 'original-progress')))
 	assert.ok(summary.includes(join(temporaryDirectory, 'original-latest.json')))
+	writeCircuit(paths.latest, 4, [{ ...singleGate[0], target: 4 }])
+	assert.throws(() => loadJob('original'), /Invalid gate at index 0.*original-latest\.json/)
+	assert.equal(loadJob('original', 'original', true).inputCircuit.gates.length, 1)
 	assert.match(summary, /Worker limit:/)
 	assert.match(summary, /25 minutes/)
 	assert.match(summary, /4 wires, up to 5 gates/)
@@ -477,6 +480,11 @@ try {
 		assert.deepEqual(generateCombinations(6).map(input => evalCircuit(exact.gates, input)), generateCombinations(6).map(input => evalCircuit(identity, input)))
 	}
 	await runSql('DELETE FROM InputOutputReplacers')
+	const { RoundStrategyPicker } = await import('./strategy-picker.js')
+	const not = { a: 0, b: 0, target: 0, gate_i: 15 }
+	const oneWireIdentity = [not, not, not, not]
+	const oneWire = await massOptimizeStep(integrationPortfolio, new LimitedMap(100), new LimitedMap(100), oneWireIdentity, 4, true, true, false, undefined, undefined, new RoundStrategyPicker(['variables']))
+	assert.deepEqual(oneWire.gates, [], 'the variables strategy cancels a one-wire identity')
 	const tested = new LimitedMap<string, boolean>(1000)
 	const processed = new LimitedMap<string, boolean>(1000)
 	const lookups = new LimitedMap<string, Gate[] | null>(1000)

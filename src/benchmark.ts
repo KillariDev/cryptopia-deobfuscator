@@ -8,10 +8,11 @@ import { config, configPath, parseConfig } from './config.js'
 import { benchmarkSettings, benchmarkOrder, ablationVariants, comparisonVariants, BenchmarkVariant } from './benchmark-variants.js'
 import { summarizeBenchmarks, BenchmarkResult } from './benchmark-report.js'
 import { CircuitData } from './types.js'
+import { assertCircuitData } from './circuit-validation.js'
 
 const readCircuit = (path: string): CircuitData => {
-	const circuit = JSON.parse(readFileSync(path, 'utf8')) as CircuitData
-	if (!Number.isSafeInteger(circuit.wire_count) || circuit.wire_count < 1 || circuit.wire_count > config.validation.maximumWires || !Array.isArray(circuit.gates) || circuit.gates.some(gate => !Array.isArray(gate) || gate.length !== 4 || gate.some((n, i) => !Number.isSafeInteger(n) || n < 0 || n >= (i === 3 ? 16 : circuit.wire_count)))) throw new Error(`Invalid circuit: ${path}`)
+	const circuit: unknown = JSON.parse(readFileSync(path, 'utf8'))
+	assertCircuitData(circuit, config.validation.maximumWires, path)
 	return circuit
 }
 async function run() {
