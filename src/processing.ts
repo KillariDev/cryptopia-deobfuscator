@@ -1,3 +1,4 @@
+import { synthesizeDecisionDiagramProduct } from './decision-diagram-product.js'
 import { circuitWireCost, isBetterCircuit } from './circuit-cost.js'
 import { CheckpointWriter } from './checkpoint-writer.js'
 import { opaqueRainbow } from './opaque-rainbow.js'
@@ -491,6 +492,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		...(lookup ? [{ name: 'truth-table-lookup' }] : []),
 		...synthesisNames.map(name => ({ name })),
 		...(config.synthesis.quadraticShear ? [{ name: 'polynomial-shear-interpolation' }] : []),
+		...(config.synthesis.decisionDiagramProduct ? [{ name: 'decision-diagram-product' }] : []),
 		...(synthesisBudget?.broad && (config.synthesis.affine || config.synthesis.quadratic) ? [{ name: 'polynomial-region-search' }] : []),
 	]
 	const useStrategyPicker = config.search.strategyAdaptive || synthesisBudget?.forceStrategy
@@ -537,6 +539,14 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	if (selected === 'truth-table-lookup' && lookup && synthesisBudget?.dependencyRegion) {
 		const result = await opaqueRainbow(originalGates, tables, ioIdentifierCache, () => performance.now() >= synthesisBudget.deadline || synthesisBudget.shouldStop?.() === true)
 		if (result) { recordStrategy('truth-table-lookup', { opaque: true }, attemptStarted, originalGates.length, result.length, true); return finish({gates: result, changed:true}) }
+	}
+	if (selected === 'decision-diagram-product' && config.synthesis.decisionDiagramProduct) {
+		const deadline = synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000
+		const stopped = () => performance.now() >= deadline || synthesisBudget?.shouldStop?.() === true
+		const result = synthesizeDecisionDiagramProduct(originalGates, config.validation.maximumWires, stopped)
+		recordStrategy(selected, { verification: 'decision-diagram' }, attemptStarted,
+			originalGates.length, result?.gates.length ?? originalGates.length, result !== undefined)
+		return finish({ gates: result?.gates ?? originalGates, changed: result !== undefined })
 	}
 	if (selected === 'polynomial-shear-interpolation' && config.synthesis.quadraticShear) {
 		const deadline = synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000
@@ -908,10 +918,12 @@ const localStrategyOrder = () => prioritizeStrategies(config.search.localStrateg
 	'smt-synthesis': config.synthesis.smt,
 	'meet-in-the-middle': config.synthesis.meetInMiddle,
 	'polynomial-shear-interpolation': config.synthesis.quadraticShear,
+	'decision-diagram-product': config.synthesis.decisionDiagramProduct,
 }).filter(strategy => !smallSynthesisStrategies.has(strategy) || config.search.subsetMinimum <= config.synthesis.maximumWindowGates)
 export const broadStrategyOrder = () => prioritizeStrategies(config.search.broadStrategyOrder, defaultBroadStrategyOrder, {
 	'sat-sweeping': config.synthesis.satSweeping,
 	'polynomial-shear-interpolation': config.synthesis.quadraticShear,
+	'decision-diagram-product': config.synthesis.decisionDiagramProduct,
 	'basis-change-cancellation': config.synthesis.mixedBasis,
 	'block-cancellation': config.synthesis.blockCancellation,
 	'polynomial-region-search': config.synthesis.affine || config.synthesis.quadratic,

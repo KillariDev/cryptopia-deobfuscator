@@ -89,6 +89,12 @@ The solver combines several approaches:
   expose simplifications that were not adjacent before.
 - **Local search:** prioritize recently changed regions. Adaptive search modes
   remain available through `search.adaptive`, but are off by default.
+- **Decision-diagram product synthesis:** compose a region exactly and recover a
+  single output flip controlled by a positive conjunction of unchanged inputs.
+  The pass uses bounded decision diagrams on up to 64 active wires, restores
+  borrowed wires, and proves every output equivalent before accepting a shorter
+  circuit. Prioritize it with
+  `decision-diagram-product` in either strategy order.
 - **Strategy rotation:** a worker keeps its strategy for the entire round and
   advances after a round without a gate reduction. The local and broad searches
   have separate strategy orders. The checked-in config starts both with

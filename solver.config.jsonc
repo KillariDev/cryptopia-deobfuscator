@@ -48,6 +48,9 @@
       "maximumDegree": 8 // Highest degree to fit. Set to 2 for quadratic-only search.
     },
     // Enumerate short replacements by forward semantic search.
+    "decisionDiagramProduct": {
+      "enabled": true // Exactly recover single-product updates with a bounded decision diagram.
+    },
     "forwardSemantic": {
       "enabled": true // Run this strategy when eligible.
     },

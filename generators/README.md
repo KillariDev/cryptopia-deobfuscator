@@ -58,3 +58,36 @@ degree-four interpolation. The higher-degree fallback can handle it. The generat
 the reference on all 65,536 lower-input states with upper inputs zero,
 using the shear construction to account for arbitrary upper inputs.
 Use `--check` to regenerate and verify the checked-in artifacts.
+
+## Rare product
+
+Run `npx tsc && node experiments/solve-rare-product.mjs data` to generate
+`data/rare-product.json` and `data/rare-product-solved.json`, compare solver
+passes, and verify the replacement. The experiment generates both files from
+a fixed seed.
+
+The 2,376-gate fixture on 39 wires uses 33 differently ordered implementations
+of the same 20-control flip. Each implementation restores all 18 borrowed wires
+for arbitrary initial values. An odd number of these flips leaves wire 38
+toggled exactly when inputs 0 through 19 are all one. The event has probability
+`2^-20` under uniform inputs. The output delta has degree 20, beyond the
+default interpolation cap of 8.
+
+Before adding the strategy, a 15-second tuned optimizer trial with two workers
+and the benchmark suite's small rainbow-table portfolio retained all 2,376 gates.
+Direct whole-region calls to polynomial shear, ANF synthesis, factored synthesis,
+block cancellation, and mixed-basis cancellation returned no replacement. SAT sweeping returned no
+replacement within its five-second budget. Longer runs or larger lookup tables
+could change the optimizer result.
+
+The optimizer’s `decision-diagram-product` strategy composes the circuit with
+reduced ordered binary decision diagrams, reads the conjunction from the changed
+wire's output delta, and synthesizes a 72-gate borrowed-wire ladder. Comparing every output diagram
+proves equivalence for all inputs. The existing exact ANF equivalence checker
+independently confirms the replacement and rejects the identity. The diagram
+run used 64,736 nodes including intermediates and took about 0.21 seconds on
+the development machine.
+
+To give the strategy the first broad-search turn, put `decision-diagram-product`
+first in `search.broadStrategyOrder`. The strategy also participates in local
+rotation and is enabled by default.

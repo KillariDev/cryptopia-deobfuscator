@@ -8,6 +8,8 @@ import { functionKey, encodeGates } from './semantic.js'
 import { runSQL } from './sql.js'
 import { calculateAllOutputsArray, generateCombinations } from './utils.js'
 import { Gate } from './types.js'
+import { emitBorrowedProduct, synthesizeDecisionDiagramProduct } from './decision-diagram-product.js'
+import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { strategySnapshot, resetStrategyStats } from './strategy-stats.js'
 const regions = [...broadRegions(40)]
 assert.deepEqual(regions[0], { start: 0, end: 40 })
@@ -24,7 +26,7 @@ try {
 	// This case isolates contiguous broad windows; global cuts have separate
 	// integration coverage and may find a smaller improvement first.
 	config.search.dependencyCuts = false
-	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, quadratic: false, quadraticShear: false, affine: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+	Object.assign(config.synthesis, { decisionDiagramProduct: false, factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, quadratic: false, quadraticShear: false, affine: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
 	config.search.probabilistic = false
 	config.search.variableElimination = false
 	await runSQL(db, 'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
@@ -223,6 +225,45 @@ try {
 	assert.equal(ninthResult?.length, 386)
 	assert.equal(ninthVerification, 'polynomial')
 
+
+	// Exercise the strategy on a region whose positive product is above
+	// the interpolation degree cap and restores initially dirty scratch.
+	const factors = Array.from({ length: 20 }, (_, i) => i)
+	const borrowed = Array.from({ length: 18 }, (_, i) => i + 20)
+	const rareProduct = Array.from({ length: 33 }, (_, i) => {
+		const offset = i % factors.length
+		return emitBorrowedProduct([...factors.slice(offset), ...factors.slice(0, offset)], borrowed, 38)
+	}).flat()
+	const proveProduct = createPolynomialEquivalenceChecker(rareProduct, 39, 100000, 10000000)
+	const productOrder = parseConfig({
+		strategies: { decisionDiagramProduct: { enabled: true } },
+		search: { localStrategyOrder: ['decision-diagram-product'], broadStrategyOrder: ['decision-diagram-product'] },
+	})
+	const productStep = () => {
+		const caches = createOptimizerCaches()
+		return massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, rareProduct,
+			rareProduct.length, false, false, false, undefined, { deadline: performance.now() + 5000, forceStrategy: true }, caches.strategyPicker)
+	}
+	config.search.localStrategyOrder = productOrder.search.localStrategyOrder
+	config.search.broadStrategyOrder = productOrder.search.broadStrategyOrder
+	assert.equal((await productStep()).changed, false, 'disabled strategy is excluded even when prioritized')
+	config.synthesis.decisionDiagramProduct = productOrder.synthesis.decisionDiagramProduct
+	const localProduct = await productStep()
+	assert.equal(localProduct.gates.length, 72)
+	assert.equal(proveProduct(localProduct.gates), true)
+	const broadProduct = await broadSearch(tables, rareProduct, 39, createOptimizerCaches(), 5000, () => false, () => {})
+	assert.equal(broadProduct.length, 72)
+	assert.equal(proveProduct(broadProduct), true)
+	assert.ok(strategySnapshot().some(stat => stat.strategy === 'decision-diagram-product' && stat.rewrites))
+	assert.equal(synthesizeDecisionDiagramProduct(rareProduct, 38, () => false), undefined)
+	assert.equal(synthesizeDecisionDiagramProduct(rareProduct, 64, () => true), undefined)
+	assert.equal(synthesizeDecisionDiagramProduct([...rareProduct, { a: 0, b: 0, target: 20, gate_i: 15 }], 64, () => false), undefined)
+	const sparseProduct = rareProduct.map(({ a, b, target, gate_i }) => ({ a: 2 * a, b: 2 * b, target: 2 * target, gate_i }))
+	const sparseResult = synthesizeDecisionDiagramProduct(sparseProduct, 64, () => false)
+	assert.deepEqual(sparseResult?.gates, localProduct.gates.map(({ a, b, target, gate_i }) => ({ a: 2 * a, b: 2 * b, target: 2 * target, gate_i })))
+	config.search.localStrategyOrder = []
+	config.search.broadStrategyOrder = []
+	config.synthesis.decisionDiagramProduct = false
 
 	Object.assign(config.synthesis, { factored: true, satSweeping: true, mixedBasis: true, blockCancellation: true, affine: true })
 	config.search.dependencyCuts = true

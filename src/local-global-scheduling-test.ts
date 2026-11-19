@@ -125,7 +125,7 @@ try {
 	assert.deepEqual(result.gates, splitFixture.gates)
 
 	Object.assign(config.workers, { keepBusy: true, broadSearchSeconds: 60 })
-	Object.assign(config.synthesis, { satSweeping: false, quadraticShear: false, mixedBasis: false, blockCancellation: true, affine: false, quadratic: false, factored: false })
+	Object.assign(config.synthesis, { satSweeping: false, quadraticShear: false, decisionDiagramProduct: false, mixedBasis: false, blockCancellation: true, affine: false, quadratic: false, factored: false })
 	config.search.dependencyCuts = false
 	let broadDispatches = 0
 	WorkerPool.prototype.run = async function(gates, _wires, progress, signal, _budget, _restart, solver, round) {
@@ -167,7 +167,7 @@ try {
 	Object.assign(config.workers, { maximum: 1, keepBusy: false, jobsPerWorker: 1, wholeCircuitMaximumGates: 10 })
 	Object.assign(config.search, { rainbow: true, variableElimination: false, strategyAdaptive: false })
 	Object.assign(config.synthesis, {
-		affine: false, quadratic: true, blockCancellation: true, forwardSemanticSearch: false,
+		affine: false, quadratic: true, blockCancellation: true, decisionDiagramProduct: true, forwardSemanticSearch: false,
 		equalitySaturation: false, smt: false, meetInMiddle: false,
 	})
 	const attempts: (string | undefined)[] = []
@@ -181,7 +181,7 @@ try {
 	}
 	await assert.rejects(splitTaskAndRun(join(directory, 'whole-strategies'), 'unused',
 		{ originalCircuit: splitFixture, inputCircuit: splitFixture }), error => error === done)
-	assert.deepEqual(attempts, ['anf-synthesis', 'truth-table-lookup', 'block-cancellation'])
+	assert.deepEqual(attempts, ['anf-synthesis', 'truth-table-lookup', 'block-cancellation', 'decision-diagram-product'])
 
 } finally {
 	Object.assign(config, saved)
