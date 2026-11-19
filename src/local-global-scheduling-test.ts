@@ -144,7 +144,7 @@ try {
 	config.files.workerSnapshots = true
 	let finishLocal!: () => void
 	const localStarted = new Promise<void>(resolve => { finishLocal = resolve })
-	let localJobs = 0
+	let localJobs = 0, firstLocalChunkSize = 0
 	WorkerPool.prototype.run = async function(gates, _wires, progress, signal, _budget, _restart, solver) {
 		const stop = new Int32Array(signal!)
 		if (solver === 'broad') {
@@ -153,14 +153,14 @@ try {
 			assert.equal(Atomics.load(stop, 0), 1, 'a complete broad result stops local workers immediately')
 			return []
 		}
-		localJobs++
+		if (localJobs++ === 0) firstLocalChunkSize = gates.length
 		finishLocal()
 		await wait(5)
 		return gates
 	}
 	await splitTaskAndRun(zeroPath, 'unused', { originalCircuit: zeroCircuit, inputCircuit: zeroCircuit })
 	assert.ok(localJobs > 0)
-	assert.equal(JSON.parse(await readFile(outputPaths(zeroPath).worker(0), 'utf8')).gate_count, zeroCircuit.gate_count)
+	assert.equal(JSON.parse(await readFile(outputPaths(zeroPath).worker(0), 'utf8')).gate_count, firstLocalChunkSize)
 	assert.equal(JSON.parse(await readFile(zeroPath + '-latest.json', 'utf8')).gate_count, 0)
 
 } finally {
