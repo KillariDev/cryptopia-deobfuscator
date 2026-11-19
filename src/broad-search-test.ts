@@ -135,6 +135,25 @@ try {
 	const cubic: Gate[] = [compute, { a: 2, b: 3, target: 4, gate_i: 1 }, compute]
 	assert.equal(synthesizeQuadraticShear(cubic, 64, 1, 10000000, () => false, 4096), undefined)
 
+	// A borrowed wire is restored for either starting value, and a shared
+	// control pair only needs one compute/restore sequence.
+	const triple = (target: number) => {
+		const flip = { a: 3, b: 2, target, gate_i: 1 }
+		return [compute, flip, compute, flip]
+	}
+	assertFit([...triple(4), ...triple(5)], 6, 6)
+	const borrow = triple(4)
+	const quarticFlip = { a: 4, b: 5, target: 6, gate_i: 1 }
+	const quartic = [...borrow, quarticFlip, ...borrow, quarticFlip]
+	assert.equal(synthesizeQuadraticShear(quartic, 64, 1, 10000000, () => false, 4096), undefined)
+	const secondQuarticFlip = { ...quarticFlip, b: 7, target: 8 }
+	const secondQuartic = [...borrow, secondQuarticFlip, ...borrow, secondQuarticFlip]
+	assertFit([...quartic, ...secondQuartic], 12, 9)
+	const linear = { a: 0, b: 0, target: 8, gate_i: 3 }
+	assertFit([...quartic, ...secondQuartic, ...triple(9), linear], 17, 10)
+
+
+
 	Object.assign(config.synthesis, { factored: true, satSweeping: true, mixedBasis: true, blockCancellation: true, affine: true })
 	config.search.dependencyCuts = true
 	assert.deepEqual(broadStrategyOrder(), ['sat-sweeping', 'quadratic-shear-interpolation', 'basis-change-cancellation', 'block-cancellation', 'polynomial-region-search', 'factored-synthesis', 'dependency-cuts'])

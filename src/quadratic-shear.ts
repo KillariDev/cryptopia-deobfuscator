@@ -1,5 +1,5 @@
 import { randomFillSync } from 'node:crypto'
-import { emitQuadraticMap } from './polynomial-synthesis.js'
+import { emitCubicShear, emitQuadraticMap, emitQuarticShear } from './polynomial-synthesis.js'
 import { packedControl } from './packed.js'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { Gate } from './types.js'
@@ -53,22 +53,46 @@ function emitShear(rows: Set<bigint>[], wires: number[], targets: number[], maxi
 	return [basisGate, ...middle, basisGate]
 }
 
-function fitQuadratic(gates: Gate[], width: number, controls: number[], targets: number[], stopped: () => boolean) {
-	const pairs: [number, number][] = []
-	for (let a = 0; a < controls.length; a++) {
-		for (let b = a + 1; b < controls.length; b++) pairs.push([a, b])
+function fitPolynomial(gates: Gate[], width: number, controls: number[], targets: number[], stopped: () => boolean, degree: 2 | 3 | 4 = 2) {
+	const count = controls.length
+	const samples = 1 + count + count * (count - 1) / 2
+		+ (degree >= 3 ? count * (count - 1) * (count - 2) / 6 : 0)
+		+ (degree === 4 ? count * (count - 1) * (count - 2) * (count - 3) / 24 : 0)
+	// Bound higher-degree attempts by the cost of evaluating the probes.
+	if (degree > 2 && gates.length * Math.ceil(samples / 32) > 64_000_000) return undefined
+
+	const probes: number[][] = [[]]
+	for (let a = 0; a < count; a++) probes.push([a])
+	const pairs = Array.from({ length: count }, () => new Uint32Array(count))
+	for (let a = 0; a < count; a++) {
+		for (let b = a + 1; b < count; b++) {
+			pairs[a][b] = probes.length
+			probes.push([a, b])
+		}
 	}
-	const samples = 1 + controls.length + pairs.length
+	const tripleIndex = (a: number, b: number, c: number) => (a * count + b) * count + c
+	const triples = degree === 4 ? new Uint32Array(count ** 3) : undefined
+	if (degree >= 3) {
+		for (let a = 0; a < count; a++) for (let b = a + 1; b < count; b++) {
+			for (let c = b + 1; c < count; c++) {
+				if (triples) triples[tripleIndex(a, b, c)] = probes.length
+				probes.push([a, b, c])
+			}
+		}
+	}
+	if (triples) {
+		for (let a = 0; a < count; a++) for (let b = a + 1; b < count; b++) {
+			for (let c = b + 1; c < count; c++) for (let d = c + 1; d < count; d++) {
+				probes.push([a, b, c, d])
+			}
+		}
+	}
 	const fitting = new Uint32Array(Math.ceil(samples / 32) * width)
-	controls.forEach((wire, i) => setInputBit(fitting, width, wire, i + 1))
-	pairs.forEach(([a, b], i) => {
-		const sample = 1 + controls.length + i
-		setInputBit(fitting, width, controls[a], sample)
-		setInputBit(fitting, width, controls[b], sample)
-	})
+	probes.forEach((probe, sample) => probe.forEach(wire => setInputBit(fitting, width, controls[wire], sample)))
 	const outputs = evaluatePacked(gates, fitting, width, stopped)
 	if (!outputs) return undefined
 	const bits = Array.from({ length: width }, (_, i) => 1n << BigInt(i))
+	const masks = probes.map(probe => probe.reduce((mask, wire) => mask | bits[controls[wire]], 0n))
 	const rows = bits.map(bit => new Set([bit]))
 	for (const target of targets) {
 		if (stopped()) return undefined
@@ -77,18 +101,23 @@ function fitQuadratic(gates: Gate[], width: number, controls: number[], targets:
 			return ((outputs[index] ^ fitting[index]) >>> (sample & 31)) & 1
 		}
 		const toggle = (term: bigint) => { if (!rows[target].delete(term)) rows[target].add(term) }
-		const constant = bit(0)
-		if (constant) toggle(0n)
-		const linear = controls.map((wire, i) => {
-			const coefficient = bit(i + 1) ^ constant
-			if (coefficient) toggle(bits[wire])
-			return coefficient
-		})
-		pairs.forEach(([a, b], i) => {
-			if (bit(1 + controls.length + i) ^ constant ^ linear[a] ^ linear[b]) toggle(bits[controls[a]] | bits[controls[b]])
-		})
+		for (let sample = 0; sample < probes.length; sample++) {
+			const [a, b, c, d] = probes[sample]
+			let coefficient = bit(sample)
+			if (a !== undefined) coefficient ^= bit(0)
+			if (b !== undefined) coefficient ^= bit(a + 1) ^ bit(b + 1)
+			if (c !== undefined) coefficient ^= bit(c + 1) ^ bit(pairs[a][b]) ^ bit(pairs[a][c]) ^ bit(pairs[b][c])
+			if (d !== undefined && triples) {
+				coefficient ^= bit(d + 1) ^ bit(pairs[a][d]) ^ bit(pairs[b][d]) ^ bit(pairs[c][d])
+				coefficient ^= bit(triples[tripleIndex(a, b, c)]) ^ bit(triples[tripleIndex(a, b, d)])
+					^ bit(triples[tripleIndex(a, c, d)]) ^ bit(triples[tripleIndex(b, c, d)])
+			}
+			if (coefficient) toggle(masks[sample])
+		}
 	}
 	const wires = bits.map((_, i) => i)
+	if (degree === 4) return emitQuarticShear(rows, wires, gates.length, stopped)
+	if (degree === 3) return emitCubicShear(rows, wires, gates.length, stopped)
 	return controls.length === width
 		? emitQuadraticMap(rows, wires, gates.length, stopped)
 		: emitShear(rows, wires, targets, gates.length, stopped)
@@ -109,7 +138,7 @@ export function quadraticShearSampleCount(gates: number, wires: number, minimum:
 	return Math.max(minimum, 4096 * Math.min(16, Math.max(1, complexity)))
 }
 
-/** Infer a quadratic map and verify the emitted circuit independently of fitting. */
+/** Infer a quadratic map or a higher-degree shear and verify the emitted circuit independently of fitting. */
 export function synthesizeQuadraticShear(gates: Gate[], maximumWires: number, maximumTerms: number, maximumOperations: number, stopped: () => boolean, fallbackSamples = 0, onVerified?: (result: QuadraticVerification) => void): Gate[] | undefined {
 	const active = new Set<number>()
 	for (let i = 0; i < gates.length; i++) {
@@ -138,9 +167,15 @@ export function synthesizeQuadraticShear(gates: Gate[], maximumWires: number, ma
 	}
 
 	const candidates = function* () {
-		yield targets.length ? fitQuadratic(mapped, width, controls, targets, stopped) : []
+		yield targets.length ? fitPolynomial(mapped, width, controls, targets, stopped) : []
 		if (targets.length && controls.length < width && !stopped()) {
-			yield fitQuadratic(mapped, width, wires.map((_, i) => i), targets, stopped)
+			yield fitPolynomial(mapped, width, wires.map((_, i) => i), targets, stopped)
+		}
+		if (targets.length && controls.length >= 3 && !stopped()) {
+			yield fitPolynomial(mapped, width, controls, targets, stopped, 3)
+		}
+		if (targets.length && controls.length >= 4 && controls.length <= 20 && !stopped()) {
+			yield fitPolynomial(mapped, width, controls, targets, stopped, 4)
 		}
 	}
 	const equivalent = createPolynomialEquivalenceChecker(mapped, width, maximumTerms, maximumOperations, stopped)

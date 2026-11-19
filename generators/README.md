@@ -44,5 +44,6 @@ Run `python3 generators/generate-shuffled-cubic-maze.py` to build a
 The generator constructs nested nonlinear basis changes and shuffles adjacent
 commuting gates. The proof metadata records the shuffle count and an eight-input
 witness of a nonzero cubic coefficient on wire 16. That witness rules out a
-whole-circuit quadratic fit. Run the generator with `--check` to verify the
+whole-circuit quadratic fit. The cubic fallback in quadratic shear interpolation
+can handle this fixture. Run the generator with `--check` to verify the
 checked-in artifacts and repeat the packed comparisons.

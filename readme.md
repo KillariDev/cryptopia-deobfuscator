@@ -137,7 +137,7 @@ cuts can also invoke local rewrite methods inside a cut.
 | `basis-change-cancellation` | Local and broad | Tracks XOR contributions across reversible basis changes so matching contributions can cancel. |
 | `smt-synthesis` | Local | Asks Z3 for a shorter sequence with the same behavior on every input of a small region. |
 | `meet-in-the-middle` | Local | Searches from both the identity and the target function, then joins paths at the same intermediate function. |
-| `quadratic-shear-interpolation` | Local and broad | Samples inputs with zero, one, and two active controls to fit quadratic target flips while preserving the controls. |
+| `quadratic-shear-interpolation` | Local and broad | Fits quadratic target flips from samples, with bounded cubic and quartic shear fallbacks. |
 | `polynomial-region-search` | Broad | Searches larger regions and their subwindows using the enabled affine and ANF synthesis methods. |
 | `dependency-cuts` | Broad | Builds regions from gate dependencies, including noncontiguous gates, and tries enabled rewrite strategies there. |
 
@@ -188,7 +188,13 @@ Quadratic shear interpolation (`strategies.quadraticShearInterpolation.enabled`)
 uses packed samples to identify likely unchanged wires. It evaluates zero-, one-,
 and two-bit inputs to fit quadratic flips. If the shear fit fails, it can try
 an ordered quadratic map whose target updates read their controls before those
-controls change. The emitter packs compatible terms into a single gate and
+controls change. If both quadratic attempts fail, a bounded cubic shear pass
+also samples triples. It can emit those terms when an unused, unchanged wire
+can hold a product temporarily, and groups triples that share a pair. The solver
+charges for computing and restoring that wire. If cubic fails, a quartic pass
+tries regions with at most 20 inferred controls. It groups quartic terms that
+share a triple and requires two unused, unchanged wires for temporary products.
+The solver stops at the first verified improvement. The emitter packs compatible terms into a single gate and
 tries a shared-output basis change when overlapping target expressions can
 justify the cost of changing and restoring the basis. Broad search checks the
 whole circuit first, then tries up to 16 sampled restore windows before its
