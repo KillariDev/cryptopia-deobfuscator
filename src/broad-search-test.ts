@@ -23,7 +23,7 @@ try {
 	// This case isolates contiguous broad windows; global cuts have separate
 	// integration coverage and may find a smaller improvement first.
 	config.search.dependencyCuts = false
-	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, quadratic: false, affine: false, templates: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, quadratic: false, affine: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
 	config.search.probabilistic = false
 	config.search.variableElimination = false
 	await runSQL(db, 'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
@@ -95,8 +95,7 @@ const { WorkerPool } = await import('./threads.js')
 const { WholeCircuitRestart, roundSearchResult } = await import('./round-search.js')
 const fixture = new URL('data:text/javascript,' + encodeURIComponent(`
 import {parentPort} from 'node:worker_threads';
-parentPort.on('message', async ({gates,solver,stopSignal,sharedTemplates}) => {
- if(sharedTemplates !== undefined) return;
+parentPort.on('message', async ({gates,solver,stopSignal}) => {
  const signal = new Int32Array(stopSignal);
  Atomics.store(signal, solver === 'broad' ? 1 : 2, 1);
  parentPort.postMessage({progress:gates.length});

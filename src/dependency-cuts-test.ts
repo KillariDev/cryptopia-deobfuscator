@@ -94,7 +94,7 @@ try {
  config.search.strategyAdaptive = true
  config.search.dependencyCuts = true
  config.search.variableElimination = false
- Object.assign(config.synthesis, { templates: false, affine: false, quadratic: false, factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+ Object.assign(config.synthesis, { affine: false, quadratic: false, factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
  resetStrategyStats()
  const rewritten = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, sparse, sparse.length, false, false, true, new SubsetPreparation(sparse), { deadline: performance.now() + 10000, broad: true, minimumBroadGates: sparse.length }, picker)
  assert.equal(rewritten.gates.length, sparse.length - 2)

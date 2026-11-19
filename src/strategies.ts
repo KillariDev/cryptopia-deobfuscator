@@ -4,17 +4,15 @@ import { synthesizeSMT } from './smt.js'
 import { recordStrategy } from './strategy-stats.js'
 import { config } from './config.js'
 import { Gate } from './types.js'
-import { TemplateLibrary } from './templates.js'
 import { normalizeWindow } from './search.js'
 import { generateAllGates } from './rainbowtable.js'
-import { meetInMiddle, forwardSemanticSearch } from './semantic.js'
+import { functionKey, meetInMiddle, forwardSemanticSearch } from './semantic.js'
 import { saturateCircuit } from './equality.js'
-import { reverseMapCircuit, isReplacementSimpler } from './utils.js'
+import { getVars, reverseMapCircuit, isReplacementSimpler } from './utils.js'
 import { LimitedMap } from './limitedMap.js'
 import { structuralNames, structuralChoices, structuralRewrite } from './structural-strategies.js'
 
-export const templates = new TemplateLibrary(config.synthesis.templateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates, config.workers.sharedTemplateEntries)
-const failed = new LimitedMap<string, boolean>(config.synthesis.templateEntries)
+const failed = new LimitedMap<string, boolean>(Math.min(10000, config.cache.processedEntries))
 const picker = new StrategyPicker(['gf2-affine', 'quadratic', ...structuralNames, 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'])
 export type SynthesisBudget = { deadline: number, shouldStop?: () => boolean, broad?: boolean, minimumBroadGates?: number, dependencyRegion?: boolean, onProgress?: () => void, onCut?: (indices: number[], replacement: Gate[]) => void, selectedStrategy?: string }
 // Serialize synthesis so Z3 initialization and cleanup cannot overlap.
@@ -38,7 +36,7 @@ export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = {
 		if (small && options.forwardSemanticSearch) choices.push({ name: 'forward-semantic-search', run: () => forwardSemanticSearch(normalized, wires.length, options.maximumReplacementGates, options.states, remaining(), stopped) })
 		if (small && options.smt) choices.push({ name: 'z3', run: () => synthesizeSMT(normalized, wires.length, options.maximumReplacementGates, remaining(), stopped) })
 		if (small && options.meetInMiddle) choices.push({ name: 'meet-in-the-middle', run: () => meetInMiddle(normalized, wires.length, [...generateAllGates(wires.length)], Math.min(options.maximumReplacementGates, gates.length - 1), options.states, remaining(), stopped) })
-		if (small && options.equalitySaturation) choices.push({ name: 'equality-saturation', run: () => saturateCircuit(normalized, wires.length, templates, options.states, remaining(), stopped) })
+		if (small && options.equalitySaturation) choices.push({ name: 'equality-saturation', run: () => saturateCircuit(normalized, wires.length, options.states, remaining(), stopped) })
 		if (affine) choices.push({ name: 'gf2-affine', run: () => {
 			const result = searchAffineRegions(normalized, config.validation.maximumWires, options.affineMaximumTerms, options.affineMaximumOperations, budget.deadline, stopped)
 			return result === normalized ? undefined : result
@@ -54,7 +52,10 @@ export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = {
 		const started = performance.now()
 		const result = await choice.run()
 		const isStructural = (structuralNames as readonly string[]).includes(choice.name)
-		const accepted = result !== undefined && isReplacementSimpler(result, normalized) && (isStructural || ['gf2-affine', 'quadratic'].includes(choice.name) || templates.learn(normalized, result))
+		const symbolic = isStructural || choice.name === 'gf2-affine' || choice.name === 'quadratic'
+		const accepted = result !== undefined && isReplacementSimpler(result, normalized) &&
+			(symbolic || (result.every(gate => getVars(gate).every(wire => wire >= 0 && wire < wires.length)) &&
+				functionKey(result, wires.length) === functionKey(normalized, wires.length)))
 		const settings = ['gf2-affine', 'quadratic'].includes(choice.name)
 			? { maximumWires: config.validation.maximumWires, maximumWindowGates: options.affineMaximumWindowGates, workerJobSeconds: config.workers.jobSeconds }
 			: { maximumWires: options.maximumWires, maximumWindowGates: options.maximumWindowGates, maximumReplacementGates: options.maximumReplacementGates, ...(choice.name !== 'z3' ? { states: options.states } : {}), workerJobSeconds: config.workers.jobSeconds }

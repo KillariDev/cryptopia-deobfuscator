@@ -114,7 +114,7 @@ assert.equal(await structuralRewrite('sat-sweeping', distributed, performance.no
 // Each solver is selected and measured independently of the original toolkit.
 const saved = structuredClone(config), tables = new RainbowPortfolio([{ wires: 3, gates: 3, db: new sqlite3.Database(':memory:') }])
 try {
-	Object.assign(config.synthesis, { templates: false, affine: false, quadratic: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false, factored: true, blockCancellation: true, satSweeping: true })
+	Object.assign(config.synthesis, { affine: false, quadratic: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false, factored: true, blockCancellation: true, satSweeping: true })
 	config.search.strategyAdaptive = true
 	const cases = { factored: [t, t, t], 'block-cancellation': blockInput, 'sat-sweeping': distributed, 'mixed-basis': blockInput }
 	for (const name of structuralNames) {

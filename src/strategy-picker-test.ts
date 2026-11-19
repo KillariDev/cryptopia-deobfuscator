@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { StrategyPicker } from './strategy-picker.js'
-import { advancedRewrite, templates } from './strategies.js'
+import { advancedRewrite } from './strategies.js'
 import { config } from './config.js'
 import { forwardSemanticSearch, meetInMiddle } from './semantic.js'
 import { saturateCircuit } from './equality.js'
@@ -25,7 +25,7 @@ try {
 } finally { Object.assign(config.synthesis, saved) }
 assert.equal(forwardSemanticSearch([not], 2, 2, 100000, 30000, () => true), undefined)
 assert.equal(meetInMiddle([not], 2, [not], 2, 100000, 30000, () => true), undefined)
-assert.equal(saturateCircuit([not], 2, templates, 100000, 30000, () => true), undefined)
+assert.equal(saturateCircuit([not], 2, 100000, 30000, () => true), undefined)
 let cancellationChecks = 0
 const started = performance.now()
 assert.equal(await synthesizeSMT([not], 2, 3, 30000, () => { cancellationChecks++; return performance.now() - started > 10 }), undefined)

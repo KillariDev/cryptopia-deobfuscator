@@ -54,18 +54,9 @@
     "meetInMiddle": {
       "enabled": true // Run this strategy when eligible.
     },
-    // Explore equivalent small circuits using rewrite rules.
+    // Explore small circuits using exact prefix equivalence and gate commutation.
     "equalitySaturation": {
       "enabled": true // Run this strategy when eligible.
-    },
-    // Learn and apply reusable exact rewrites.
-    "templates": {
-      "enabled": true, // Run this strategy when eligible.
-      "cacheEntries": 10000, // Maximum learned templates per worker.
-      "share": true, // Exchange learned templates between workers.
-      "shareSeconds": 15, // Seconds between template sharing reports.
-      "sharedEntries": 64, // Maximum shared template entries.
-      "sharedBatch": 16 // Maximum templates exchanged in a batch.
     },
     // Shared graph limits for SAT sweep, factored, mixed-basis and block cancellation.
     "factoredLimits": {
@@ -78,7 +69,7 @@
       "maximumTerms": 100000, // Maximum total terms in an exact polynomial representation.
       "maximumOperations": 10000000 // Maximum term operations per exact polynomial computation.
     },
-    // Limits for templates, forward semantic search, SMT, meet-in-the-middle and equality saturation.
+    // Limits for forward semantic search, SMT, meet-in-the-middle and equality saturation.
     "smallSynthesisLimits": {
       "maximumWires": 3, // Maximum active wires for small synthesis.
       "maximumWindowGates": 8, // Maximum region size for bounded small synthesis.

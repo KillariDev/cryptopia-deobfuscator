@@ -1,7 +1,6 @@
 import { Gate } from './types.js'
 import { circuitState, applyState, stateKey, functionKey } from './semantic.js'
 import { hashGates, isReplacementSimpler } from './utils.js'
-import { TemplateLibrary } from './templates.js'
 
 /** Prefix nodes are interned by (parent equivalence class, gate). Classes use exact semantics. */
 export class CircuitEqualityGraph {
@@ -19,7 +18,7 @@ export class CircuitEqualityGraph {
 		return parent
 	}
 }
-export function saturateCircuit(original: Gate[], wires: number, templates: TemplateLibrary, nodes: number, timeoutMs: number, shouldStop: () => boolean = () => false) {
+export function saturateCircuit(original: Gate[], wires: number, nodes: number, timeoutMs: number, shouldStop: () => boolean = () => false) {
 	if (shouldStop()) return undefined
 	const graph = new CircuitEqualityGraph()
 	const target = graph.add(original, wires)
@@ -29,7 +28,16 @@ export function saturateCircuit(original: Gate[], wires: number, templates: Temp
 	const end = performance.now() + timeoutMs
 	for (let head = 0; head < queue.length && performance.now() < end && !shouldStop() && seen.size < nodes; head++) {
 		const current = queue[head]
-		const alternatives: Gate[][] = [templates.rewrite(current)]
+		const alternatives: Gate[][] = []
+		let state = circuitState([], wires)
+		const prefixes = new Map([[stateKey(state), 0]])
+		for (let i = 0; i < current.length; i++) {
+			if (shouldStop() || performance.now() >= end) break
+			state = applyState(state, current[i])
+			const key = stateKey(state), previous = prefixes.get(key)
+			if (previous === undefined) prefixes.set(key, i + 1)
+			else alternatives.push([...current.slice(0, previous), ...current.slice(i + 1)])
+		}
 		for (let i = 0; i < current.length - 1; i++) {
 			if (shouldStop() || performance.now() >= end) break
 			const pair = current.slice(i, i + 2)

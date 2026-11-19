@@ -9,7 +9,7 @@ let waiting=false,reportsWhileWaiting=0
 try{
  config.timing.workerReportSeconds=0.01;config.search.strategyAdaptive=false
  Object.assign(config.search,{probabilistic:false,variableElimination:false,subsetMinimum:2,subsetMaximum:3,sliceMinimum:2,sliceMaximum:2,workerShufflePasses:1})
- Object.assign(config.synthesis,{templates:false,affine:false,quadratic:false,factored:false,blockCancellation:false,satSweeping:false,forwardSemanticSearch:false,smt:false,meetInMiddle:false,equalitySaturation:false})
+ Object.assign(config.synthesis,{affine:false,quadratic:false,factored:false,blockCancellation:false,satSweeping:false,forwardSemanticSearch:false,smt:false,meetInMiddle:false,equalitySaturation:false})
  tables.findReplacements=async()=>{waiting=true;await new Promise(resolve=>setTimeout(resolve,80));waiting=false;return new Map()}
  const gates=Array.from({length:20},()=>({a:0,b:0,target:1,gate_i:3}))
  await optimize(tables,gates,3,'heartbeat',true,undefined,100,()=>{if(waiting)reportsWhileWaiting++})

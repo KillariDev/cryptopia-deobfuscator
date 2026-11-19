@@ -119,6 +119,23 @@ try {
 	const result: CircuitData = JSON.parse(await readFile(path + '-latest.json', 'utf8'))
 	assert.equal(result.gate_count, original.length)
 	assert.equal(circuitWireCost(result.gates.map(([a, b, target, gate_i]) => ({ a, b, target, gate_i }))).effectivePairs, 1)
+
+	Object.assign(config.workers, { keepBusy: true, broadSearchSeconds: 60 })
+	Object.assign(config.synthesis, { satSweeping: false, mixedBasis: false, blockCancellation: true, affine: false, quadratic: false, factored: false })
+	config.search.dependencyCuts = false
+	let broadDispatches = 0
+	WorkerPool.prototype.run = async function(gates, _wires, progress, signal, _budget, _restart, solver, round) {
+		if (solver === 'broad') {
+			broadDispatches++
+			progress?.(gates.length, { scope: 'broad', stage: 'searching', broadExhausted: true, passes: 1, subsets: 1, checks: 1, improvements: 0 })
+			return gates
+		}
+		if (round === 2) throw done
+		Atomics.store(new Int32Array(signal!), 0, 1)
+		return gates
+	}
+	await assert.rejects(splitTaskAndRun(join(directory, 'exhausted'), 'unused', { originalCircuit: circuit, inputCircuit: circuit }), error => error === done)
+	assert.equal(broadDispatches, 1, 'unchanged rounds do not dispatch an exhausted broad scan again')
 } finally {
 	Object.assign(config, saved)
 	WorkerPool.prototype.run = run

@@ -544,23 +544,16 @@ assert.match(lateStatus, /Warning: 1 worker update delayed/)
 assert.match(lateStatus, /Round time: 1m 30s \/ 25m 0s/)
 assert.ok(!formatStatus({ effectivePairs: 0, previousPairs: 0, original: 0, roundStart: 0, candidate: 0, previous: 0, statuses: [], elapsedMs: 0 }).includes('NaN'))
 
-const { TemplateLibrary } = await import('./templates.js')
 const { functionKey, circuitState, semanticCircuits, meetInMiddle, encodeGates, decodeGates, truthKey } = await import('./semantic.js')
 const { saturateCircuit, CircuitEqualityGraph } = await import('./equality.js')
-const library = new TemplateLibrary(100, 4)
 for (let f = 0; f < 16; f++) for (let h = 0; h < 16; h++) {
 	const gates = [{ a: 0, b: 1, target: 2, gate_i: f }, { a: 1, b: 0, target: 2, gate_i: h }]
-	const rewritten = library.rewrite(gates)
-	assert.equal(functionKey(gates, 3), functionKey(rewritten, 3))
-	assert.ok(rewritten.length < gates.length)
 	assert.deepEqual(decodeGates(encodeGates(gates)), gates)
 }
 const unsafe = [{ a: 0, b: 1, target: 0, gate_i: 3 }, { a: 0, b: 1, target: 0, gate_i: 3 }]
-assert.equal(functionKey(library.rewrite(unsafe), 2), functionKey(unsafe, 2))
-assert.equal(library.learn(singleGate, []), false)
 const not0 = { a: 0, b: 0, target: 0, gate_i: 15 }, not1 = { a: 0, b: 0, target: 1, gate_i: 15 }
 const separated = [not0, not1, not0]
-const saturated = saturateCircuit(separated, 2, library, 100, 500)
+const saturated = saturateCircuit(separated, 2, 100, 500)
 assert.ok(saturated && saturated.length < separated.length)
 assert.equal(functionKey(saturated!, 2), functionKey(separated, 2))
 const egraph = new CircuitEqualityGraph()
@@ -657,7 +650,7 @@ try {
 	Object.assign(config.synthesis, synthesisOptions)
 	resetStrategyStats()
 }
-console.log('Template, semantic generation, meet-in-the-middle, equality graph, forward semantic search and strategy summary regressions passed')
+console.log('Semantic generation, meet-in-the-middle, equality graph, forward semantic search and strategy summary regressions passed')
 
 assert.equal(parseConfig({ database: { memoryMapBytes: 0 } }).database.memoryMapBytes, 0)
 assert.throws(() => parseConfig({ database: { format: 'unknown' } }))
@@ -946,13 +939,9 @@ try {
 	await putPortfolio(5, 2, [and012, and234])
 	portfolio.resetStatistics()
 	const fiveWindow = [and012, and234, not0, not0]
-	const templatesEnabled = config.synthesis.templates
-	try {
-		config.synthesis.templates = false
-		const result = await massOptimizeStep(portfolio, portfolioCache, new LimitedMap(100), fiveWindow, 4, false, false)
-		assert.deepEqual(result.gates, [and012, and234])
-		assert.equal(functionKey(result.gates, 5), functionKey(fiveWindow, 5))
-	} finally { config.synthesis.templates = templatesEnabled }
+	const result = await massOptimizeStep(portfolio, portfolioCache, new LimitedMap(100), fiveWindow, 4, false, false)
+	assert.deepEqual(result.gates, [and012, and234])
+	assert.equal(functionKey(result.gates, 5), functionKey(fiveWindow, 5))
 	assert.deepEqual(portfolio.statistics().map(stat => stat.windows), [0, 0, 0, 1])
 	assert.equal(portfolio.statistics()[3].gatesRemoved, 2)
 	assert.equal((await portfolio.findReplacements([{ wires: 6, mappedGates: fiveWindow }], portfolioCache)).size, 0)

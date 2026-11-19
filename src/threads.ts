@@ -1,5 +1,4 @@
 import type { SharedTable } from './shared-table.js'
-import { TemplateLibrary, TemplateRule } from './templates.js'
 import { config } from './config.js'
 import { Worker } from 'worker_threads'
 import { availableParallelism } from 'os'
@@ -14,13 +13,14 @@ export function configuredWorkerCount() {
 }
 
 type Job = { solver: 'local' | 'affine' | 'broad' | 'shuffle', restartOnImprovement: boolean, round: number, broadStrategy?: string, splitCircuit: boolean, budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
+type WorkerSlot = { worker: Worker, index: number, job?: Job, retiring?: boolean }
 export class WorkerPool {
-	private slots: { worker: Worker, index: number, job?: Job, retiring?: boolean }[] = []
+	private slots: WorkerSlot[] = []
+	private broadSlot?: WorkerSlot
 	private queue: Job[] = []
 	private failure?: Error
 	private concurrency: number
 	private reserveBroad = false
-	private shared = new TemplateLibrary(config.workers.sharedTemplateEntries, config.synthesis.maximumWires, config.synthesis.maximumWindowGates)
 	constructor(private size: number, private workerUrl = new URL('./worker.js', import.meta.url), private sharedTables: SharedTable[] = [], private seed?: number, private maximumChecks = 0) {
 		if (!Number.isSafeInteger(size) || size < 1) throw new Error('Invalid worker pool size')
 		this.concurrency = size
@@ -79,7 +79,11 @@ export class WorkerPool {
 			if (active.length >= this.concurrency) return
 			if (next.solver !== 'broad' && this.reserveBroad && this.concurrency > 1 &&
 				active.filter(slot => slot.job!.solver !== 'broad').length >= this.concurrency - 1) return
-			let slot = this.slots.find(slot => !slot.job)
+			if (this.broadSlot?.retiring) this.broadSlot = undefined
+			const reserved = this.reserveBroad && this.concurrency > 1 ? this.broadSlot : undefined
+			let slot = next.solver === 'broad' && this.broadSlot && !this.broadSlot.job
+				? this.broadSlot
+				: this.slots.find(slot => !slot.job && (next.solver === 'broad' || slot !== reserved))
 			if (!slot) {
 				if (this.slots.length >= this.size) return
 				let index = 0
@@ -88,13 +92,8 @@ export class WorkerPool {
 				slot = { worker, index }
 				const current = slot
 				this.slots.push(current)
-				worker.on('message', (message: { gates?: Gate[], error?: string, progress?: number, activity?: WorkerActivity, snapshot?: Gate[], sharedTemplates?: TemplateRule[] }) => {
+				worker.on('message', (message: { gates?: Gate[], error?: string, progress?: number, activity?: WorkerActivity, snapshot?: Gate[] }) => {
 					if (current.retiring) return
-					if (config.workers.shareTemplates && message.sharedTemplates?.length) {
-						this.shared.importShared(message.sharedTemplates, config.workers.sharedTemplateBatch, true)
-						const rules = this.shared.drainShared(config.workers.sharedTemplateBatch)
-						if (rules.length) for (const peer of this.slots) if (peer !== current) peer.worker.postMessage({ sharedTemplates: rules })
-					}
 					const job = current.job
 					const activity = message.activity ? { ...message.activity, workerId: current.worker.threadId } : undefined
 					if (message.progress !== undefined) { job?.onProgress?.(message.progress, activity, message.snapshot); return }
@@ -105,15 +104,12 @@ export class WorkerPool {
 					job?.resolve(message.gates!)
 					this.dispatch()
 				})
-				if (config.workers.shareTemplates) {
-					const rules = this.shared.exportShared(config.workers.sharedTemplateEntries)
-					for (let i = 0; i < rules.length; i += config.workers.sharedTemplateBatch) worker.postMessage({ sharedTemplates: rules.slice(i, i + config.workers.sharedTemplateBatch) })
-				}
 				worker.on('error', error => { if (!current.retiring) this.fail(error) })
 				worker.on('exit', code => {
 					if (!this.failure && !current.retiring) this.fail(new Error(`Worker exited unexpectedly (${code})`))
 				})
 			}
+			if (next.solver === 'broad') this.broadSlot = slot
 			slot.job = this.queue.shift()!
 			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs, restartOnImprovement: slot.job.restartOnImprovement, solver: slot.job.solver, round: slot.job.round, broadStrategy: slot.job.broadStrategy, splitCircuit: slot.job.splitCircuit })
 		}

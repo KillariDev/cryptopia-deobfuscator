@@ -53,7 +53,7 @@ assert.equal(createPolynomialEquivalenceChecker(original, 20, 100000, 10000000, 
 const saved = structuredClone(config), tables = new RainbowPortfolio([{ wires: 3, gates: 3, db: new sqlite3.Database(':memory:') }])
 try {
 	config.search.strategyAdaptive = false
-	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, templates: false, affine: false, quadratic: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, affine: false, quadratic: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
 	const optimize = (input: Gate[]) => massOptimizeStep(tables, new LimitedMap(100), new LimitedMap(100), input, input.length, true, true, false)
 	assert.equal((await optimize(original)).changed, false, 'do not admit a sampled false positive through the real variable strategy')
 	const valid = [...basis, ...basis.slice().reverse(), { a: 0, b: 0, target: 19, gate_i: 15 }]

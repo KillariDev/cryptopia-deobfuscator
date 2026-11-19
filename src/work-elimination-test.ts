@@ -11,7 +11,6 @@ import { WindowFingerprints } from './fingerprints.js'
 import { selectIntervals, WeightedInterval } from './intervals.js'
 import { LookupStatements } from './lookup-statements.js'
 import { SubsetPreparation, massOptimizeStep, optimizeSubset } from './processing.js'
-import { templates } from './strategies.js'
 import { RainbowPortfolio, initializeRainbowTables, openRainbowPortfolio } from './rainbow-portfolio.js'
 import { databaseFilename, hasCanonicalCoverage, closeRainbowTable, getReplacersByIds } from './rainbowtable.js'
 import { encodeGates, functionKey } from './semantic.js'
@@ -156,31 +155,20 @@ await closed
 
 const memory = new sqlite3.Database(':memory:')
 const portfolio = new RainbowPortfolio([{ db: memory, wires: 3, gates: 1 }])
-const originalRewrite = templates.rewrite.bind(templates)
-let scans = 0
 try {
 	await runSQL(memory, 'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL)')
 	assert.equal(await hasCanonicalCoverage(memory, 3, 1), false)
-	templates.rewrite = gates => { scans++; return originalRewrite(gates) }
 	const gates = Array.from({ length: 4 }, (_, i) => ({ a: (i + 1) % 4, b: 0, target: i, gate_i: 3 }))
 	const preparation = new SubsetPreparation(gates)
 	assert.equal(preparation.fingerprint(gates), preparation.fingerprint(gates))
 	for (const size of [2, 3, 4]) await massOptimizeStep(portfolio, new LimitedMap(100), new LimitedMap(100), gates, size, false, false, true, preparation)
-	assert.equal(scans, 1, 'unchanged subsets scan templates once across sizes')
-	templates.rewrite = originalRewrite
 	const sliceActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const }
 	assert.deepEqual(await optimizeSubset(portfolio, gates, new LimitedMap(100), new LimitedMap(100), 3, 199, 'heavy', () => false, sliceActivity, () => {}, new LimitedMap(100), 'rainbow'), gates)
 	assert.ok(sliceActivity.subsets > 0)
 	assert.equal(sliceActivity.checks, sliceActivity.subsets * 2, 'only sizes 2 and 3 run, once each')
-	templates.rewrite = gates => { scans++; return originalRewrite(gates) }
-	const version = templates.version
-	const before = [n0, { ...n0, target: 1 }, n0, { ...n0, target: 1 }, n0]
-	assert.equal(templates.learn(before, [n0]), true)
-	assert.ok(templates.version > version)
-	preparation.templateGates(); assert.equal(scans, 2)
 	await assert.rejects(massOptimizeStep(portfolio, new LimitedMap(10), new LimitedMap(10), gates.slice(), 2, false, false, true, preparation), /different circuit/)
-	templates.rewrite = originalRewrite
 	const activity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' as const }
+	await runSQL(memory, 'INSERT INTO InputOutputReplacers VALUES (?,?)', [Buffer.from(functionKey([], 3), 'hex'), encodeGates([])])
 	const source = Array.from({ length: 300 }, () => n0)
 	const nativeArray = ChunkedSequence.prototype.toArray
 	let snapshots = 0, edits = 0
@@ -190,7 +178,7 @@ try {
 		assert.ok(edits > 1); assert.equal(snapshots, 1)
 		assert.deepEqual(calculateAllOutputsArray(result, generateCombinations(3)), calculateAllOutputsArray(source, generateCombinations(3)))
 	} finally { ChunkedSequence.prototype.toArray = nativeArray }
-} finally { templates.rewrite = originalRewrite; await portfolio.close() }
+} finally { await portfolio.close() }
 
 const directory = await mkdtemp(join(tmpdir(), 'coverage-proof-')), previousCwd = process.cwd()
 try {

@@ -8,8 +8,7 @@ import { splitTaskAndRun } from './processing.js'
 
 const fixtureSource = `
 import {parentPort} from 'node:worker_threads';
-parentPort.on('message', async ({gates,solver,stopSignal,sharedTemplates}) => {
- if(sharedTemplates !== undefined) return;
+parentPort.on('message', async ({gates,solver,stopSignal}) => {
  const signal=new Int32Array(stopSignal);
  parentPort.postMessage({progress:gates.length,activity:{scope:solver==='broad'?'broad':undefined,passes:0,subsets:0,checks:0,improvements:0,stage:'searching'}});
  const end=performance.now()+(solver==='broad'?120:8);

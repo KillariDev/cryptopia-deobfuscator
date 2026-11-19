@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { RoundStrategyPicker } from './strategy-picker.js'
 
-const choices = ['rainbow', 'variables', 'templates'].map(name => ({ name }))
+const choices = ['rainbow', 'variables', 'forward-semantic-search'].map(name => ({ name }))
 const first = new RoundStrategyPicker(choices.map(choice => choice.name))
 const second = new RoundStrategyPicker(choices.map(choice => choice.name), 1)
 first.beginRound(1)
@@ -15,7 +15,7 @@ assert.equal(first.pick(choices)?.name, 'rainbow', 'new jobs in the same round p
 first.beginRound(2)
 second.beginRound(2)
 assert.equal(first.pick(choices)?.name, 'rainbow', 'a reduction keeps the strategy for the next round')
-assert.equal(second.pick(choices)?.name, 'templates', 'a dry round moves to the next strategy')
+assert.equal(second.pick(choices)?.name, 'forward-semantic-search', 'a dry round moves to the next strategy')
 assert.equal(second.pick(choices.slice(0, 2)), undefined, 'ineligible regions do not switch strategies mid-round')
 first.observe('variables', 9)
 first.beginRound(3)
@@ -43,7 +43,7 @@ const db = new sqlite3.Database(':memory:')
 const tables = new RainbowPortfolio([{ wires: 3, gates: 2, db }])
 try {
 	config.search.strategyAdaptive = true
-	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, templates: false, affine: false, quadratic: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, affine: false, quadratic: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
 	await runSQL(db,'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
 	const cn = {a:1,b:0,target:0,gate_i:3}, not1 = {a:0,b:0,target:1,gate_i:15}
 	const input = [cn,not1,cn], expected = [not1,{...not1,target:0}]

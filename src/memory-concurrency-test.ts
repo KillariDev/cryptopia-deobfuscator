@@ -22,8 +22,7 @@ assert.ok(memory.rss > 0 && memory.budget > 0 && memory.free >= 0)
 
 const fixture = new URL('data:text/javascript,' + encodeURIComponent(`
 import {parentPort} from 'node:worker_threads';
-parentPort.on('message', async ({gates,sharedTemplates}) => {
- if(sharedTemplates!==undefined)return;
+parentPort.on('message', async ({gates}) => {
  parentPort.postMessage({progress:gates.length});
  await new Promise(resolve=>setTimeout(resolve,100));
  parentPort.postMessage({gates});

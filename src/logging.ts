@@ -29,6 +29,7 @@ export function formatProgress(initialGates: number, candidateGates: number, com
 
 export type WorkerActivity = {
 	scope?: 'broad'
+	broadExhausted?: boolean
 	cutPatch?: CutPatch
 	workerId?: number
 	activeStrategy?: string

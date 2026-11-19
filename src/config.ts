@@ -8,7 +8,7 @@ export type RainbowTableSpec = { wires: number, gates: number }
 export const defaults = {
 	runtime: { heapMegabytes: 16384 },
 	files: { dataDirectory: 'data', latestName: 'latest.json', workerDirectory: 'worker', progressDirectory: 'progress', databaseDirectory: '.' },
-	workers: { broadSearchIdleSeconds: 30, keepBusy: true, broadSearchSeconds: 60, wholeCircuitMaximumGates: 2000, maximum: 24, minimumChunkGates: 100, maximumChunkFraction: 0.5, jobsPerWorker: 4, jobSeconds: 120, adaptiveConcurrency: true, initialConcurrency: 4, concurrencySampleRounds: 2, concurrencyDatabaseFraction: 0.6, concurrencyRateTolerance: 0.05, memoryBudgetMegabytes: 8192, shareTemplates: true, sharedTemplateSeconds: 15, sharedTemplateEntries: 64, sharedTemplateBatch: 16 },
+	workers: { broadSearchIdleSeconds: 30, keepBusy: true, broadSearchSeconds: 60, wholeCircuitMaximumGates: 2000, maximum: 24, minimumChunkGates: 100, maximumChunkFraction: 0.5, jobsPerWorker: 4, jobSeconds: 120, adaptiveConcurrency: true, initialConcurrency: 4, concurrencySampleRounds: 2, concurrencyDatabaseFraction: 0.6, concurrencyRateTolerance: 0.05, memoryBudgetMegabytes: 8192 },
 	timing: { checkpointSeconds: 30, roundMinutes: 25, improvedRoundMinutes: 5, summarySeconds: 30, workerReportSeconds: 5, databaseLogSeconds: 60, standaloneSaveSeconds: 60 },
 	logging: { verbose: false, generationDiagnostics: true, generationDiagnosticsMinimumSeconds: 5, eventLoopResolutionMilliseconds: 20 },
 	validation: { checkpointInputs: 20, probabilisticInputs: 202, maximumWires: 64 },
@@ -16,7 +16,7 @@ export const defaults = {
 	cache: { lookupPolicy: 'lru' as 'fifo' | 'lru', lookupEntries: 1000000, processedEntries: 1000000, shuffleEntries: 100000, subsetEntries: 100000, windowKeyBytes: 16777216 },
 	database: { tables: [{ wires: 3, gates: 6 }, { wires: 4, gates: 5 }, { wires: 5, gates: 2 }], queryBatchSize: 900, lookupBatchMilliseconds: 0, statementCacheEntries: 16, sharedTables: true, sharedTableBytes: 33554432, sharedTableMaximumRows: 100000, memoryMapBytes: 268435456, generationStates: 0, generationBatchRows: 3000, generationReadRows: 4096, generationSqlParameters: 8192, generationPreparedInserts: true, generationCompactBindings: true, generationStagingWriters: 1, generationAppendStaging: false, generationAggregateMerge: true, generationCountFinalInserts: false, generationCandidateCacheMegabytes: 32, generationStreamStaging: true, generationStagingQueueBatches: 2, generationDirectInputMerge: true, generationSortStaging: false, generationStatementCacheEntries: 8, generationCacheMegabytes: 256, generationTempStore: 'file' as 'file' | 'memory', generationJournalMode: 'wal' as 'wal' | 'delete', generationSynchronous: 'full' as 'full' | 'normal', generationWorkers: 8, generationPrefetch: true, generationPrefetchMegabytes: 16, generationQueueBatches: 2, generationMinimumWork: 100000, etaWindowSamples: 5, etaWarmupSamples: 3, etaSmoothing: 0.2, etaMaximumSlowdown: 1, etaTrendWindowSamples: 60, etaTrendMinimumSamples: 10, etaTrendMinimumWorkGrowth: 0.25 },
 	benchmark: { generationStreamingComparison: false, generationFinalComparison: false, finalLookupOutputName: 'final-lookup-benchmark.json', generationWriterComparison: false, generationPrefetchComparison: false, generationStagingComparison: false, mergeOutputName: 'merge-benchmark.json', stagingWideSqlParameters: 16384, stagingRows: 200000, stagingOutputName: 'staging-benchmark.json', dedupSeenRows: [10000, 100000, 1000000], dedupCandidateFunctions: 2000, dedupMasksPerFunction: 4, dedupOutputName: 'dedup-benchmark.json', generationTables: [{ wires: 3, gates: 3 }, { wires: 4, gates: 2 }], generationOutputName: 'generation-benchmark.json', generationTimeoutSeconds: 600, variants: [] as string[], decayFactor: 0.98, mode: 'comparison' as 'comparison' | 'ablation', caseManifest: 'benchmarks/cases.json', caseOutputDirectory: 'benchmark-cases', seconds: 10, repeats: 3, seed: 1729, workerCounts: [1, 2, 4], maximumChecks: 0, maximumOverrunSeconds: 30, outputName: 'benchmark.json' },
-	synthesis: { factored: true, blockCancellation: true, satSweeping: true, broadSatCutsFirst: false, mixedBasis: true, factoredMaximumNodes: 200000, factoredMaximumEdges: 16000000, quadratic: true, affine: true, affineMaximumWindowGates: 256, affineMaximumTerms: 100000, affineMaximumOperations: 10000000, templates: true, templateEntries: 10000, maximumWires: 3, maximumWindowGates: 8, maximumReplacementGates: 3, states: 2000, forwardSemanticSearch: true, smt: true, meetInMiddle: true, equalitySaturation: true },
+	synthesis: { factored: true, blockCancellation: true, satSweeping: true, broadSatCutsFirst: false, mixedBasis: true, factoredMaximumNodes: 200000, factoredMaximumEdges: 16000000, quadratic: true, affine: true, affineMaximumWindowGates: 256, affineMaximumTerms: 100000, affineMaximumOperations: 10000000, maximumWires: 3, maximumWindowGates: 8, maximumReplacementGates: 3, states: 2000, forwardSemanticSearch: true, smt: true, meetInMiddle: true, equalitySaturation: true },
 }
 export type SolverConfig = typeof defaults
 
@@ -31,7 +31,6 @@ const strategySettings = {
 	factored: { enabled: 'synthesis.factored' },
 	gf2Affine: { enabled: 'synthesis.affine' },
 	quadratic: { enabled: 'synthesis.quadratic' },
-	templates: { enabled: 'synthesis.templates', cacheEntries: 'synthesis.templateEntries', share: 'workers.shareTemplates', shareSeconds: 'workers.sharedTemplateSeconds', sharedEntries: 'workers.sharedTemplateEntries', sharedBatch: 'workers.sharedTemplateBatch' },
 	forwardSemantic: { enabled: 'synthesis.forwardSemanticSearch' },
 	smt: { enabled: 'synthesis.smt' },
 	meetInMiddle: { enabled: 'synthesis.meetInMiddle' },
@@ -46,6 +45,7 @@ function expandStrategySettings(value: object) {
 	if (!Object.prototype.hasOwnProperty.call(value, 'strategies')) return sections
 	if (!strategies || typeof strategies !== 'object' || Array.isArray(strategies)) throw new Error('Invalid config section: strategies')
 	for (const [strategy, settings] of Object.entries(strategies)) {
+		if (strategy === 'templates') continue // Settings from before template removal.
 		if (!Object.prototype.hasOwnProperty.call(strategySettings, strategy)) throw new Error(`Unknown strategy group: ${strategy}`)
 		if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error(`Invalid strategy group: ${strategy}`)
 		const fields = strategySettings[strategy as keyof typeof strategySettings] as Record<string, string>
@@ -73,8 +73,9 @@ export function parseConfig(value: unknown): SolverConfig {
 				continue
 			}
 			// Legacy strategy timers/cadence are accepted but no longer affect execution.
-			if (section === 'synthesis' && ['timeoutMs', 'affineWholeCircuitMinutes', 'attemptEvery'].includes(key)) continue
+			if (section === 'synthesis' && ['timeoutMs', 'affineWholeCircuitMinutes', 'attemptEvery', 'templates', 'templateEntries'].includes(key)) continue
 			if (section === 'search' && ['strategySpecialization', 'strategyExplorationProbability', 'strategyDecayHalfLifeSeconds'].includes(key)) continue
+			if (section === 'workers' && ['shareTemplates', 'sharedTemplateSeconds', 'sharedTemplateEntries', 'sharedTemplateBatch'].includes(key)) continue
 			const target = result[section as keyof SolverConfig] as Record<string, unknown>
 			if (!Object.prototype.hasOwnProperty.call(target, key)) throw new Error(`Unknown config setting: ${section}.${key}`)
 			if (section === 'benchmark' && key === 'variants') {

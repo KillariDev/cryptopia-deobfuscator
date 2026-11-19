@@ -10,7 +10,7 @@ const db=new sqlite3.Database(':memory:'), tables=new RainbowPortfolio([{wires:3
 try{
  config.search.strategyAdaptive=false;config.search.variableElimination=false;config.search.probabilistic=false
  Object.assign(config.search,{subsetMinimum:2,subsetMaximum:2,sliceMinimum:2,sliceMaximum:2,workerShufflePasses:1})
- Object.assign(config.synthesis,{templates:false,affine:false,quadratic:false,factored:false,blockCancellation:false,satSweeping:false,forwardSemanticSearch:false,smt:false,meetInMiddle:false,equalitySaturation:false})
+ Object.assign(config.synthesis,{affine:false,quadratic:false,factored:false,blockCancellation:false,satSweeping:false,forwardSemanticSearch:false,smt:false,meetInMiddle:false,equalitySaturation:false})
  config.timing.workerReportSeconds=60
  await runSQL(db,'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
  await runSQL(db,'INSERT INTO InputOutputReplacers VALUES (?,?)',[Buffer.from(functionKey([],3),'hex'),encodeGates([])])

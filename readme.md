@@ -99,7 +99,7 @@ Local GF(2) affine synthesis (`strategies.gf2Affine.enabled`, enabled by default
 the eligible synthesis choices. It is not an unconditional startup or worker
 prepass. It searches affine runs and smaller subwindows inside the selected
 region, using its own `strategies.polynomialLimits.maximumWindowGates` bound (default 256) and
-`validation.maximumWires`, independently of the tiny SMT/template limits.
+`validation.maximumWires`, independently of the small synthesis limits.
 Exact symbolic verification is required for every accepted reduction. The solver
 also composes Boolean polynomials through mixed gates: nonlinear intermediates
 may cancel to an affine map. It can rewrite that map directly, or find smaller

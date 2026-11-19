@@ -2,8 +2,7 @@ import { isBetterCircuit } from './circuit-cost.js'
 import { broadSearch } from './broad-search.js'
 import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy-stats.js'
 import { config } from './config.js'
-import { templates, wholeCircuitAffineSearch } from './strategies.js'
-import { TemplateRule } from './templates.js'
+import { wholeCircuitAffineSearch } from './strategies.js'
 import { parentPort, workerData } from 'worker_threads'
 import { createOptimizerCaches, optimize, shuffleRowsWithDependentGateSwap } from './processing.js'
 import { openRainbowPortfolio } from './rainbow-portfolio.js'
@@ -12,13 +11,8 @@ import { WORKER_ROUND_MS } from './job.js'
 
 let portfolio: ReturnType<typeof openRainbowPortfolio> | undefined
 const caches = createOptimizerCaches(workerData?.workerIndex ?? 0)
-let lastShared = performance.now()
-parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, broadStrategy, solver = 'local', restartOnImprovement = false, splitCircuit = false, sharedTemplates }: { sharedTemplates?: TemplateRule[], gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, broadStrategy?: string, restartOnImprovement?: boolean, splitCircuit?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
+parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, broadStrategy, solver = 'local', restartOnImprovement = false, splitCircuit = false }: { gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, broadStrategy?: string, restartOnImprovement?: boolean, splitCircuit?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
 	try {
-		if (sharedTemplates !== undefined) {
-			if (config.workers.shareTemplates) templates.importShared(sharedTemplates, config.workers.sharedTemplateBatch)
-			return
-		}
 		if (solver === 'shuffle') {
 			resetStrategyStats()
 			const started = performance.now(), deadline = started + budgetMs
@@ -56,12 +50,9 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 			const snapshot = improves ? candidate : undefined
 			if (candidate) lastConsideredImprovement = activity.improvements
 			if (snapshot) lastSnapshot = snapshot
-			const now = performance.now()
-			const sharedTemplates = config.workers.shareTemplates && now - lastShared >= config.workers.sharedTemplateSeconds * 1000 ? templates.drainShared(config.workers.sharedTemplateBatch) : []
-			if (sharedTemplates.length) lastShared = now
-			parentPort!.postMessage({ progress: count, activity, snapshot, sharedTemplates })
+			parentPort!.postMessage({ progress: count, activity, snapshot })
 		}, activity => (restartOnImprovement && lastSnapshot.length < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0) || (workerData?.maximumChecks > 0 && (activity?.checks ?? 0) >= workerData.maximumChecks), (count, improvements) => count < lastSnapshot.length || (count === lastSnapshot.length && improvements > lastConsideredImprovement), true)
-		parentPort!.postMessage({ gates: result, sharedTemplates: config.workers.shareTemplates ? templates.drainShared(config.workers.sharedTemplateBatch) : [] })
+		parentPort!.postMessage({ gates: result })
 	} catch (error) {
 		parentPort!.postMessage({ error: String(error) })
 	}
