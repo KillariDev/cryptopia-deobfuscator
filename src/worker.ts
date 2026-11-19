@@ -10,8 +10,9 @@ import { Gate } from './types.js'
 import { WORKER_ROUND_MS } from './job.js'
 
 let portfolio: ReturnType<typeof openRainbowPortfolio> | undefined
-const caches = createOptimizerCaches(workerData?.workerIndex ?? 0)
-parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, broadStrategy, solver = 'local', restartOnImprovement = false, splitCircuit = false }: { gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, broadStrategy?: string, restartOnImprovement?: boolean, splitCircuit?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
+let localCaches: ReturnType<typeof createOptimizerCaches> | undefined
+let broadCaches: ReturnType<typeof createOptimizerCaches> | undefined
+parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, localIndex, broadStrategy, solver = 'local', restartOnImprovement = false, splitCircuit = false }: { gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, localIndex?: number, broadStrategy?: string, restartOnImprovement?: boolean, splitCircuit?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
 	try {
 		if (solver === 'shuffle') {
 			resetStrategyStats()
@@ -32,6 +33,7 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 		// Open once per persistent worker and wait for every connection to be ready.
 		const tables = await (portfolio ??= openRainbowPortfolio(config.search.rainbow ? config.database.tables : [], workerData?.sharedTables ?? []))
 		if (solver === 'broad') {
+			const caches = broadCaches ??= createOptimizerCaches(workerData?.workerIndex ?? 0)
 			caches.broadStrategyPicker.beginRound(round, broadStrategy)
 			resetStrategyStats()
 			const stop = stopSignal ? new Int32Array(stopSignal) : undefined
@@ -39,6 +41,7 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 			parentPort!.postMessage({ gates: result })
 			return
 		}
+		const caches = localCaches ??= createOptimizerCaches(localIndex ?? workerData?.workerIndex ?? 0)
 		caches.strategyPicker.beginRound(round)
 		let lastSnapshot = gates
 		let lastConsideredImprovement = 0

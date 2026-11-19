@@ -6,6 +6,8 @@ import { forwardSemanticSearch, meetInMiddle } from './semantic.js'
 import { saturateCircuit } from './equality.js'
 import { synthesizeSMT } from './smt.js'
 import { Gate } from './types.js'
+import { WorkerPool } from './threads.js'
+import { createSharedTable } from './shared-table.js'
 const picker = new StrategyPicker(['GF2', 'forward', 'Z3'])
 const choices = ['GF2', 'forward', 'Z3'].map(name => ({ name }))
 assert.deepEqual(Array.from({ length: 6 }, () => picker.pick(choices)?.name), ['GF2', 'forward', 'Z3', 'GF2', 'forward', 'Z3'])
@@ -30,4 +32,23 @@ let cancellationChecks = 0
 const started = performance.now()
 assert.equal(await synthesizeSMT([not], 2, 3, 30000, () => { cancellationChecks++; return performance.now() - started > 10 }), undefined)
 assert.ok(cancellationChecks > 1, 'SMT observes cancellation while its isolate is running')
+const search = { ...config.search }
+const tables = config.database.tables
+const table = { wires: 2, gates: 1 }
+const pool = new WorkerPool(2, undefined, [createSharedTable(table, [], 1024)!])
+try {
+	Object.assign(config.search, { rainbow: true, strategyAdaptive: true })
+	config.database.tables = [table]
+	pool.setBroadReservation(true)
+	await pool.run([not], 2, undefined, undefined, 100, false, 'broad', 1)
+	let firstLocalStrategy: string | undefined
+	await pool.run([not], 2, (_, activity) => { firstLocalStrategy ??= activity?.activeStrategy },
+		undefined, 20, false, 'local', 1)
+	assert.equal(firstLocalStrategy, 'rainbow', 'starting a broad worker first preserves the first local strategy')
+} finally {
+	await pool.close()
+	Object.assign(config.search, search)
+	config.database.tables = tables
+}
+
 console.log('Fixed solver rotation, eligibility skips, shared job expiry, cancellation and retry safety passed')

@@ -13,7 +13,7 @@ export function configuredWorkerCount() {
 }
 
 type Job = { solver: 'local' | 'affine' | 'broad' | 'shuffle', restartOnImprovement: boolean, round: number, broadStrategy?: string, splitCircuit: boolean, budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
-type WorkerSlot = { worker: Worker, index: number, job?: Job, retiring?: boolean }
+type WorkerSlot = { worker: Worker, index: number, localIndex?: number, job?: Job, retiring?: boolean }
 export class WorkerPool {
 	private slots: WorkerSlot[] = []
 	private broadSlot?: WorkerSlot
@@ -110,8 +110,14 @@ export class WorkerPool {
 				})
 			}
 			if (next.solver === 'broad') this.broadSlot = slot
+			if (next.solver === 'local' && slot.localIndex === undefined) {
+				// A worker that has only run broad jobs must not consume a local strategy slot.
+				let localIndex = 0
+				while (this.slots.some(worker => worker.localIndex === localIndex)) localIndex++
+				slot.localIndex = localIndex
+			}
 			slot.job = this.queue.shift()!
-			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs, restartOnImprovement: slot.job.restartOnImprovement, solver: slot.job.solver, round: slot.job.round, broadStrategy: slot.job.broadStrategy, splitCircuit: slot.job.splitCircuit })
+			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs, restartOnImprovement: slot.job.restartOnImprovement, solver: slot.job.solver, round: slot.job.round, localIndex: slot.localIndex, broadStrategy: slot.job.broadStrategy, splitCircuit: slot.job.splitCircuit })
 		}
 	}
 	private fail(error: Error) {
