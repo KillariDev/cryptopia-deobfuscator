@@ -4,6 +4,7 @@ import { opaqueRainbow } from './opaque-rainbow.js'
 import { RoundStrategyPicker, StrategyPicker } from './strategy-picker.js'
 import { searchDependencyCuts } from './dependency-cuts.js'
 import { setImmediate as yieldToCoordinator } from 'node:timers/promises'
+import { synthesizeQuadraticShear } from './quadratic-shear.js'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { structuralChoices, structuralNames, structuralRewrite, StructuralStrategy } from './structural-strategies.js'
 import { mergeDisjointRoundResults, RoundCutPatches, roundChunkSize, roundSearchPlan, roundSearchResult } from './round-search.js'
@@ -456,6 +457,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		...(findUselessVarsSetting && sliceSize > 2 ? [{ name: 'variables' }] : []),
 		...(lookup ? [{ name: 'rainbow' }] : []),
 		...synthesisNames.map(name => ({ name })),
+		...(synthesisBudget?.broad && config.synthesis.quadraticShear ? [{ name: 'quadratic-shear' }] : []),
 		...(synthesisBudget?.broad && (config.synthesis.affine || config.synthesis.quadratic) ? [{ name: 'symbolic' }] : []),
 	]
 	const useStrategyPicker = config.search.strategyAdaptive || synthesisBudget?.forceStrategy
@@ -502,6 +504,14 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	if (selected === 'rainbow' && lookup && synthesisBudget?.dependencyRegion) {
 		const result = await opaqueRainbow(originalGates, tables, ioIdentifierCache, () => performance.now() >= synthesisBudget.deadline || synthesisBudget.shouldStop?.() === true)
 		if (result) { recordStrategy('rainbow', { opaque: true }, attemptStarted, originalGates.length, result.length, true); return finish({gates: result, changed:true}) }
+	}
+	if (selected === 'quadratic-shear' && synthesisBudget?.broad && config.synthesis.quadraticShear) {
+		const stopped = () => performance.now() >= synthesisBudget.deadline || synthesisBudget.shouldStop?.() === true
+		const result = synthesizeQuadraticShear(originalGates, config.validation.maximumWires,
+			config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, stopped)
+		recordStrategy(selected, { maximumWires: Math.min(64, config.validation.maximumWires) },
+			attemptStarted, originalGates.length, result?.length ?? originalGates.length, result !== undefined)
+		return finish({ gates: result ?? originalGates, changed: result !== undefined })
 	}
 	if (selected === 'symbolic') {
 		const result = wholeCircuitAffineSearch(originalGates, Math.max(0, (synthesisBudget?.deadline ?? performance.now()) - performance.now()), () => synthesisBudget?.shouldStop?.() === true)
@@ -860,6 +870,7 @@ const localStrategyOrder = () => [
 ].filter(strategy => !smallSynthesisStrategies.has(strategy) || config.search.subsetMinimum <= config.synthesis.maximumWindowGates)
 export const broadStrategyOrder = () => [
 	...(config.synthesis.satSweeping ? ['sat-sweeping'] : []),
+	...(config.synthesis.quadraticShear ? ['quadratic-shear'] : []),
 	...(config.synthesis.mixedBasis ? ['mixed-basis'] : []),
 	...(config.synthesis.blockCancellation ? ['block-cancellation'] : []),
 	...(config.synthesis.affine || config.synthesis.quadratic ? ['symbolic'] : []),

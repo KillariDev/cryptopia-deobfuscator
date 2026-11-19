@@ -23,7 +23,7 @@ try {
 	// This case isolates contiguous broad windows; global cuts have separate
 	// integration coverage and may find a smaller improvement first.
 	config.search.dependencyCuts = false
-	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, quadratic: false, affine: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, quadratic: false, quadraticShear: false, affine: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
 	config.search.probabilistic = false
 	config.search.variableElimination = false
 	await runSQL(db, 'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
@@ -70,9 +70,33 @@ try {
 		assert.ok(strategySnapshot().some(stat => stat.strategy === 'factored'))
 		assert.equal(await broadSearch(tables, input, 8, createOptimizerCaches(), 5000, () => true, () => {}), input)
 	}
-	Object.assign(config.synthesis, { satSweeping: true, mixedBasis: true, blockCancellation: true, affine: true })
+	config.synthesis.factored = false
+	config.synthesis.quadraticShear = true
+	const fittingInput: Gate[] = [
+		...middle,
+		{ a: 0, b: 3, target: 7, gate_i: 1 },
+		{ a: 3, b: 0, target: 7, gate_i: 3 },
+		{ a: 0, b: 0, target: 2, gate_i: 15 },
+	]
+	for (const adaptive of [false, true]) {
+		config.search.strategyAdaptive = adaptive
+		resetStrategyStats()
+		const fitted = await broadSearch(tables, fittingInput, 8, createOptimizerCaches(), 5000, () => false, () => {})
+		assert.equal(fitted.length, 3)
+		const inputs = generateCombinations(8)
+		assert.deepEqual(calculateAllOutputsArray(fitted, inputs), calculateAllOutputsArray(fittingInput, inputs))
+		assert.ok(strategySnapshot().some(stat => stat.strategy === 'quadratic-shear'))
+	}
+	const { synthesizeQuadraticShear } = await import('./quadratic-shear.js')
+	assert.equal(synthesizeQuadraticShear(fittingInput, 64, 1, 10000000, () => false), undefined, 'a fit cannot bypass the proof budget')
+	assert.equal(synthesizeQuadraticShear(fittingInput, 64, 100000, 10000000, () => true), undefined)
+	const compute = { a: 0, b: 1, target: 3, gate_i: 1 }
+	const cubic: Gate[] = [compute, { a: 2, b: 3, target: 4, gate_i: 1 }, compute]
+	assert.equal(synthesizeQuadraticShear(cubic, 64, 100000, 10000000, () => false), undefined)
+
+	Object.assign(config.synthesis, { factored: true, satSweeping: true, mixedBasis: true, blockCancellation: true, affine: true })
 	config.search.dependencyCuts = true
-	assert.deepEqual(broadStrategyOrder(), ['sat-sweeping', 'mixed-basis', 'block-cancellation', 'symbolic', 'factored', 'dependency-cuts'])
+	assert.deepEqual(broadStrategyOrder(), ['sat-sweeping', 'quadratic-shear', 'mixed-basis', 'block-cancellation', 'symbolic', 'factored', 'dependency-cuts'])
 	config.search.strategyAdaptive = true
 	config.synthesis.broadSatCutsFirst = true
 	let provenIndices: number[] | undefined
