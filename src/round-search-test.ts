@@ -14,7 +14,7 @@ assert.deepEqual(roundSearchPlan(1000, 24, 450, 2000), { wholeCircuit: true, cap
 assert.deepEqual(roundSearchPlan(1000, 24, 450, 0), { wholeCircuit: false, capacity: 2 })
 assert.equal(roundSearchPlan(2000, 8, 500, 2000).wholeCircuit, true)
 assert.equal(roundSearchPlan(2001, 8, 500, 2000).wholeCircuit, false)
-assert.deepEqual(roundSearchPlan(1000, 1, 450, 2000), { wholeCircuit: false, capacity: 1 })
+assert.deepEqual(roundSearchPlan(1000, 1, 450, 2000), { wholeCircuit: true, capacity: 1 })
 assert.equal(parseConfig({ workers: { wholeCircuitMaximumGates: 0 } }).workers.wholeCircuitMaximumGates, 0)
 assert.throws(() => parseConfig({ workers: { wholeCircuitMaximumGates: -1 } }))
 assert.throws(() => parseConfig({ workers: { wholeCircuitMaximumGates: 1.5 } }))

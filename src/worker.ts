@@ -12,7 +12,7 @@ import { WORKER_ROUND_MS } from './job.js'
 let portfolio: ReturnType<typeof openRainbowPortfolio> | undefined
 let localCaches: ReturnType<typeof createOptimizerCaches> | undefined
 let broadCaches: ReturnType<typeof createOptimizerCaches> | undefined
-parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, localIndex, broadStrategy, solver = 'local', restartOnImprovement = false, splitCircuit = false }: { gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, localIndex?: number, broadStrategy?: string, restartOnImprovement?: boolean, splitCircuit?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
+parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, localIndex, assignedStrategy, solver = 'local', restartOnImprovement = false, splitCircuit = false }: { gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, localIndex?: number, assignedStrategy?: string, restartOnImprovement?: boolean, splitCircuit?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
 	try {
 		if (solver === 'shuffle') {
 			resetStrategyStats()
@@ -34,7 +34,7 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 		const tables = await (portfolio ??= openRainbowPortfolio(config.search.rainbow ? config.database.tables : [], workerData?.sharedTables ?? []))
 		if (solver === 'broad') {
 			const caches = broadCaches ??= createOptimizerCaches(workerData?.workerIndex ?? 0)
-			caches.broadStrategyPicker.beginRound(round, broadStrategy)
+			caches.broadStrategyPicker.beginRound(round, assignedStrategy)
 			resetStrategyStats()
 			const stop = stopSignal ? new Int32Array(stopSignal) : undefined
 			const result = await broadSearch(tables, gates, wires, caches, budgetMs, () => stop !== undefined && Atomics.load(stop, 0) !== 0, (progress, activity, snapshot) => parentPort!.postMessage({ progress, activity, snapshot }))
@@ -42,7 +42,7 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 			return
 		}
 		const caches = localCaches ??= createOptimizerCaches(localIndex ?? workerData?.workerIndex ?? 0)
-		caches.strategyPicker.beginRound(round)
+		caches.strategyPicker.beginRound(round, assignedStrategy)
 		let lastSnapshot = gates
 		let lastConsideredImprovement = 0
 		const stop = stopSignal ? new Int32Array(stopSignal) : undefined
@@ -54,7 +54,7 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 			if (candidate) lastConsideredImprovement = activity.improvements
 			if (snapshot) lastSnapshot = snapshot
 			parentPort!.postMessage({ progress: count, activity, snapshot })
-		}, () => (restartOnImprovement && lastSnapshot.length < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0), (count, improvements) => count < lastSnapshot.length || (count === lastSnapshot.length && improvements > lastConsideredImprovement), true, workerData?.remainingChecks)
+		}, () => (restartOnImprovement && lastSnapshot.length < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0), (count, improvements) => count < lastSnapshot.length || (count === lastSnapshot.length && improvements > lastConsideredImprovement), true, workerData?.remainingChecks, assignedStrategy !== undefined)
 		parentPort!.postMessage({ gates: result })
 	} catch (error) {
 		parentPort!.postMessage({ error: String(error) })

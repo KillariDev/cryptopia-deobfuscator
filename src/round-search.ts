@@ -11,7 +11,7 @@ export function roundChunkSize(gates: number, minimum: number, maximumFraction: 
 
 /** Small circuits use independent full-context searches instead of tiny chunks. */
 export function roundSearchPlan(gates: number, maximumWorkers: number, chunkSize: number, wholeCircuitMaximumGates: number) {
-	const wholeCircuit = gates > 0 && gates <= wholeCircuitMaximumGates && maximumWorkers > 1
+	const wholeCircuit = gates > 0 && gates <= wholeCircuitMaximumGates
 	return { wholeCircuit, capacity: wholeCircuit ? maximumWorkers : Math.max(1, Math.min(Math.floor(gates / chunkSize), maximumWorkers, gates || 1)) }
 }
 

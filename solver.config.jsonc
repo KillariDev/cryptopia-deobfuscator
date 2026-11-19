@@ -93,7 +93,7 @@
   // Worker concurrency, scheduling and memory.
   "workers": {
     "keepBusy": true, // Refill workers continuously during a round.
-    "wholeCircuitMaximumGates": 2000, // Maximum gate count for whole-circuit local jobs. Zero always splits.
+    "wholeCircuitMaximumGates": 2000, // Maximum gate count for whole-circuit jobs covering all enabled local strategies. Zero disables this mode.
     "maximum": 8, // Upper bound on concurrent workers.
     "minimumChunkGates": 100, // Lower bound used for the worker chunk-size target.
     "maximumChunkFraction": 0.5, // Largest chunk-size target as a fraction of the circuit.

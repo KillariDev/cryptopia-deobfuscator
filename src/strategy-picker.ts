@@ -29,7 +29,7 @@ export class RoundStrategyPicker {
 		return undefined
 	}
 	beginRound(round: number, assignedStrategy?: string) {
-		if (round === this.round) return
+		if (round === this.round && (assignedStrategy === undefined || assignedStrategy === this.activeStrategy)) return
 		if (assignedStrategy !== undefined) {
 			const index = this.order.indexOf(assignedStrategy)
 			if (index < 0) throw new Error(`Unknown assigned strategy: ${assignedStrategy}`)

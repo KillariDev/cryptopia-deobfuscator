@@ -458,8 +458,9 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 		...synthesisNames.map(name => ({ name })),
 		...(synthesisBudget?.broad && (config.synthesis.affine || config.synthesis.quadratic) ? [{ name: 'symbolic' }] : []),
 	]
-	const selected = synthesisBudget?.selectedStrategy ?? (config.search.strategyAdaptive || synthesisBudget?.dependencyRegion ? strategyPicker?.pick(available)?.name : undefined)
-	if (strategyPicker && config.search.strategyAdaptive && !selected) return { gates: originalGates, changed: false, unavailable: true }
+	const useStrategyPicker = config.search.strategyAdaptive || synthesisBudget?.forceStrategy
+	const selected = synthesisBudget?.selectedStrategy ?? (useStrategyPicker || synthesisBudget?.dependencyRegion ? strategyPicker?.pick(available)?.name : undefined)
+	if (strategyPicker && useStrategyPicker && !selected) return { gates: originalGates, changed: false, unavailable: true }
 	const runSynthesis = (!wideOnly && selected === undefined) || (selected !== undefined && synthesisNames.includes(selected))
 	const selectedBudget = selected && runSynthesis ? { deadline: synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000, ...synthesisBudget, selectedStrategy: selected } : synthesisBudget
 	if (selected !== undefined && strategyPicker) {
@@ -767,8 +768,9 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 	if (subsetSize > slicedVersion.length) return slicedVersion.slice()
 	const useProbabilistically = method !== 'rainbow' && phase === 'heavy' && config.search.probabilistic
 	const findUselessVarsSetting = method !== 'rainbow' && config.search.variableElimination
-	const active = config.search.strategyAdaptive && strategyPicker instanceof RoundStrategyPicker ? strategyPicker.activeStrategy : undefined
-	const useLegacyCache = !(config.search.strategyAdaptive && strategyPicker)
+	const useStrategyPicker = config.search.strategyAdaptive || synthesisBudget?.forceStrategy
+	const active = useStrategyPicker && strategyPicker instanceof RoundStrategyPicker ? strategyPicker.activeStrategy : undefined
+	const useLegacyCache = !(useStrategyPicker && strategyPicker)
 	const attemptBudget = useLegacyCache
 		? { deadline: performance.now() + config.workers.jobSeconds * 1000, ...synthesisBudget, exhaustStrategies: true }
 		: synthesisBudget
@@ -877,7 +879,7 @@ export const createOptimizerCaches = (workerIndex = 0) => ({
 	methodCaches: new Map<string, LimitedMap<string, boolean>>(),
 })
 
-export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number, improvements: number) => boolean, reportOnImprovement = false, checkBudget: number | BigInt64Array = 0) => {
+export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number, improvements: number) => boolean, reportOnImprovement = false, checkBudget: number | BigInt64Array = 0, wholeCircuitStrategy = false) => {
 	resetStrategyStats()
 	const jobStarted = performance.now(), jobDeadline = jobStarted + roundDurationMs, databaseStarted = lookupDatabaseTime()
 	let optimizedVersion = originalGates.slice()
@@ -896,7 +898,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	const { ioIdentifierCache, processedGatesCache } = caches
 	
 	tables.resetStatistics()
-	const strategy = config.search.strategyAdaptive ? caches.strategyPicker.activeStrategy : undefined
+	const strategy = config.search.strategyAdaptive || wholeCircuitStrategy ? caches.strategyPicker.activeStrategy : undefined
 	const scanContiguous = strategy === 'variables' || (strategy === 'rainbow' && tables.maximumWires > 0)
 	const sliceResults = scanContiguous ? new SliceResults() : undefined
 	const minimumSubset = strategy === 'variables' ? Math.max(3, config.search.subsetMinimum) : config.search.subsetMinimum
@@ -910,7 +912,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	const arms = !config.search.adaptive ? [] : config.search.stableSearchArms ? caches.arms : createSearchArms(config.search.searchArms, config.search.subsetMinimum, config.search.subsetMaximum, config.search.sliceMinimum, config.search.sliceMaximum).map(arm => ({ ...arm, subset: getRandomNumberInRange(config.search.subsetMinimum, config.search.subsetMaximum + 1), slice: getRandomNumberInRange(config.search.sliceMinimum, config.search.sliceMaximum + 1) }))
 	//logTimed(`optimizer started with subset ${subsetSize}`)
 	const activity: WorkerActivity = { passes: 0, subsets: 0, checks: 0, improvements: 0, stage: 'searching' }
-	const progressActivity = (): WorkerActivity => ({ ...activity, activeStrategy: config.search.strategyAdaptive ? caches.strategyPicker.activeStrategy : undefined, strategies: strategySnapshot(), rainbowTables: tables.statistics(), resources: { databaseMs: lookupDatabaseTime() - databaseStarted, verificationMs, elapsedMs: performance.now() - jobStarted, heapUsedBytes: process.memoryUsage().heapUsed } })
+	const progressActivity = (): WorkerActivity => ({ ...activity, activeStrategy: strategy, strategies: strategySnapshot(), rainbowTables: tables.statistics(), resources: { databaseMs: lookupDatabaseTime() - databaseStarted, verificationMs, elapsedMs: performance.now() - jobStarted, heapUsedBytes: process.memoryUsage().heapUsed } })
 	let lastProgress = performance.now()
 	let publishedReduction = false
 	let candidateParts = new LazyCircuit([optimizedVersion])
@@ -967,9 +969,10 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 			const selected = caches.scheduler.choose(arms)
 			subsetSize = selected.subset
 			maxSlice = selected.slice
-			if (!config.search.strategyAdaptive) method = selected.method
+			if (!config.search.strategyAdaptive && !wholeCircuitStrategy) method = selected.method
 		}
 		subsetSize = Math.max(minimumSubset, Math.min(subsetSize, maximumSubset))
+		if (wholeCircuitStrategy) subsetSize = Math.min(subsetSize, optimizedVersion.length)
 		if (strategy === 'variables') maxSlice = Math.max(3, maxSlice)
 		const selection = { subset: subsetSize, slice: maxSlice, method }
 		let methodCache = caches.methodCaches.get(method ?? 'all')
@@ -997,7 +1000,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 				activity.subsets++
 				activity.checks++
 				let published = false
-				const budget: SynthesisBudget = { deadline: jobDeadline, shouldStop: timeToEndWorker }
+				const budget: SynthesisBudget = { deadline: jobDeadline, shouldStop: timeToEndWorker, forceStrategy: wholeCircuitStrategy }
 				if (reportOnImprovement && onProgress && !publishedReduction) budget.onCandidate = gates => {
 					published = true
 					activity.improvements++
@@ -1020,14 +1023,15 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 			if (workerMode && (!optimizedVersion.length || checkLimitReached() || timeToEndWorker())) return finishWorker()
 		}
 		const nChunks = Math.max(1, Math.min(config.search.maximumInnerChunks, Math.floor(optimizedVersion.length / config.search.minimumInnerChunkGates)))
-		const components = config.search.independentComponents ? independentComponents(optimizedVersion) : [optimizedVersion]
-		const chunked = components.flatMap(component => chunkArray(component, Math.max(1, Math.min(component.length, Math.floor(nChunks / components.length)))))
+		const components = !wholeCircuitStrategy && config.search.independentComponents ? independentComponents(optimizedVersion) : [optimizedVersion]
+		const chunked = wholeCircuitStrategy ? [optimizedVersion] : components.flatMap(component =>
+			chunkArray(component, Math.max(1, Math.min(component.length, Math.floor(nChunks / components.length)))))
 		candidateParts = new LazyCircuit(chunked)
 		await Promise.all(chunked.map(async (data, index) => {
 			const result = await optimizeSubset(tables, data, ioIdentifierCache, methodCache!, subsetSize, maxSlice, phase, timeToEndWorker, activity, () => {}, caches.testedSubsets, method, gates => {
 				candidateParts.update(index, gates)
 				timeToEndWorker()
-			}, { deadline: jobDeadline, shouldStop: () => shouldFinish?.(activity) === true }, caches.strategyPicker, workerRegionSeed(data.length, caches.workerIndex), sliceResults, claimCheck)
+			}, { deadline: jobDeadline, shouldStop: () => shouldFinish?.(activity) === true, forceStrategy: wholeCircuitStrategy }, caches.strategyPicker, workerRegionSeed(data.length, caches.workerIndex), sliceResults, claimCheck)
 			candidateParts.update(index, result)
 			return result
 		}))
@@ -1215,6 +1219,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 				: undefined
 			const runBroad = broadEnabled && (config.search.strategyAdaptive ? !!globalStrategy : !completedBroad?.has(''))
 			const plan = roundSearchPlan(currentGates.length, nMaxWorkers, workersSize, config.workers.wholeCircuitMaximumGates)
+			const wholeStrategies = plan.wholeCircuit ? localStrategyOrder() : []
 			const wholeCircuit = plan.wholeCircuit || (config.workers.keepBusy && currentGates.length < nMaxWorkers)
 			requestedConcurrency = config.workers.keepBusy ? nMaxWorkers : config.workers.adaptiveConcurrency ? Math.max(runBroad ? 2 : 1, concurrency.limit(Math.min(nMaxWorkers, plan.capacity + Number(runBroad)))) : Math.min(nMaxWorkers, plan.capacity + Number(runBroad))
 			const nWorkers = memoryLimit.limit(requestedConcurrency)
@@ -1226,7 +1231,10 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 			const queueCapacity = config.workers.keepBusy ? requestedConcurrency : nWorkers
 			const localWorkers = Math.max(1, queueCapacity - Number(runBroad && queueCapacity > 1))
 			const requestedJobs = config.workers.keepBusy ? Math.max(nWorkers, localWorkers * config.workers.jobsPerWorker) : localWorkers * config.workers.jobsPerWorker
-			const jobCount = wholeCircuit ? requestedJobs : Math.min(currentGates.length, requestedJobs)
+			const jobCount = wholeCircuit ? Math.max(requestedJobs, wholeStrategies.length) : Math.min(currentGates.length, requestedJobs)
+			const pendingWholeStrategies = new Set(wholeStrategies)
+			const strategyWaves = Math.max(1, Math.ceil(wholeStrategies.length / Math.max(1, nWorkers - Number(runBroad))))
+			const localJobBudget = Math.min(config.workers.jobSeconds * 1000, WORKER_ROUND_MS / strategyWaves)
 			const approxGates = wholeCircuit ? Array.from({ length: jobCount }, () => currentGates.slice()) : config.search.balancedWorkers ? balancedChunks(currentGates, jobCount, wireCosts) : splitArrayIntoApproximatelyChunks(currentGates, jobCount)
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
@@ -1244,6 +1252,8 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 			const localCount = () => wholeCircuit ? Math.min(...candidateCounts) : candidateCounts.reduce((sum, count) => sum + count, 0)
 			let broadBest = currentGates
 			const bestCount = () => Math.min(broadBest.length, localCount())
+			const roundTimeReached = (elapsed: number, count: number) => elapsed >= WORKER_ROUND_MS ||
+				(!pendingWholeStrategies.size && shouldFinishReducedRound(elapsed, nPrevGates, count))
 			const roundPatches = runBroad && !wholeCircuit ? new RoundCutPatches(nPrevGates) : undefined
 			let bestObserved = currentGates
 			let bestObservedSide: 'local' | 'global' = 'local'
@@ -1278,7 +1288,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 					lastReportedGates = candidate
 					lastReportedPairs = effectivePairs
 				}
-				if ((elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, candidate)) && Atomics.load(stopSignal, 0) === 0) {
+				if (roundTimeReached(elapsed, candidate) && Atomics.load(stopSignal, 0) === 0) {
 					Atomics.store(stopSignal, 0, 1)
 					logVerbose(`Round time target reached; finishing active jobs and returning queued jobs unchanged.`)
 				}
@@ -1293,7 +1303,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 					if (!config.workers.keepBusy || Atomics.load(stopSignal, 0) !== 0) return false
 					const count = bestCount()
 					const elapsed = performance.now() - lastIterationTime
-					if (!count || elapsed >= WORKER_ROUND_MS || shouldFinishReducedRound(elapsed, nPrevGates, count)) {
+					if (!count || roundTimeReached(elapsed, count)) {
 						Atomics.store(stopSignal, 0, 1)
 						return false
 					}
@@ -1332,6 +1342,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 						: completed < jobCount && Atomics.load(stopSignal, 0) === 0))
 				})().finally(() => pool.setBroadReservation(false)) : Promise.resolve()
 				const local = Promise.all(approxGates.map(async (_initial, index) => {
+					const assigned = wholeStrategies.length ? wholeStrategies[index % wholeStrategies.length] : undefined
 					const workerFile = config.files.workerSnapshots ? paths.worker(index) : undefined
 					let chunk = index
 					do {
@@ -1359,12 +1370,13 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 									try { accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
 								}
 								statuses[index] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
-						}, stopSignal.buffer as SharedArrayBuffer, config.workers.jobSeconds * 1000, false, 'local', optimizerRound, undefined, !wholeCircuit)
+						}, stopSignal.buffer as SharedArrayBuffer, localJobBudget, false, 'local', optimizerRound, assigned, !wholeCircuit)
 						if (executionStarted !== undefined) {
 							const cost = (performance.now() - executionStarted) / Math.max(1, dataChunk.length)
 							for (const wire of new Set(dataChunk.flatMap(getVars))) wireCosts.set(wire, ((wireCosts.get(wire) ?? cost) + cost) / 2)
 						}
 						accept(result)
+						if (assigned) pendingWholeStrategies.delete(assigned)
 						completed++
 						statuses[index].done = true
 						if (workerFile) writeCircuit(workerFile, inputCircuit.wire_count, result)

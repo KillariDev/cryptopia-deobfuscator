@@ -89,7 +89,7 @@ The solver combines several approaches:
   expose simplifications that were not adjacent before.
 - **Local search:** prioritize recently changed regions. Adaptive search modes
   remain available through `search.adaptive`, but are off by default.
-- **Strategy rotation:** local workers start with quadratic synthesis when enabled,
+- **Strategy rotation:** in split-circuit mode, local workers start with quadratic synthesis when enabled,
   followed by rainbow lookup in the rotation. When quadratic is disabled, local
   workers start at offset positions in the enabled strategy order. A worker keeps
   its strategy for the entire round and advances after a round without a gate
@@ -207,9 +207,10 @@ stay on the command line.
 
 Useful settings to start with:
 
-- `workers.wholeCircuitMaximumGates`: use parallel whole-circuit searches below
-  this gate count (inclusive); default 2,000, or 0 to always split into chunks.
-  The adaptive concurrency and memory limits still apply.
+- `workers.wholeCircuitMaximumGates`: at or below this gate count, schedule a
+  whole-circuit local job for every enabled strategy. With fewer workers than
+  strategies, the remaining jobs queue. The default is 2,000. Set it to 0
+  to disable this scheduling mode. Concurrency and memory limits still apply.
 - `workers.maximum`: upper bound on solver workers; the default cap is 24.
   Actual concurrency also depends on the circuit and resource limits.
 - `runtime.heapMegabytes`: Node heap budget; the default is 16,384 MiB. SQLite,

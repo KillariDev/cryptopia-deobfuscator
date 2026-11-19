@@ -64,6 +64,20 @@ try {
 		}, undefined, 1000)))
 		assert.equal(checks.reduce((sum, count) => sum + count, 0), 1)
 	} finally { await limitedPool.close() }
+	config.search.strategyAdaptive = false
+	config.synthesis.quadratic = true
+	const assignedPool = new WorkerPool(1, undefined, [createSharedTable(table, [], 1024)!])
+	try {
+		for (const strategy of ['quadratic', 'rainbow']) {
+			let reported: string | undefined
+			const input = [not, not]
+			const result = await assignedPool.run(input, 2, (_, activity) => { reported = activity?.activeStrategy },
+				undefined, 100, false, 'local', 1, strategy)
+			assert.equal(reported, strategy)
+			assert.deepEqual(result, strategy === 'quadratic' ? [] : input)
+		}
+	} finally { await assignedPool.close() }
+
 } finally {
 	await pool.close()
 	Object.assign(config.search, search)

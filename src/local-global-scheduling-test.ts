@@ -163,6 +163,25 @@ try {
 	assert.equal(JSON.parse(await readFile(outputPaths(zeroPath).worker(0), 'utf8')).gate_count, firstLocalChunkSize)
 	assert.equal(JSON.parse(await readFile(zeroPath + '-latest.json', 'utf8')).gate_count, 0)
 
+	Object.assign(config.workers, { maximum: 1, keepBusy: false, jobsPerWorker: 1, wholeCircuitMaximumGates: 10 })
+	Object.assign(config.search, { rainbow: true, variableElimination: false, strategyAdaptive: false })
+	Object.assign(config.synthesis, {
+		affine: false, quadratic: true, blockCancellation: true, forwardSemanticSearch: false,
+		equalitySaturation: false, smt: false, meetInMiddle: false,
+	})
+	const attempts: (string | undefined)[] = []
+	WorkerPool.prototype.run = async function(gates, _wires, _progress, _signal, _budget, _restart, solver, round, assigned, split) {
+		if (round === 2) throw done
+		assert.equal(solver, 'local')
+		assert.equal(split, false)
+		assert.equal(gates.length, splitFixture.gate_count)
+		attempts.push(assigned)
+		return gates
+	}
+	await assert.rejects(splitTaskAndRun(join(directory, 'whole-strategies'), 'unused',
+		{ originalCircuit: splitFixture, inputCircuit: splitFixture }), error => error === done)
+	assert.deepEqual(attempts, ['quadratic', 'rainbow', 'block-cancellation'])
+
 } finally {
 	Object.assign(config, saved)
 	WorkerPool.prototype.run = run
