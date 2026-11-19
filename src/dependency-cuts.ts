@@ -61,6 +61,35 @@ export class DependencyCutIndex {
 		}
 		return { indices: ordered, gates: ordered.map(i => this.gates[i]), wires: [...used].sort((a, b) => a - b), inputs: [...inputs].map(([wire, version]) => ({ wire, version })), outputs: [...outputs].map(([wire, version]) => ({ wire, version })) }
 	}
+	/** Close the interval between consecutive writes over operations they
+	 * cannot commute past, leaving unrelated gates outside the cut. */
+	*repeatedWriteCuts(offset: number, minimumSpan: number, maximumGates: number, maximumSeeds: number): Generator<{ wire: number, cut: DependencyCut }> {
+		let remaining = maximumSeeds
+		for (let i = 0; i < this.gates.length && remaining > 0; i++) {
+			this.check()
+			const end = (this.gates.length - 1 + offset - i) % this.gates.length
+			const wire = this.gates[end].target
+			const writes = this.writes.get(wire)!
+			const start = writes[wireAccessLowerBound(writes, end) - 1]
+			if (start === undefined || end - start + 1 < minimumSpan) continue
+			remaining--
+			const pending = [start]
+			const chosen = new Set([start, end])
+			while (pending.length && chosen.size <= maximumGates) {
+				this.check()
+				for (const next of this.successors[pending.pop()!]) {
+					if (next > end) break
+					if (chosen.has(next)) continue
+					chosen.add(next)
+					pending.push(next)
+					if (chosen.size > maximumGates) break
+				}
+			}
+			if (chosen.size > maximumGates) continue
+			const cut = this.cut([...chosen])
+			if (cut) yield { wire, cut }
+		}
+	}
 	select(seed: number, maximumGates: number): DependencyCut | undefined {
 		this.check()
 		if (!Number.isInteger(seed) || seed < 0 || seed >= this.gates.length || maximumGates < 1) return undefined
