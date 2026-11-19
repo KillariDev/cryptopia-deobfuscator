@@ -1,31 +1,44 @@
+import { LimitedMap } from './limitedMap.js'
+import { normalizeWindow } from './search.js'
+import { reverseMapCircuit } from './utils.js'
 import { config } from './config.js'
 import { Gate } from './types.js'
 import { analyzeFactored, FactoredLimit, synthesizeFactored } from './factored.js'
 import type { FactoredOptions } from './factored.js'
+import { simplifyMixedBasis } from './mixed-basis.js'
 import { cancelBlocks } from './block-cancellation.js'
 import { SolverService } from './solver-worker.js'
 import { recordStrategy } from './strategy-stats.js'
 
-export const structuralNames = ['factored', 'block-cancellation', 'sat-sweeping'] as const
+export const structuralNames = ['factored', 'block-cancellation', 'sat-sweeping', 'mixed-basis'] as const
 export type StructuralStrategy = typeof structuralNames[number]
 export function structuralChoices() {
-	return structuralNames.filter(name => name === 'factored' ? config.synthesis.factored : name === 'block-cancellation' ? config.synthesis.blockCancellation : config.synthesis.satSweeping)
+	return structuralNames.filter(name => name === 'factored' ? config.synthesis.factored : name === 'block-cancellation' ? config.synthesis.blockCancellation : name === 'mixed-basis' ? config.synthesis.mixedBasis : config.synthesis.satSweeping && !satService.busy)
 }
 
 const satService = new SolverService()
+const satPreflightMisses = new LimitedMap<string, true>(512, 'lru')
 
 async function satRewrite(gates: Gate[], options: FactoredOptions, deadline: number) {
 	// Most small windows have no equivalent expressions to sweep. Avoid an
 	// isolate (and WASM initialization) for those cheap negative results.
 	if (gates.length <= config.synthesis.affineMaximumWindowGates) {
 		try {
-			const { graph, rows } = analyzeFactored(gates, options)
+			const { normalized, wires, key } = normalizeWindow(gates)
+			const missKey = `${options.maximumWires}:${options.maximumNodes}:${options.maximumEdges}:${key}`
+			if (satPreflightMisses.get(missKey)) return undefined
+			const { graph, rows } = analyzeFactored(normalized, options)
 			const result = graph.emit(rows, gates.length)
-			if (result) return result
+			if (result) return reverseMapCircuit(result, wires)
 			const seen = new Set<bigint>()
 			let candidate = false
 			for (const form of graph.forms) { graph.check(); if (seen.has(form.signature)) { candidate = true; break }; seen.add(form.signature) }
-			if (!candidate) return undefined
+			if (!candidate) {
+				// This preflight completed without candidates for any input.
+				// A canceled or resource-limited attempt never reaches here.
+				satPreflightMisses.set(missKey, true)
+				return undefined
+			}
 		} catch (error) { if (error instanceof FactoredLimit) return undefined; throw error }
 	}
 	return satService.run(new URL('./sat-sweeping-worker.js', import.meta.url), { gates, maximumWires: options.maximumWires, maximumNodes: options.maximumNodes, maximumEdges: options.maximumEdges, budgetMs: Math.max(0, deadline - performance.now()) }, Math.max(0, deadline - performance.now()), options.stopped)
@@ -38,6 +51,7 @@ export async function structuralRewrite(name: StructuralStrategy, gates: Gate[],
 	const options = { maximumWires: config.validation.maximumWires, maximumNodes: config.synthesis.factoredMaximumNodes, maximumEdges: config.synthesis.factoredMaximumEdges, stopped }
 	const result = name === 'factored' ? synthesizeFactored(gates, options)
 		: name === 'block-cancellation' ? cancelBlocks(gates, options)
+		: name === 'mixed-basis' ? simplifyMixedBasis(gates, options)
 		: await satRewrite(gates, options, deadline)
 	const accepted = result !== undefined && result.length < gates.length
 	recordStrategy(name, { maximumWires: options.maximumWires, maximumNodes: options.maximumNodes, maximumEdges: options.maximumEdges }, started, gates.length, accepted ? result!.length : gates.length, accepted)

@@ -1,3 +1,4 @@
+import { defaultConfigPath } from './config-document.js'
 import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve, dirname } from 'path'
@@ -47,7 +48,7 @@ try {
 	for (const table of smoke ? [{ wires: 2, gates: 2 }, { wires: 2, gates: 3 }] : config.benchmark.generationTables) for (const workers of smoke ? [1, 2] : config.benchmark.workerCounts) for (let repeat = 0; repeat < (smoke ? 1 : config.benchmark.repeats); repeat++) {
 		for (const variant of repeat % 2 ? [...variants].reverse() : variants) {
 			const directory = mkdtempSync(join(temporary, 'trial-')), report = join(directory, 'result.json')
-			let settingsSource = variant.name === 'reference' ? join(variant.root, 'solver.config.json') : configPath
+			let settingsSource = variant.name === 'reference' ? defaultConfigPath(variant.root) : configPath
 			if (variant.append !== undefined || variant.prefetch !== undefined || variant.diagnostics !== undefined || variant.compact !== undefined || variant.countFinal !== undefined || variant.stream !== undefined) {
 				const settings = structuredClone(config)
 				if (variant.stream !== undefined) { settings.database.generationStreamStaging = variant.stream; settings.database.generationCandidateCacheMegabytes = variant.candidateCache! }

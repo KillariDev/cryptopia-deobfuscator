@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import sqlite3 from 'sqlite3'
 import { broadRegions, broadSearch } from './broad-search.js'
-import { config } from './config.js'
-import { createOptimizerCaches, massOptimizeStep } from './processing.js'
+import { config, minimumBroadGates } from './config.js'
+import { broadStrategyOrder, createOptimizerCaches, massOptimizeStep } from './processing.js'
 import { RainbowPortfolio } from './rainbow-portfolio.js'
 import { functionKey, encodeGates } from './semantic.js'
 import { runSQL } from './sql.js'
@@ -23,7 +23,7 @@ try {
 	// This case isolates contiguous broad windows; global cuts have separate
 	// integration coverage and may find a smaller improvement first.
 	config.search.dependencyCuts = false
-	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, quadratic: false, affine: false, templates: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, quadratic: false, affine: false, templates: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
 	config.search.probabilistic = false
 	config.search.variableElimination = false
 	await runSQL(db, 'CREATE TABLE InputOutputReplacers(ioIdentifier BLOB PRIMARY KEY,replacerGates BLOB NOT NULL) WITHOUT ROWID')
@@ -33,15 +33,27 @@ try {
 	const suffix: Gate[] = Array.from({ length: 1250 }, () => ({ a: 3, b: 4, target: 5, gate_i: 1 }))
 	const input = [...prefix, ...middle, ...suffix]
 	const nativeFind = tables.findReplacements.bind(tables)
-	let largestWindow = 0
+	const small = middle.slice(0, minimumBroadGates() - 1)
+	for (const adaptive of [false, true]) {
+		config.search.strategyAdaptive = adaptive
+		resetStrategyStats()
+		assert.equal(await broadSearch(tables, small, 8, createOptimizerCaches(), 5000, () => false, () => {}), small)
+		assert.deepEqual(strategySnapshot(), [], 'broad search leaves local-sized circuits to local workers')
+	}
+	config.search.variableElimination = true
+	let lookups = 0
 	tables.findReplacements = async (windows, cache) => {
-		for (const window of windows) largestWindow = Math.max(largestWindow, window.mappedGates.length)
+		lookups++
 		return nativeFind(windows, cache)
 	}
-	const result = await broadSearch(tables, input, 8, createOptimizerCaches(), 5000, () => false, () => {})
-	assert.equal(largestWindow, 2500, 'rainbow scans a large region spanning the normal split at gate 2500')
-	assert.deepEqual(result, [...prefix, ...suffix])
-	assert.deepEqual(calculateAllOutputsArray(result, generateCombinations(8)), calculateAllOutputsArray(input, generateCombinations(8)))
+	for (const adaptive of [false, true]) {
+		config.search.strategyAdaptive = adaptive
+		resetStrategyStats()
+		assert.equal(await broadSearch(tables, input, 8, createOptimizerCaches(), 5000, () => false, () => {}), input)
+		assert.deepEqual(strategySnapshot(), [], 'global search skips standalone variable and rainbow passes')
+	}
+	assert.equal(lookups, 0)
+	config.search.strategyAdaptive = false
 	const dense: Gate[] = Array.from({ length: 5000 }, (_, i) => ({ a: 0, b: 0, target: i % 2, gate_i: 15 }))
 	let batches = 0, largestBatch = 0
 	tables.findReplacements = async (windows, cache) => {
@@ -50,17 +62,33 @@ try {
 	}
 	assert.deepEqual((await massOptimizeStep(tables, createOptimizerCaches().ioIdentifierCache, createOptimizerCaches().processedGatesCache, dense, 2500, false, false)).gates, [])
 	assert.ok(batches > 1 && largestBatch <= 40, 'large overlapping queries are streamed, not retained quadratically')
-	config.search.variableElimination = true
-	const variables: Gate[] = Array.from({ length: 2500 }, (_, i) => ({ a: 0, b: 0, target: i % 2, gate_i: 15 }))
-	resetStrategyStats()
-	assert.deepEqual(await broadSearch(tables, variables, 2, createOptimizerCaches(), 5000, () => false, () => {}), [])
-	assert.ok(strategySnapshot().some(stat => stat.strategy === 'variables' && JSON.parse(stat.settings).slice === 2500), 'variable elimination gets the full large window too')
-	assert.equal(await broadSearch(tables, variables, 2, createOptimizerCaches(), 5000, () => true, () => {}), variables)
+	config.synthesis.factored = true
+	for (const adaptive of [false, true]) {
+		config.search.strategyAdaptive = adaptive
+		resetStrategyStats()
+		assert.deepEqual(await broadSearch(tables, input, 8, createOptimizerCaches(), 5000, () => false, () => {}), [])
+		assert.ok(strategySnapshot().some(stat => stat.strategy === 'factored'))
+		assert.equal(await broadSearch(tables, input, 8, createOptimizerCaches(), 5000, () => true, () => {}), input)
+	}
+	Object.assign(config.synthesis, { satSweeping: true, mixedBasis: true, blockCancellation: true, affine: true })
+	config.search.dependencyCuts = true
+	assert.deepEqual(broadStrategyOrder(), ['sat-sweeping', 'mixed-basis', 'block-cancellation', 'symbolic', 'factored', 'dependency-cuts'])
+	config.search.strategyAdaptive = true
+	config.synthesis.broadSatCutsFirst = true
+	let provenIndices: number[] | undefined
+	const repeated = Array.from({ length: 1200 }, () => ({ a: 0, b: 0, target: 0, gate_i: 15 }))
+	const cutResult = await broadSearch(tables, repeated, 1, createOptimizerCaches(), 5000, () => false, (_, activity) => {
+		if (activity.cutPatch) provenIndices = activity.cutPatch.indices
+	})
+	assert.ok(provenIndices?.length && cutResult.length < repeated.length, 'cuts-first reports its exact cut')
+	const bits = generateCombinations(1)
+	assert.deepEqual(calculateAllOutputsArray(cutResult, bits), calculateAllOutputsArray(repeated, bits))
+
 } finally {
 	Object.assign(config, saved)
 	await tables.close()
 }
-console.log('Broad toolkit: overlapping multi-scale regions, cross-chunk 2500-gate rainbow and variable scans, exact equivalence and cancellation passed')
+console.log('Broad toolkit: overlapping regions, global strategy order, local lookup batching and cancellation passed')
 
 // A broad and local job must both start; queued old-baseline work is canceled.
 const { WorkerPool } = await import('./threads.js')

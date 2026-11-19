@@ -19,7 +19,7 @@ export function loadJob(working: string, original = working, startOver = false):
 	const inputCircuit = inputPath ? readJsonFile(inputPath) as CircuitData | null : originalCircuit
 	if (!inputCircuit) throw new Error(`Cannot load working circuit: ${working}.json`)
 	for (const circuit of [originalCircuit, inputCircuit]) {
-		if (circuit.wire_count > config.validation.maximumWires) throw new Error('Circuit exceeds validation.maximumWires in solver.config.json')
+		if (circuit.wire_count > config.validation.maximumWires) throw new Error('Circuit exceeds validation.maximumWires in solver settings')
 	}
 	return { originalCircuit, inputCircuit }
 }

@@ -1,3 +1,4 @@
+import { isBetterCircuit } from './circuit-cost.js'
 import { config } from './config.js'
 import { mkdirSync, writeFileSync } from 'fs'
 import { basename, dirname, join } from 'path'
@@ -41,5 +42,26 @@ export class ReductionCheckpoint {
 		this.savedCount = gates.length
 		this.hasSaved = true
 		return true
+	}
+}
+
+/** Serialized persistence advances the count only after verification and writes.
+ * The best circuit is rechecked when dequeued, so stale requests cannot regress disk. */
+export class AsyncReductionCheckpoint {
+	private tail: Promise<unknown> = Promise.resolve()
+	hasSaved = false
+	constructor(private best: Gate[] | number, private persist: (gates: Gate[]) => Promise<void>) {}
+
+	saveIfReduced(gates: Gate[]) {
+		const work = this.tail.then(async () => {
+			const better = typeof this.best === 'number' ? gates.length < this.best : isBetterCircuit(gates, this.best)
+			if (!better) return false
+			await this.persist(gates)
+			this.best = gates
+			this.hasSaved = true
+			return true
+		})
+		this.tail = work.catch(() => {})
+		return work
 	}
 }

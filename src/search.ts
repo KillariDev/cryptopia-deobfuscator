@@ -27,12 +27,21 @@ export class RewriteCache {
 	}
 }
 export const improving = (old: Gate[]) => {
-	const oldWires = new Set(old.flatMap(getVars)).size
-	const oldReads = old.reduce((sum, gate) => sum + getVars(gate).length, 0)
+	const score = (gates: Gate[]) => {
+		const wires = new Set<number>()
+		let reads = 0
+		for (const gate of gates) {
+			const used = getVars(gate)
+			reads += used.length
+			for (const wire of used) wires.add(wire)
+		}
+		return { wires: wires.size, reads }
+	}
+	const baseline = score(old)
 	return (candidate: Gate[]) => {
 		if (candidate.length !== old.length) return candidate.length < old.length
-		const wires = new Set(candidate.flatMap(getVars)).size
-		return wires !== oldWires ? wires < oldWires : candidate.reduce((sum, gate) => sum + getVars(gate).length, 0) < oldReads
+		const next = score(candidate)
+		return next.wires !== baseline.wires ? next.wires < baseline.wires : next.reads < baseline.reads
 	}
 }
 
@@ -108,6 +117,11 @@ export function independentComponents(gates: Gate[]): Gate[][] {
 		component.push(gate); components.set(key, component)
 	}
 	return [...components.values()]
+}
+
+/** Space worker anchors around the circuit without depending on pool size. */
+export function workerRegionSeed(length: number, workerIndex: number) {
+	return Math.floor(length * ((workerIndex * 0.61803398875) % 1))
 }
 
 /** Index seeds are rebuilt after each edit; broad traversal periodically goes first. */

@@ -7,7 +7,7 @@ import { DependencyCutIndex, CutCancelled, searchDependencyCuts } from './depend
 import { config } from './config.js'
 import { createRainbowTable } from './rainbowtable.js'
 import { RainbowPortfolio } from './rainbow-portfolio.js'
-import { AdaptiveStrategyPicker } from './strategy-picker.js'
+import { RoundStrategyPicker } from './strategy-picker.js'
 import { createOptimizerCaches, massOptimizeStep, SubsetPreparation } from './processing.js'
 import { analyzeFactored, synthesizeFactored } from './factored.js'
 import { sweepFactored, SweepStats } from './sat-sweeping-core.js'
@@ -25,6 +25,11 @@ const sparse = [cn, ...Array.from({ length: 10000 }, () => gate(3, 4, 5, 1)), cn
 const sparseIndex = new DependencyCutIndex(sparse), sparseCut = sparseIndex.select(10001, 2)!
 assert.deepEqual(sparseCut.indices, [0, 10001])
 equivalent(sparse, sparseIndex.patch(sparseCut, []), 6)
+const rankedSparse = await searchDependencyCuts(sparse, () => false, async cut => cut.indices.length === 2 &&
+	cut.indices[0] === 0 && cut.indices[1] === 10001 ? [] : undefined, 0, undefined, undefined, 2, 8, true)
+assert.deepEqual(rankedSparse, sparse.slice(1, -1))
+assert.ok(sparseIndex.nearby(10001, [1]).includes(10001))
+
 assert.throws(() => sparseIndex.patch({ ...sparseCut, gates: [] }, []), /Stale/)
 assert.throws(() => sparseIndex.patch(sparseCut, [gate(0, 0, 42, 15)]), /boundary wire/)
 const war = new DependencyCutIndex([cn, gate(0, 0, 0, 15), cn])
@@ -34,6 +39,11 @@ assert.equal(fork.cut([0, 2]), undefined, 'cannot hide an intermediate value rea
 assert.throws(() => new DependencyCutIndex([cn], () => true), CutCancelled)
 assert.equal(await searchDependencyCuts([cn, cn], () => true, async () => []), undefined)
 assert.deepEqual([...new DependencyCutIndex([cn]).regions()], [])
+const controlFree = gate(0, 0, 1, 15)
+const sameSize = await searchDependencyCuts([cn, cn], () => false, async () => [controlFree, controlFree], 0, undefined, undefined, 2)
+assert.deepEqual(sameSize, [controlFree, controlFree], 'an equivalent cut can save a wire without deleting a gate')
+equivalent([cn, cn], sameSize!, 2)
+
 
 // Exhaustively check the movement theorem, including non-involutive aliases
 // and all Boolean gate functions. Replacement leaves every region output intact.
@@ -55,11 +65,13 @@ for (let i = 0; i < identity.length; i++) { selected.push(mixed.length); mixed.p
 const options = { maximumWires: 64, maximumNodes: 200000, maximumEdges: 16000000, stopped: () => false }
 assert.equal(synthesizeFactored(mixed, options), undefined)
 const wholeStats: SweepStats = { queries: 0, merges: 0, counterexamples: 0 }
-assert.equal(await sweepFactored(mixed, options, performance.now() + 30000, wholeStats), undefined)
-assert.ok(wholeStats.merges > 0 && wholeStats.rebuilds! > 0 && wholeStats.passes! > 1, 'merge, compact, and repeat even when the remaining output is cubic')
+const partial = await sweepFactored(mixed, options, performance.now() + 30000, wholeStats)
+assert.ok(partial && partial.length < mixed.length)
+equivalent(mixed, partial, 11)
+assert.ok(wholeStats.merges > 0 && wholeStats.rebuilds! > 0, 'keep proved writes even when the remaining output is cubic')
 const noisy = [...mixed, ...Array.from({ length: 10 }, (_, i) => gate(11 + i * 3, 12 + i * 3, 13 + i * 3, 1))]
 const coneStats: SweepStats = { queries: 0, merges: 0, counterexamples: 0 }
-assert.equal(await sweepFactored(noisy, options, performance.now() + 30000, coneStats), undefined)
+assert.ok((await sweepFactored(noisy, options, performance.now() + 30000, coneStats))!.length < noisy.length)
 assert.ok(coneStats.merges > 0 && coneStats.coneNodes! < analyzeFactored(noisy, options).graph.products.length, 'SAT only defines the queried cones, excluding independent nonlinear outputs')
 const index = new DependencyCutIndex(mixed), cut = index.cut(selected)!
 const solved = await sweepFactored(cut.gates, options, performance.now() + 30000)
@@ -78,17 +90,16 @@ try {
  assert.equal(opaque?.length, 1, 'lookup uses three live values despite a fourth restored workspace wire')
  equivalent(scratch, opaque!, 4)
  const caches = createOptimizerCaches()
- const picker = new AdaptiveStrategyPicker(['dependency-cuts'], () => ({ enabled: true, exploration: 0.2, halfLifeSeconds: 300 }))
+ const picker = new RoundStrategyPicker(['dependency-cuts'])
  config.search.strategyAdaptive = true
  config.search.dependencyCuts = true
  config.search.variableElimination = false
- Object.assign(config.synthesis, { templates: false, affine: false, quadratic: false, factored: false, blockCancellation: false, satSweeping: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
+ Object.assign(config.synthesis, { templates: false, affine: false, quadratic: false, factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
  resetStrategyStats()
- const rewritten = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, sparse, sparse.length, false, false, true, new SubsetPreparation(sparse), { deadline: performance.now() + 10000, broad: true }, picker)
+ const rewritten = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, sparse, sparse.length, false, false, true, new SubsetPreparation(sparse), { deadline: performance.now() + 10000, broad: true, minimumBroadGates: sparse.length }, picker)
  assert.equal(rewritten.gates.length, sparse.length - 2)
  equivalent(sparse, rewritten.gates, 6)
  assert.ok(strategySnapshot().some(stat => stat.strategy === 'rainbow' && stat.gatesRemoved === 2), 'reuse rainbow lookup on distant live values')
- assert.equal(picker.weights()[0].attempts, 1)
  config.synthesis.satSweeping = true
  resetStrategyStats()
 	let patched = mixed

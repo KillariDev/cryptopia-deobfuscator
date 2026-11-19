@@ -83,17 +83,23 @@ export class FactoredGraph {
 		this.ands.set(key, result)
 		return result
 	}
-	compose(gates: Gate[]): Form[] {
+	update(gate: Gate, rows: Form[], start?: Form) {
+		this.check()
+		const rule = rules[gate.gate_i], target = this.indices.get(gate.target)!
+		let value = start ?? rows[target]
+		if (rule.c) value = this.xor(value, this.one)
+		if (rule.a) value = this.xor(value, rows[this.indices.get(gate.a)!])
+		if (rule.b) value = this.xor(value, rows[this.indices.get(gate.b)!])
+		if (rule.ab) value = this.xor(value, this.and(rows[this.indices.get(gate.a)!], rows[this.indices.get(gate.b)!]))
+		return rows[target] = value
+	}
+	compose(gates: Gate[], onWrite?: (before: Form, after: Form) => void): Form[] {
 		const rows = this.inputs.slice()
 		for (const gate of gates) {
-			this.check()
-			const rule = rules[gate.gate_i], target = this.indices.get(gate.target)!
-			let value = rows[target]
-			if (rule.c) value = this.xor(value, this.one)
-			if (rule.a) value = this.xor(value, rows[this.indices.get(gate.a)!])
-			if (rule.b) value = this.xor(value, rows[this.indices.get(gate.b)!])
-			if (rule.ab) value = this.xor(value, this.and(rows[this.indices.get(gate.a)!], rows[this.indices.get(gate.b)!]))
-			rows[target] = value // All aliased controls read the old target.
+			if (onWrite) {
+				const before = rows[this.indices.get(gate.target)!]
+				onWrite(before, this.update(gate, rows))
+			} else this.update(gate, rows)
 		}
 		return rows
 	}
@@ -204,7 +210,7 @@ export class FactoredGraph {
 	}
 }
 
-export function analyzeFactored(gates: Gate[], options: FactoredOptions) {
+export function analyzeFactored(gates: Gate[], options: FactoredOptions, onWrite?: (before: Form, after: Form) => void) {
 	const used = new Set<number>()
 	for (const gate of gates) {
 		if (options.stopped()) throw new FactoredLimit('canceled')
@@ -212,7 +218,7 @@ export function analyzeFactored(gates: Gate[], options: FactoredOptions) {
 		if (used.size > options.maximumWires) throw new FactoredLimit('wire limit')
 	}
 	const graph = new FactoredGraph([...used].sort((a, b) => a - b), options)
-	return { graph, rows: graph.compose(gates) }
+	return { graph, rows: graph.compose(gates, onWrite) }
 }
 
 export function synthesizeFactored(gates: Gate[], options: FactoredOptions): Gate[] | undefined {

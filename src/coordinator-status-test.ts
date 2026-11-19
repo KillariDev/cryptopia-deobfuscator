@@ -20,24 +20,39 @@ try {
 	config.workers.keepBusy = false // Exercise the optional legacy between-round shuffle.
 	config.workers.adaptiveConcurrency = false
 	config.workers.broadSearchSeconds = 60
+	config.workers.broadSearchIdleSeconds = 0 // Isolate global-win reporting without the idle delay.
 	config.timing.summarySeconds = 0.02
 	config.logging.verbose = false
 	process.env.OPTIMIZER_VERBOSE = '0'
 	let broadCalls = 0, shuffleCalls = 0
-	WorkerPool.prototype.run = function(gates, _wires, _progress, _stop, _budget, _restart, solver) {
+	const reports: string[] = []
+	WorkerPool.prototype.run = function(gates, _wires, progress, _stop, _budget, _restart, solver) {
 		if (solver === 'shuffle') { shuffleCalls++; return Promise.reject(new Error('Unexpected shuffle after improvement')) }
 		if (solver === 'broad') {
 			if (++broadCalls === 2) {
 				assert.equal(gates.length, 3001)
 				return Promise.reject(done)
 			}
-			return Promise.resolve(gates.slice(0, 3001)) // Same odd NOT parity.
+			progress?.(gates.length, {
+				scope: 'broad', workerId: 1, activeStrategy: 'sat-sweeping',
+				passes: 1, checks: 1, subsets: 1, improvements: 0, stage: 'searching',
+				strategies: [{ strategy: 'sat-sweeping broad', settings: '', attempts: 1, elapsedMs: 500, rewrites: 0, gatesRemoved: 0 }],
+			})
+			return new Promise(resolve => setTimeout(() => resolve(gates.slice(0, 3001)), 65)) // Same odd NOT parity.
 		}
 		return Promise.resolve(gates)
 	}
-	console.log = () => {}
+	console.log = (...args: unknown[]) => { reports.push(args.map(String).join(' ')) }
 	await assert.rejects(splitTaskAndRun(join(directory, 'early'), 'unused', { originalCircuit: circuit, inputCircuit: circuit }), error => error === done)
 	assert.equal(shuffleCalls, 0, 'large circuits restart immediately after an improvement instead of running 2000 shuffle passes')
+
+	const counts = reports.filter(line => line.includes('Global strategies:'))
+	const timings = reports.filter(line => line.includes('Global tried (worker time):'))
+	assert.equal(counts.length, 1)
+	assert.match(counts[0], /SAT sweep:1/)
+	assert.equal(timings.length, 0)
+	const periodic = reports.findIndex(line => line.includes('Circuit: 5001G 0.00W -0G -0.00W'))
+	assert.ok(periodic >= 0 && periodic < reports.indexOf(counts[0]), 'periodic status precedes the round-end strategy totals')
 
 	let shuffleFinished = false, phaseReports = 0
 	let finishShuffle: (() => void) | undefined

@@ -1,0 +1,457 @@
+// Omitted settings use built-in defaults. Restart the optimizer after editing.
+{
+  // Set any strategy’s enabled flag to false to disable it.
+  "strategies": {
+    // Rainbow lookups in local search and dependency cuts.
+    "rainbow": {
+      // Run this strategy when eligible.
+      "enabled": true
+    },
+    // Remove or substitute wires, then prove equivalence.
+    "variables": {
+      // Run this strategy when eligible.
+      "enabled": true,
+      // Exhaustively evaluate variable rewrites up to this wire count.
+      "exactMaximumWires": 7,
+      // Try sampling larger variable candidates before exact polynomial proof.
+      "sampleCandidates": true,
+      // Sample inputs used to reject larger variable candidates.
+      "samples": 202
+    },
+    // Search noncontiguous dependency regions in global search.
+    "dependencyCuts": {
+      // Run this strategy when eligible.
+      "enabled": true
+    },
+    // Prove equivalent expressions and remove redundant writes.
+    "satSweeping": {
+      // Run this strategy when eligible.
+      "enabled": true,
+      // Try ranked cuts before whole-region SAT.
+      "cutsFirst": false
+    },
+    // Cancel XOR updates across reversible basis changes.
+    "mixedBasis": {
+      // Run this strategy when eligible.
+      "enabled": true
+    },
+    // Cancel commuting repeated blocks and inverse operations.
+    "blockCancellation": {
+      // Run this strategy when eligible.
+      "enabled": true
+    },
+    // Simplify factored Boolean expressions.
+    "factored": {
+      // Run this strategy when eligible.
+      "enabled": true
+    },
+    // Simplify affine regions using GF(2) linear algebra.
+    "gf2Affine": {
+      // Run this strategy when eligible.
+      "enabled": true
+    },
+    // Simplify quadratic regions and enable quadratic whole-region symbolic synthesis.
+    "quadratic": {
+      // Run this strategy when eligible.
+      "enabled": true
+    },
+    // Enumerate short replacements by forward semantic search.
+    "forwardSemantic": {
+      // Run this strategy when eligible.
+      "enabled": true
+    },
+    // Use SMT to find small equivalent circuits.
+    "smt": {
+      // Run this strategy when eligible.
+      "enabled": true
+    },
+    // Find small replacements by joining two semantic searches.
+    "meetInMiddle": {
+      // Run this strategy when eligible.
+      "enabled": true
+    },
+    // Explore equivalent small circuits using rewrite rules.
+    "equalitySaturation": {
+      // Run this strategy when eligible.
+      "enabled": true
+    },
+    // Learn and apply reusable exact rewrites.
+    "templates": {
+      // Run this strategy when eligible.
+      "enabled": true,
+      // Maximum learned templates per worker.
+      "cacheEntries": 10000,
+      // Exchange learned templates between workers.
+      "share": true,
+      // Seconds between template sharing reports.
+      "shareSeconds": 15,
+      // Maximum shared template entries.
+      "sharedEntries": 64,
+      // Maximum templates exchanged in a batch.
+      "sharedBatch": 16
+    },
+    // Shared graph limits for SAT sweep, factored, mixed-basis and block cancellation.
+    "factoredLimits": {
+      // Maximum total factored forms and product nodes.
+      "maximumNodes": 200000,
+      // Maximum factored graph edges and expansion work.
+      "maximumEdges": 16000000
+    },
+    // Limits for affine and quadratic search and exact polynomial proofs.
+    "polynomialLimits": {
+      // Maximum region size for local symbolic search and exact splice admission.
+      "maximumWindowGates": 256,
+      // Maximum total terms in an exact polynomial representation.
+      "maximumTerms": 100000,
+      // Maximum term operations per exact polynomial computation.
+      "maximumOperations": 10000000
+    },
+    // Limits for templates, forward semantic search, SMT, meet-in-the-middle and equality saturation.
+    "smallSynthesisLimits": {
+      // Maximum active wires for small synthesis.
+      "maximumWires": 3,
+      // Maximum region size for bounded small synthesis.
+      "maximumWindowGates": 8,
+      // Maximum gates in a small synthesized replacement.
+      "maximumReplacementGates": 3,
+      // State cap for bounded small semantic searches.
+      "states": 2000
+    }
+  },
+  // Process resource settings.
+  "runtime": {
+    // Node heap limit in MiB.
+    "heapMegabytes": 16384
+  },
+  // Input, output and scratch paths.
+  "files": {
+    // Base directory for working data.
+    "dataDirectory": "data",
+    // Legacy latest-file setting. Checkpoints use the input filename plus -latest.json.
+    "latestName": "latest.json",
+    // Name of the worker scratch directory under dataDirectory.
+    "workerDirectory": "worker",
+    // Name of the progress directory under dataDirectory.
+    "progressDirectory": "progress",
+    // Directory containing rainbow databases.
+    "databaseDirectory": "."
+  },
+  // Worker concurrency, scheduling and memory.
+  "workers": {
+    // Legacy setting. Global jobs now run alongside local jobs.
+    "broadSearchIdleSeconds": 0,
+    // Refill workers continuously during a round.
+    "keepBusy": true,
+    // Maximum gate count for whole-circuit local jobs. Zero always splits.
+    "wholeCircuitMaximumGates": 2000,
+    // Upper bound on concurrent workers.
+    "maximum": 8,
+    // Lower bound used for the worker chunk-size target.
+    "minimumChunkGates": 100,
+    // Largest chunk-size target as a fraction of the circuit.
+    "maximumChunkFraction": 0.5,
+    // Number of local job lanes queued per worker.
+    "jobsPerWorker": 4,
+    // Time budget for each worker job.
+    "jobSeconds": 120,
+    // Tune worker concurrency in non-continuous scheduling mode.
+    "adaptiveConcurrency": true,
+    // Starting worker concurrency for adaptive scheduling.
+    "initialConcurrency": 4,
+    // Rounds to sample before adjusting adaptive concurrency.
+    "concurrencySampleRounds": 2,
+    // Database-time fraction used by the concurrency controller.
+    "concurrencyDatabaseFraction": 0.6,
+    // Relative throughput tolerance for concurrency changes.
+    "concurrencyRateTolerance": 0.05,
+    // Worker memory budget in MiB.
+    "memoryBudgetMegabytes": 8192,
+    // Positive enables global search. Zero disables it.
+    "broadSearchSeconds": 60
+  },
+  // Round, status and checkpoint intervals.
+  "timing": {
+    // Seconds between attempts to save the best candidate.
+    "checkpointSeconds": 30,
+    // Round target in minutes when local search has no gate reduction.
+    "roundMinutes": 25,
+    // Round target in minutes once local search removes gates.
+    "improvedRoundMinutes": 5,
+    // Seconds between console progress summaries.
+    "summarySeconds": 30,
+    // Seconds between worker progress reports.
+    "workerReportSeconds": 5,
+    // Seconds between database-generation status updates.
+    "databaseLogSeconds": 60,
+    // Seconds between saves in standalone optimization.
+    "standaloneSaveSeconds": 60
+  },
+  // Console output and diagnostics.
+  "logging": {
+    // Enable detailed optimizer logging.
+    "verbose": false,
+    // Enable database generation diagnostics.
+    "generationDiagnostics": true,
+    // Minimum generation duration for detailed diagnostics.
+    "generationDiagnosticsMinimumSeconds": 5,
+    // Event-loop sampling interval in milliseconds.
+    "eventLoopResolutionMilliseconds": 20
+  },
+  // Shared equivalence checking limits.
+  "validation": {
+    // Sample count for checkpoint equivalence validation.
+    "checkpointInputs": 20,
+    // Maximum wire count accepted by the optimizer and verification.
+    "maximumWires": 64
+  },
+  // Region selection and search infrastructure shared by strategies.
+  "search": {
+    // Keep productive strategies across rounds and rotate after misses.
+    "strategyAdaptive": true,
+    // Smallest local dependency subset in gates.
+    "subsetMinimum": 2,
+    // Largest local dependency subset in gates.
+    "subsetMaximum": 199,
+    // Smallest search window inside a local subset.
+    "sliceMinimum": 2,
+    // Largest search window inside a local subset.
+    "sliceMaximum": 199,
+    // Maximum pieces searched within a worker job.
+    "maximumInnerChunks": 5,
+    // Gate threshold for splitting worker jobs internally.
+    "minimumInnerChunkGates": 200,
+    // Gate shuffle passes between local searches.
+    "workerShufflePasses": 200,
+    // Gate shuffle passes between rounds when enabled.
+    "roundShufflePasses": 2000,
+    // Adapt region sizes and search arms based on measured results.
+    "adaptive": false,
+    // Explore a different search arm every N selections.
+    "explorationEvery": 5,
+    // Number of region-size combinations considered by the scheduler.
+    "searchArms": 16,
+    // Give recently changed wires priority when selecting regions.
+    "prioritizeChangedWires": true,
+    // Reuse prefix snapshots during packed evaluation.
+    "incrementalEvaluation": true,
+    // Byte budget for prefix snapshots per evaluator.
+    "prefixCacheBytes": 8388608,
+    // Minimum gate interval between prefix snapshots.
+    "prefixStride": 16,
+    // Maximum normalized exact-rewrite cache entries.
+    "normalizedCacheEntries": 10000,
+    // Balance chunks by measured wire costs.
+    "balancedWorkers": true,
+    // Maintain a dependency index across local rewrites.
+    "incrementalDependencies": true,
+    // Decay factor for prior search-arm performance.
+    "schedulerDecay": 0.98,
+    // Seed search near the last successful rewrite.
+    "localSearch": true,
+    // Maximum number of nearby anchors after a rewrite.
+    "localSearchSeeds": 32,
+    // Maximum gate distance when collecting nearby seeds.
+    "localSearchRadius": 16,
+    // Bypass nearby anchors every N region searches.
+    "localSearchBroadEvery": 5,
+    // Target size of a chunk in the editable gate sequence.
+    "circuitChunkGates": 128,
+    // Reuse the same region-size choices across jobs.
+    "stableSearchArms": false,
+    // Maximum remembered search-arm results.
+    "schedulerHistoryEntries": 128,
+    // Separate independent wire components before local search.
+    "independentComponents": false
+  },
+  // Lookup and search cache limits.
+  "cache": {
+    // Maximum cached rainbow lookups per worker.
+    "lookupEntries": 1000000,
+    // Maximum remembered processed windows per worker.
+    "processedEntries": 1000000,
+    // Maximum cached normalized shuffle results.
+    "shuffleEntries": 100000,
+    // Maximum remembered tested subsets per worker.
+    "subsetEntries": 100000,
+    // Byte budget for cached window keys.
+    "windowKeyBytes": 16777216,
+    // Evict lookup entries in FIFO or least-recently-used order.
+    "lookupPolicy": "lru"
+  },
+  // Rainbow table sizes, SQLite lookup and table generation.
+  "database": {
+    // Rainbow tables used by the optimizer.
+    "tables": [
+      {
+        // Number of wires covered by this table.
+        "wires": 5,
+        // Maximum gate count generated for this table.
+        "gates": 2
+      },
+      {
+        // Number of wires covered by this table.
+        "wires": 4,
+        // Maximum gate count generated for this table.
+        "gates": 5
+      },
+      {
+        // Number of wires covered by this table.
+        "wires": 3,
+        // Maximum gate count generated for this table.
+        "gates": 6
+      }
+    ],
+    // Maximum IDs per SQLite rainbow lookup batch.
+    "queryBatchSize": 900,
+    // SQLite memory map budget in bytes. Zero disables mapping.
+    "memoryMapBytes": 268435456,
+    // Maximum generation states. Zero uses the automatic limit.
+    "generationStates": 0,
+    // Maximum candidate rows per staging write batch.
+    "generationBatchRows": 3000,
+    // Recent generation samples used for ETA.
+    "etaWindowSamples": 5,
+    // Sample count before calculating an ETA.
+    "etaWarmupSamples": 3,
+    // Weight of the latest generation rate in the ETA estimate.
+    "etaSmoothing": 0.2,
+    // Delay for coalescing concurrent lookup requests.
+    "lookupBatchMilliseconds": 0,
+    // Maximum database-generation workers.
+    "generationWorkers": 8,
+    // Maximum queued generation batches.
+    "generationQueueBatches": 2,
+    // Minimum candidate work before generation uses parallel slots.
+    "generationMinimumWork": 100000,
+    // Maximum prepared lookup statements per connection.
+    "statementCacheEntries": 16,
+    // Share eligible rainbow tables in memory between workers.
+    "sharedTables": true,
+    // Byte budget for shared lookup tables.
+    "sharedTableBytes": 33554432,
+    // Maximum rows in a shared table.
+    "sharedTableMaximumRows": 100000,
+    // Rows per generation input read.
+    "generationReadRows": 4096,
+    // SQLite generation page cache in MiB.
+    "generationCacheMegabytes": 1024,
+    // Use files or memory for SQLite temporary storage.
+    "generationTempStore": "file",
+    // SQLite journal mode during generation.
+    "generationJournalMode": "wal",
+    // SQLite durability level during generation.
+    "generationSynchronous": "full",
+    // Maximum slowdown factor applied by ETA estimates.
+    "etaMaximumSlowdown": 1,
+    // Bind-parameter cap per generation SQL statement.
+    "generationSqlParameters": 8192,
+    // Reuse prepared staging insert statements.
+    "generationPreparedInserts": true,
+    // Sort incoming rows before staging insertion.
+    "generationSortStaging": false,
+    // Maximum prepared generation statements cached.
+    "generationStatementCacheEntries": 8,
+    // Append staging rows before deduplication.
+    "generationAppendStaging": false,
+    // Aggregate staging winners before merging.
+    "generationAggregateMerge": true,
+    // Merge incoming candidate winners directly when eligible.
+    "generationDirectInputMerge": true,
+    // Prefetch generation input batches.
+    "generationPrefetch": true,
+    // Memory budget in MiB for generation prefetch.
+    "generationPrefetchMegabytes": 16,
+    // Use compact bindings for staging inserts.
+    "generationCompactBindings": true,
+    // Number of staging writer lanes.
+    "generationStagingWriters": 2,
+    // Sample window used to estimate generation trends.
+    "etaTrendWindowSamples": 60,
+    // Minimum samples required for trend-based ETA.
+    "etaTrendMinimumSamples": 10,
+    // Minimum relative work growth before trend correction.
+    "etaTrendMinimumWorkGrowth": 0.25,
+    // Count new rows inserted into the final table.
+    "generationCountFinalInserts": false,
+    // Cache budget in MiB for generation candidates.
+    "generationCandidateCacheMegabytes": 128,
+    // Stream expansion output to staging writers.
+    "generationStreamStaging": true,
+    // Maximum queued batches per staging writer.
+    "generationStagingQueueBatches": 2
+  },
+  // Benchmark workloads, variants and output paths.
+  "benchmark": {
+    // Seconds per optimizer benchmark trial.
+    "seconds": 10,
+    // Number of trials per benchmark case and variant.
+    "repeats": 3,
+    // Random seed for repeatable benchmark trials.
+    "seed": 1729,
+    // Worker counts to benchmark.
+    "workerCounts": [1, 2, 4],
+    // Maximum optimization checks per trial. Zero is unlimited.
+    "maximumChecks": 0,
+    // Filename for the optimizer benchmark report.
+    "outputName": "benchmark.json",
+    // Extra seconds allowed for benchmark shutdown.
+    "maximumOverrunSeconds": 30,
+    // Benchmark mode, comparison or ablation.
+    "mode": "comparison",
+    // Path to the benchmark case manifest.
+    "caseManifest": "benchmarks/cases.json",
+    // Directory name for benchmark case results.
+    "caseOutputDirectory": "benchmark-cases",
+    // Named benchmark variants to run.
+    "variants": [],
+    // Benchmark override for scheduler history decay.
+    "decayFactor": 0.98,
+    // Rainbow table sizes used in generation benchmarks.
+    "generationTables": [
+      {
+        // Number of wires covered by this table.
+        "wires": 3,
+        // Maximum gate count generated for this table.
+        "gates": 3
+      },
+      {
+        // Number of wires covered by this table.
+        "wires": 4,
+        // Maximum gate count generated for this table.
+        "gates": 2
+      }
+    ],
+    // Filename for the generation benchmark report.
+    "generationOutputName": "generation-benchmark.json",
+    // Timeout per generation benchmark trial.
+    "generationTimeoutSeconds": 600,
+    // Existing row counts in the deduplication benchmark.
+    "dedupSeenRows": [10000, 100000, 1000000],
+    // Number of candidate functions in the deduplication benchmark.
+    "dedupCandidateFunctions": 2000,
+    // Number of candidate masks per function.
+    "dedupMasksPerFunction": 4,
+    // Filename for the deduplication report.
+    "dedupOutputName": "dedup-benchmark.json",
+    // Candidate row count in the staging benchmark.
+    "stagingRows": 200000,
+    // Filename for the staging benchmark report.
+    "stagingOutputName": "staging-benchmark.json",
+    // Bind-parameter limit in the wide staging benchmark variant.
+    "stagingWideSqlParameters": 16384,
+    // Filename for the merge benchmark report.
+    "mergeOutputName": "merge-benchmark.json",
+    // Compare staging settings in the generation benchmark.
+    "generationStagingComparison": false,
+    // Compare input prefetch settings.
+    "generationPrefetchComparison": false,
+    // Compare staging writer configurations.
+    "generationWriterComparison": false,
+    // Compare final table merge settings.
+    "generationFinalComparison": false,
+    // Filename for the final lookup benchmark report.
+    "finalLookupOutputName": "final-lookup-benchmark.json",
+    // Compare streamed and buffered generation output.
+    "generationStreamingComparison": false
+  }
+}

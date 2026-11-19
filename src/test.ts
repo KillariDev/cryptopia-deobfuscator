@@ -322,7 +322,16 @@ console.log('Detailed progress, reduction checkpoints and round-stop regressions
 
 const { defaults, parseConfig, config } = await import('./config.js')
 assert.deepEqual(parseConfig({}), defaults)
-assert.doesNotThrow(() => parseConfig(JSON.parse(readFileSync(new URL('../solver.config.json', import.meta.url), 'utf8'))), 'shipped settings may override defaults but must remain valid')
+const { parseConfigDocument } = await import('./config-document.js')
+assert.doesNotThrow(() => parseConfig(parseConfigDocument(readFileSync(new URL('../solver.config.jsonc', import.meta.url), 'utf8'))))
+const grouped = parseConfig(parseConfigDocument('{ // comment\n "strategies": {"rainbow":{"enabled":false,},"variables":{"samples":12},"satSweeping":{"enabled":false}}, "files":{"databaseDirectory":"https://example.test/tables"} }'))
+assert.equal(grouped.search.rainbow, false)
+assert.equal(grouped.validation.probabilisticInputs, 12)
+assert.equal(grouped.synthesis.satSweeping, false)
+assert.equal(grouped.files.databaseDirectory, 'https://example.test/tables')
+assert.throws(() => parseConfig({ strategies: { rainbow: { enabld: false } } }), /Unknown config setting/)
+assert.throws(() => parseConfigDocument('{"workers": /* unfinished'))
+assert.equal(parseConfig({ synthesis: { satSweeping: false } }).synthesis.satSweeping, false)
 const custom = parseConfig({ timing: { summarySeconds: 10, improvedRoundMinutes: 2 }, workers: { maximum: 3 }, logging: { verbose: true } })
 assert.equal(custom.timing.summarySeconds, 10)
 assert.equal(custom.workers.maximum, 3)
@@ -366,16 +375,17 @@ try {
 	assert.match(missingInputs.stderr, /Usage:/)
 } finally { await rm(configDir, { recursive: true, force: true }) }
 
-const { IncrementalEvaluator } = await import('./packed.js')
+const { IncrementalEvaluator, PackedInputs } = await import('./packed.js')
 const { RewriteCache, normalizeWindow, SearchScheduler, balancedChunks, improving } = await import('./search.js')
 const { isReplacementSimpler, findConvexSubsets } = await import('./utils.js')
 for (const wires of [1, 4, 8]) {
 	const combinations = generateCombinations(wires)
 	for (const count of [0, 1, 17, 32, 33, 64, 202]) {
 		const inputs = Array.from({ length: count }, (_, i) => combinations[i % combinations.length])
+		const packedInputs = new PackedInputs(inputs)
 		const reference = makeGates(45, wires)
 		for (const bytes of [0, 64, 8192]) {
-			const evaluator = new IncrementalEvaluator(reference, inputs, bytes, 4)
+			const evaluator = new IncrementalEvaluator(reference, bytes === 0 ? inputs : packedInputs, bytes, 4)
 			assert.deepEqual(evaluator.unpack(), inputs.map(input => evalCircuit(reference, input)))
 			assert.ok([...evaluator.checkpoints.values()].reduce((sum, state) => sum + state.byteLength, 0) <= bytes)
 			const variants = [reference, [], reference.slice(1), reference.slice(0, -1), [...reference, ...makeGates(1, wires)], [...reference.slice(0, 30), ...makeGates(1, wires), ...reference.slice(31)]]
@@ -438,6 +448,10 @@ try {
 	Math.random = () => 0.5
 	const preferred = [...findConvexSubsets(3, gatesToBalance, new Set([0]))]
 	assert.deepEqual(preferred.map(lines => lines.join(',')).sort(), baseline.map(lines => lines.join(',')).sort())
+	// The selector partitions seeds, not the gates inside each returned region.
+	const favored = baseline.filter(lines => getVars(gatesToBalance[Math.max(...lines)]).includes(0))
+	const others = baseline.filter(lines => !getVars(gatesToBalance[Math.max(...lines)]).includes(0))
+	assert.deepEqual(preferred, [...favored, ...others])
 } finally { Math.random = savedRandom }
 console.log('Adaptive, incremental, packed, normalized-cache, pruning and balancing regressions passed')
 
@@ -482,22 +496,22 @@ assert.equal(summaryThrottle.allow(0), true)
 for (let round = 1; round < 30; round++) assert.equal(summaryThrottle.allow(round * 1000), false, 'quiet cadence survives rapid round restarts')
 assert.equal(summaryThrottle.allow(30_000), true)
 assert.equal(summaryThrottle.allow(30_001, true), true, 'verbose and final reports bypass the interval')
-const compact = formatStatus({ original: 1000, roundStart: 200, candidate: 100, saved: 100, statuses: [status, { updatedAtMs: 0, done: true }], elapsedMs: 60_000 })
-assert.match(compact, /90.00% fewer than original; 100 removed this round/)
-assert.match(compact, /Checkpoint up to date/)
+const compact = formatStatus({ effectivePairs: 12, previousPairs: 15, original: 1000, roundStart: 200, candidate: 100, previous: 163, statuses: [status, { updatedAtMs: 0, done: true }], elapsedMs: 60_000 })
+assert.match(compact, /Circuit: 100G 12.00W -63G -3.00W \(90\.00% fewer than original\)/)
+assert.ok(!compact.includes('Checkpoint'))
 assert.match(compact, /1 worker active/)
-assert.match(compact, /20% elapsed/)
+assert.match(compact, /Round time: 1m 0s \/ 5m 0s$/)
 assert.ok(!compact.includes('oldest'))
 assert.ok(!compact.includes('subsets'))
-const completedStatus = formatStatus({ original: 100, roundStart: 100, candidate: 50, statuses: [{ updatedAtMs: 0, done: true }], elapsedMs: 300_000 })
+const completedStatus = formatStatus({ effectivePairs: 12, previousPairs: 10, original: 100, roundStart: 100, candidate: 50, previous: 60, statuses: [{ updatedAtMs: 0, done: true }], elapsedMs: 300_000 })
 assert.match(completedStatus, /All workers finished/)
 assert.match(completedStatus, /Round finished in 5m 0s/)
 assert.ok(!completedStatus.includes('% elapsed'))
-assert.match(completedStatus, /No checkpoint saved this run yet/)
-const lateStatus = formatStatus({ original: 100, roundStart: 100, candidate: 100, saved: 100, statuses: [status], elapsedMs: 90_000 })
+assert.match(completedStatus, /Circuit: 50G 12.00W -10G \+2.00W/)
+const lateStatus = formatStatus({ effectivePairs: 12, previousPairs: 12, original: 100, roundStart: 100, candidate: 100, previous: 100, statuses: [status], elapsedMs: 90_000 })
 assert.match(lateStatus, /Warning: 1 worker update delayed/)
-assert.match(lateStatus, /6% elapsed/)
-assert.ok(!formatStatus({ original: 0, roundStart: 0, candidate: 0, statuses: [], elapsedMs: 0 }).includes('NaN'))
+assert.match(lateStatus, /Round time: 1m 30s \/ 25m 0s/)
+assert.ok(!formatStatus({ effectivePairs: 0, previousPairs: 0, original: 0, roundStart: 0, candidate: 0, previous: 0, statuses: [], elapsedMs: 0 }).includes('NaN'))
 
 const { TemplateLibrary } = await import('./templates.js')
 const { functionKey, circuitState, semanticCircuits, meetInMiddle, encodeGates, decodeGates, truthKey } = await import('./semantic.js')
@@ -592,7 +606,7 @@ assert.equal(parseConfig({ synthesis: { forwardSemanticSearch: true } }).synthes
 const { advancedRewrite } = await import('./strategies.js')
 const synthesisOptions = { ...config.synthesis }
 try {
-	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, quadratic: false, affine: false, forwardSemanticSearch: true, smt: true, meetInMiddle: false, equalitySaturation: false, maximumWires: 3, states: 2000, maximumReplacementGates: 0 })
+	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, quadratic: false, affine: false, forwardSemanticSearch: true, smt: true, meetInMiddle: false, equalitySaturation: false, maximumWires: 3, states: 2000, maximumReplacementGates: 0 })
 	const input = [singleGate[0], singleGate[0], singleGate[0]]
 	resetStrategyStats()
 	assert.equal(await advancedRewrite(input, { deadline: performance.now() + 5000 }), undefined)
@@ -788,7 +802,7 @@ assert.deepEqual(await inFlight, singleGate)
 const failingLookup = new LookupBatcher(10, 0, async () => { throw new Error('lookup failed') })
 await assert.rejects(failingLookup.get('a'), /lookup failed/)
 await assert.rejects(failingLookup.get('a'), /lookup failed/) // retry after rejection
-const queuedStatus = formatStatus({ original: 10, roundStart: 10, candidate: 10, statuses: [{updatedAtMs:0,done:false,started:false}], elapsedMs: 100000 })
+const queuedStatus = formatStatus({ effectivePairs: 12, previousPairs: 12, original: 10, roundStart: 10, candidate: 10, previous: 10, statuses: [{updatedAtMs:0,done:false,started:false}], elapsedMs: 100000 })
 assert.match(queuedStatus, /0 workers active; 1 job queued/)
 assert.ok(!queuedStatus.includes('Warning'))
 console.log('Circuit editing, local graph updates, lazy snapshots, verified rolling fingerprints and lookup coalescing regressions passed')
@@ -1014,3 +1028,15 @@ await import('./memory-concurrency-test.js')
 await import('./dependency-cuts-test.js')
 
 await import('./checkpoint-progress-test.js')
+
+await import('./local-global-scheduling-test.js')
+
+await import('./dependency-deadline-test.js')
+
+await import('./worker-heartbeat-test.js')
+
+await import('./local-publication-test.js')
+
+await import('./checkpoint-coalescing-test.js')
+
+await import('./profile-optimizations-test.js')

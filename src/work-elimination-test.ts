@@ -1,3 +1,4 @@
+import { workerRegionSeed } from './search.js'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -19,7 +20,7 @@ import { Gate } from './types.js'
 import { LimitedMap } from './limitedMap.js'
 import { allSQL, runSQL } from './sql.js'
 import { createDependencyGraph } from './lineswapper.js'
-import { calculateAllOutputsArray, generateCombinations, dependencyGraphToMap, getVars } from './utils.js'
+import { calculateAllOutputsArray, generateCombinations, dependencyGraphToMap, dependencySort, getVars } from './utils.js'
 
 let seed = 6297
 const random = (n: number) => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return (seed >>> 8) % n }
@@ -44,6 +45,17 @@ for (const chunkSize of [1, 3, 16, 128]) {
 	assert.deepEqual(sequence.toArray(), [])
 }
 assert.throws(() => new ChunkedSequence([1, 1], 4, true))
+const consecutive = ChunkedSequence.consecutiveIds(12, 4)
+assert.equal(consecutive.indexOf(8), 8)
+consecutive.replace([0, 5], [20])
+assert.equal(consecutive.indexOf(0), undefined)
+assert.equal(consecutive.indexOf(5), undefined)
+assert.equal(consecutive.indexOf(20), 4)
+assert.equal(consecutive.indexOf(8), 7)
+assert.throws(() => consecutive.replace([0], [8]), /Duplicate stable circuit ID/)
+consecutive.replace([0], [5])
+assert.equal(consecutive.indexOf(5), 0)
+assert.equal(consecutive.indexOf(1), undefined)
 const duplicateGates = new ChunkedSequence([1, 1, 1], 2)
 duplicateGates.replace([0, 2], [2, 2]); assert.deepEqual(duplicateGates.toArray(), [1, 2, 2])
 const lazyPart = new ChunkedSequence([1, 2, 3].map(target => ({ a: 0, b: 0, target, gate_i: 15 })), 1)
@@ -56,13 +68,24 @@ assert.equal(lazy.length, 1); assert.deepEqual(lazy.materialize(), lazyPart.toAr
 for (let trial = 0; trial < 4; trial++) {
 	let gates = Array.from({ length: 320 }, () => ({ a: random(8), b: random(8), target: random(8), gate_i: random(16) }))
 	const graph = new IncrementalGraph(gates, 8)
+	const searchGraph = new IncrementalGraph(gates, 8, { trackFuture: false })
 	for (let edit = 0; edit < 35; edit++) {
 		const selected = [...new Set(Array.from({ length: 4 }, () => random(gates.length)))].sort((a, b) => a - b)
 		const replacement = Array.from({ length: random(4) }, () => ({ a: random(8), b: random(8), target: random(8), gate_i: random(16) }))
-		graph.replace(selected, replacement); gates = patchCircuit(gates, selected, replacement).values
+		graph.replace(selected, replacement)
+		searchGraph.replace(selected, replacement)
+		gates = patchCircuit(gates, selected, replacement).values
 		const nodes = createDependencyGraph(gates)
 		assert.deepEqual(graph.context().nodes, nodes)
 		assert.deepEqual(graph.context().dependantMap, dependencyGraphToMap(nodes))
+		const search = searchGraph.context()
+		assert.deepEqual(search.nodes, nodes.map(node => ({ ...node, dependOnFutureLine: -1 })))
+		assert.deepEqual(search.access, graph.context().access)
+		assert.deepEqual(search.dependantMap, graph.context().dependantMap)
+		for (const size of [2, 8, 24]) {
+			const anchor = random(gates.length)
+			assert.deepEqual(searchGraph.selectRegion(anchor, size), dependencySort(search.dependantMap, nodes[anchor], size, nodes, gates, search.access))
+		}
 	}
 }
 
@@ -194,3 +217,5 @@ for (const value of [0, -1, 1.5]) {
 	assert.throws(() => parseConfig({ database: { statementCacheEntries: value } }))
 }
 console.log('Subset reuse, coverage proofs, weighted intervals, prepared statement lifecycle and chunked circuit regressions passed')
+
+assert.equal(new Set(Array.from({ length: 8 }, (_, i) => workerRegionSeed(97037, i))).size, 8)

@@ -78,7 +78,11 @@ export const evalGate = (controlFunction: number, a: boolean, b: boolean, origin
 	return xor(lookupTable[controlFunction][a ? 1 : 0][b ? 1 : 0], originalOutput)
 }
 
-export const getUniqueVars = (gates: Gate[]) => Array.from(new Set(gates.flatMap((gate) => getVars(gate))))
+export const getUniqueVars = (gates: Gate[]) => {
+	const wires = new Set<number>()
+	for (const gate of gates) for (const wire of getVars(gate)) wires.add(wire)
+	return [...wires]
+}
 
 export const getVars = (gate: Gate) => {
 	switch(gate.gate_i) {
@@ -458,28 +462,35 @@ class SortedArray {
 
 
 export type WireAccessIndex = { accesses: Map<number, number[]>, writes: Map<number, number[]> }
+export function appendWireAccess(index: Map<number, number[]>, wire: number, id: number) {
+	const list = index.get(wire)
+	if (!list) index.set(wire, [id])
+	else if (list[list.length - 1] !== id) list.push(id)
+}
+
 export function indexWireAccesses(gates: Gate[]): WireAccessIndex {
 	const accesses = new Map<number, number[]>(), writes = new Map<number, number[]>()
-	const add = (map: Map<number, number[]>, wire: number, line: number) => {
-		const list = map.get(wire)
-		if (list) list.push(line)
-		else map.set(wire, [line])
-	}
 	gates.forEach((gate, line) => {
-		for (const wire of new Set(getVars(gate))) add(accesses, wire, line)
-		add(writes, gate.target, line)
+		for (const wire of getVars(gate)) appendWireAccess(accesses, wire, line)
+		appendWireAccess(writes, gate.target, line)
 	})
 	return { accesses, writes }
 }
 
-// Only the last conflicting future line is consumed by subset selection.
-function lastUnselected(lines: number[] = [], after: number, before: number, subset: Set<number>) {
+export function wireAccessLowerBound(lines: readonly number[], before: number, positionOf?: (id: number) => number) {
 	let low = 0, high = lines.length
 	while (low < high) {
 		const mid = (low + high) >>> 1
-		if (lines[mid] < before) low = mid + 1
+		const position = positionOf ? positionOf(lines[mid]) : lines[mid]
+		if (position < before) low = mid + 1
 		else high = mid
 	}
+	return low
+}
+
+// Only the last conflicting future line is consumed by subset selection.
+function lastUnselected(lines: number[] = [], after: number, before: number, subset: Set<number>) {
+	const low = wireAccessLowerBound(lines, before)
 	for (let i = low - 1; i >= 0 && lines[i] > after; i--) {
 		if (!subset.has(lines[i])) return lines[i]
 	}
@@ -487,20 +498,25 @@ function lastUnselected(lines: number[] = [], after: number, before: number, sub
 }
 
 export type GateSequence = Gate[] | { length: number, at(index: number): Gate, toArray(): Gate[] }
-const gateAt = (gates: GateSequence, index: number) => Array.isArray(gates) ? gates[index] : gates.at(index)
+const gateAt = (gates: Gate[] | { at(index: number): Gate }, index: number) => Array.isArray(gates) ? gates[index] : gates.at(index)
 const gateArray = (gates: GateSequence) => Array.isArray(gates) ? gates : gates.toArray()
 
-function needToAddAsWell(dependantMap: Map<number, number[]>, subsetSet: Set<number>, node: number, maxNodeNumber: number, gates: GateSequence, access: WireAccessIndex): { pastDepend: number[], addNode: number } {
-	let currentNode = node
-	while (true) {
-		const [target, ...controls] = getVars(gateAt(gates, currentNode))
-		let last = lastUnselected(access.accesses.get(target), currentNode, maxNodeNumber, subsetSet)
-		for (const wire of controls) last = Math.max(last, lastUnselected(access.writes.get(wire), currentNode, maxNodeNumber, subsetSet))
-		if (last === -1) return {
-			pastDepend: (dependantMap.get(currentNode) ?? []).filter(x => !subsetSet.has(x) && x < maxNodeNumber),
-			addNode: currentNode,
-		}
-		currentNode = last
+export type DependencyQueries = {
+	past(line: number): number[]
+	followers(line: number, before: number, selected: Set<number>): number[]
+	lastConflict(line: number, before: number, selected: Set<number>): number
+}
+
+export function dependencyQueries(dependantMap: Map<number, number[]>, nodes: DependencyNode[], gates: Gate[] | { at(index: number): Gate }, access: WireAccessIndex): DependencyQueries {
+	return {
+		past: line => nodes[line].dependOnPastLines,
+		followers: (line, before, selected) => (dependantMap.get(line) ?? []).filter(next => next < before && !selected.has(next)),
+		lastConflict: (line, before, selected) => {
+			const [target, ...controls] = getVars(gateAt(gates, line))
+			let last = lastUnselected(access.accesses.get(target), line, before, selected)
+			for (const wire of controls) last = Math.max(last, lastUnselected(access.writes.get(wire), line, before, selected))
+			return last
+		},
 	}
 }
 
@@ -518,17 +534,18 @@ export const dependencyGraphToMap = (nodes: DependencyNode[]) => {
 
 export type DependencyContext = { nodes: DependencyNode[], dependantMap: Map<number, number[]>, access: WireAccessIndex }
 
-export function* findConvexSubsets(N: number, gates: GateSequence, preferredWires?: Set<number>, context?: DependencyContext, seeds: number[] = []): Generator<number[]> {
+export function* findConvexSubsets(N: number, gates: GateSequence, preferredWires?: Set<number>, context?: DependencyContext, seeds: number[] = [], stopped: () => boolean = () => false): Generator<number[]> {
 	//yield Array.from(Array(gates.length).keys()) // start with current order
-	if (N === 0) return
+	if (N === 0 || stopped()) return
 	const nodes = context?.nodes ?? createDependencyGraph(gateArray(gates))
 	const dependantMap = context?.dependantMap ?? dependencyGraphToMap(nodes)
 	const access = context?.access ?? indexWireAccesses(gateArray(gates))
 	const visited = new Set<number>()
 	for (const seed of seeds) {
+		if (stopped()) return
 		if (!Number.isInteger(seed) || seed < 0 || seed >= nodes.length || visited.has(seed)) continue
 		visited.add(seed)
-		const subset = dependencySort(dependantMap, nodes[seed], N, nodes, gates, access)
+		const subset = dependencySort(dependantMap, nodes[seed], N, nodes, gates, access, stopped)
 		if (subset.length >= N) yield subset
 	}
 
@@ -549,40 +566,57 @@ export function* findConvexSubsets(N: number, gates: GateSequence, preferredWire
 		return array
 	  }
 
-	const revesedNodes = shuffle(nodes.slice())
-	if (preferredWires?.size) revesedNodes.sort((a, b) => Number(getVars(gateAt(gates, b.lineNumber)).some(wire => preferredWires.has(wire))) - Number(getVars(gateAt(gates, a.lineNumber)).some(wire => preferredWires.has(wire))))
-	for (const node of revesedNodes) {
+	const shuffledNodes = shuffle(nodes.slice())
+	const preferred: DependencyNode[] = []
+	if (preferredWires?.size) {
+		// Stable partition preserves shuffled order within both groups.
+		let remaining = 0
+		for (const node of shuffledNodes) {
+			if (stopped()) return
+			if (getVars(gateAt(gates, node.lineNumber)).some(wire => preferredWires.has(wire))) preferred.push(node)
+			else shuffledNodes[remaining++] = node
+		}
+		shuffledNodes.length = remaining
+	}
+	for (const group of [preferred, shuffledNodes]) for (const node of group) {
+		if (stopped()) return
 		if (visited.has(node.lineNumber)) continue
-		const currentSubset = dependencySort(dependantMap, node, N, nodes, gates, access)
+		const currentSubset = dependencySort(dependantMap, node, N, nodes, gates, access, stopped)
 		if (currentSubset.length >= N) yield currentSubset
 	}
 }
 
-export const dependencySort = (dependantMap: Map<number, number[]>, node: DependencyNode, maxLength: number, nodes: DependencyNode[], gates: GateSequence, access = indexWireAccesses(gateArray(gates))) => {
-	const currentSubset: number[] = []
-	const currentSubsetSet = new Set<number>()
-	let nonExploredDepenencies = new SortedArray()
-	currentSubset.push(node.lineNumber)
-	currentSubsetSet.add(node.lineNumber)
-	nonExploredDepenencies.add(node.dependOnPastLines)
-	while (true) {
-		const candidate = nonExploredDepenencies.popMin()
-		if (candidate === undefined) break
-		if (currentSubsetSet.has(candidate)) continue
-		const needToAdd = needToAddAsWell(dependantMap, currentSubsetSet, candidate, node.lineNumber, gates, access)
-		if (needToAdd.pastDepend.length > 0) {
-			nonExploredDepenencies.add([candidate, ...needToAdd.pastDepend]) //push us pack with the new deps
+export const dependencySort = (dependantMap: Map<number, number[]>, node: DependencyNode, maxLength: number, nodes: DependencyNode[], gates: GateSequence, access = indexWireAccesses(gateArray(gates)), stopped: () => boolean = () => false) =>
+	selectDependencyRegion(dependencyQueries(dependantMap, nodes, gates, access), node.lineNumber, maxLength, stopped)
+
+export function selectDependencyRegion(queries: DependencyQueries, anchor: number, maxLength: number, stopped: () => boolean = () => false) {
+	const currentSubset = [anchor]
+	const selected = new Set(currentSubset)
+	const pending = new SortedArray()
+	pending.add(queries.past(anchor))
+	while (!stopped()) {
+		const candidate = pending.popMin()
+		if (candidate === undefined) return currentSubset.reverse()
+		if (selected.has(candidate)) continue
+		let line = candidate
+		while (true) {
+			if (stopped()) return []
+			const conflict = queries.lastConflict(line, anchor, selected)
+			if (conflict === -1) break
+			line = conflict
+		}
+		const followers = queries.followers(line, anchor, selected)
+		if (followers.length) {
+			pending.add([candidate, ...followers])
 			continue
 		}
-		if (needToAdd.addNode !== candidate) {
-			nonExploredDepenencies.add(candidate)
-		}
-		currentSubset.push(needToAdd.addNode)
-		if (currentSubset.length >= maxLength) break
-		currentSubsetSet.add(needToAdd.addNode)
-		nonExploredDepenencies.add(nodes[needToAdd.addNode].dependOnPastLines.filter((x) => !currentSubsetSet.has(x)))
+		if (line !== candidate) pending.add(candidate)
+		currentSubset.push(line)
+		if (currentSubset.length >= maxLength) return currentSubset.reverse()
+		selected.add(line)
+		pending.add(queries.past(line).filter(previous => !selected.has(previous)))
 	}
-	return currentSubset.slice().reverse()
+	return []
 }
 
 export const randomOrder = (nMax: number): number[] => {

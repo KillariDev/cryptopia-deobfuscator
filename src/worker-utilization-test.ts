@@ -24,7 +24,7 @@ let watchdog: ReturnType<typeof setTimeout> | undefined
 try {
 	config.files.dataDirectory = directory
 	config.database.sharedTables = false
-	Object.assign(config.workers, { maximum: 4, keepBusy: true, adaptiveConcurrency: true, initialConcurrency: 1, jobsPerWorker: 1, broadSearchSeconds: 0.04 })
+	Object.assign(config.workers, { broadSearchIdleSeconds: 0, maximum: 4, keepBusy: true, adaptiveConcurrency: true, initialConcurrency: 1, jobsPerWorker: 1, broadSearchSeconds: 0.04 })
 	Object.assign(config.timing, { roundMinutes: 0.01, improvedRoundMinutes: 0.005, summarySeconds: 0.025 })
 	config.logging.verbose = false
 	console.log = () => {}
@@ -33,8 +33,8 @@ try {
 	const active = new Set<number>()
 	WorkerPool.prototype.run = function(gates, wires, onProgress, signal, budget, restart, solver) {
 		if (solver === 'shuffle') return Promise.reject(new Error('keepBusy must not pause all searches for a serial shuffle'))
-		if (!firstSignal) { firstSignal = signal; watchdog = setTimeout(() => Atomics.store(new Int32Array(firstSignal!), 0, 1), 5000) }
-		if (signal !== firstSignal) return Promise.reject(done)
+		if (!firstSignal && solver !== 'broad') { firstSignal = signal; watchdog = setTimeout(() => Atomics.store(new Int32Array(firstSignal!), 0, 1), 5000) }
+		if (solver !== 'broad' && signal !== firstSignal) return Promise.reject(done)
 		;(this as unknown as { workerUrl: URL }).workerUrl = fixture
 		let workerId: number | undefined
 		return originalRun.call(this, gates, wires, (count, activity, snapshot) => {
@@ -71,8 +71,8 @@ try {
 	firstSignal = undefined
 	let retriesFromBest = 0
 	WorkerPool.prototype.run = function(gates, wires, onProgress, signal, budget, restart, solver) {
-		if (!firstSignal) { firstSignal = signal; watchdog = setTimeout(() => Atomics.store(new Int32Array(firstSignal!), 0, 1), 5000) }
-		if (signal !== firstSignal) return Promise.reject(done)
+		if (!firstSignal && solver !== 'broad') { firstSignal = signal; watchdog = setTimeout(() => Atomics.store(new Int32Array(firstSignal!), 0, 1), 5000) }
+		if (solver !== 'broad' && signal !== firstSignal) return Promise.reject(done)
 		;(this as unknown as { workerUrl: URL }).workerUrl = shrinkFixture
 		if (gates.length === 1) retriesFromBest++
 		return originalRun.call(this, gates, wires, onProgress, signal, budget, restart, solver)
@@ -87,8 +87,8 @@ try {
 	firstSignal = undefined
 	let reusedSimpler = false
 	WorkerPool.prototype.run = function(gates, wires, onProgress, signal, budget, restart, solver) {
-		if (!firstSignal) { firstSignal = signal; watchdog = setTimeout(() => Atomics.store(new Int32Array(firstSignal!), 0, 1), 5000) }
-		if (signal !== firstSignal) return Promise.reject(done)
+		if (!firstSignal && solver !== 'broad') { firstSignal = signal; watchdog = setTimeout(() => Atomics.store(new Int32Array(firstSignal!), 0, 1), 5000) }
+		if (solver !== 'broad' && signal !== firstSignal) return Promise.reject(done)
 		;(this as unknown as { workerUrl: URL }).workerUrl = simplifyFixture
 		if (gates.length === 3 && gates.every(gate => gate.gate_i === 15)) reusedSimpler = true
 		return originalRun.call(this, gates, wires, onProgress, signal, budget, restart, solver)

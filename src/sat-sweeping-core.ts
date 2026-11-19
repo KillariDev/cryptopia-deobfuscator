@@ -1,8 +1,13 @@
+import { getVars } from './utils.js'
 import { Gate } from './types.js'
 import { analyzeFactored, FactoredGraph, FactoredLimit, FactoredOptions, Form } from './factored.js'
 import { reportSmtDiagnostic } from './smt-solver.js'
 
-export type SweepStats = { queries: number, merges: number, counterexamples: number, passes?: number, rebuilds?: number, coneNodes?: number, refinementSkips?: number }
+type SweepEngine = Awaited<ReturnType<typeof import('z3-solver').init>>
+const newContext = (api: SweepEngine) => new api.Context('sweeping')
+const contexts = new WeakMap<SweepEngine, ReturnType<typeof newContext>>()
+
+export type SweepStats = { queries: number, merges: number, counterexamples: number, passes?: number, rebuilds?: number, coneNodes?: number, refinementSkips?: number, contextInitializations?: number, encodingMs?: number, checkMs?: number }
 
 /** Evaluate concrete counterexamples in topological order. These refine the
  * candidate filter only; they never authorize a rewrite. */
@@ -30,12 +35,49 @@ function simulate(graph: FactoredGraph, assignment: bigint): boolean[] {
 	return values
 }
 
+/** Roll back writes whose effects were never consumed by another wire.
+ * Form identities refer to the original execution, so each rollback rejoins
+ * it with exactly the same state at the end of that write chain. */
+function removeUnobservedWrites(gates: Gate[], writes: [Form, Form][], aliases: Map<number, Form>, stopped: () => boolean) {
+	const representative = (form: Form) => {
+		while (aliases.has(form.id)) form = aliases.get(form.id)!
+		return form.id
+	}
+	const chains = new Map<number, { lines: number[], positions: Map<number, number> }>()
+	const removed = new Set<number>()
+	for (let i = 0; i < gates.length; i++) {
+		if (stopped()) return undefined
+		const gate = gates[i], [before, after] = writes[i]
+		for (const wire of getVars(gate)) if (wire !== gate.target) chains.delete(wire)
+		let chain = chains.get(gate.target)
+		if (!chain) {
+			chain = { lines: [], positions: new Map([[representative(before), 0]]) }
+			chains.set(gate.target, chain)
+		}
+		chain.lines.push(i)
+		const value = representative(after), prior = chain.positions.get(value)
+		if (prior === undefined) chain.positions.set(value, chain.lines.length)
+		else {
+			for (let j = chain.lines.length - 1; j >= prior; j--) {
+				const line = chain.lines[j]
+				chain.positions.delete(representative(writes[line][1]))
+				removed.add(line)
+			}
+			chain.lines.length = prior
+			chain.positions.set(value, prior)
+		}
+	}
+	return removed.size && !stopped() ? gates.filter((_, i) => !removed.has(i)) : undefined
+}
+
 /** Simulation suggests identities; only UNSAT miters authorize a merge.
  * Rebuild congruence after each batch and repeat on the compact live cone. */
 export async function sweepFactored(gates: Gate[], options: FactoredOptions, deadline: number, stats: SweepStats = { queries: 0, merges: 0, counterexamples: 0 }, engine?: Awaited<ReturnType<typeof import('z3-solver').init>>): Promise<Gate[] | undefined> {
 	try {
 		const stopped = () => options.stopped() || performance.now() >= deadline
-		let working = analyzeFactored(gates, { ...options, stopped })
+		const writes: [Form, Form][] = []
+		let working = analyzeFactored(gates, { ...options, stopped }, (before, after) => writes.push([before, after]))
+		const initialGraph = working.graph
 		const structural = working.graph.emit(working.rows, gates.length)
 		if (structural) return structural
 		if (stopped()) return undefined
@@ -46,12 +88,14 @@ export async function sweepFactored(gates: Gate[], options: FactoredOptions, dea
 			if (signatures.has(form.signature)) { hasCandidates = true; break }
 			signatures.add(form.signature)
 		}
-		if (!hasCandidates) return undefined
+		if (!hasCandidates) return removeUnobservedWrites(gates, writes, new Map(), stopped)
 		const samples: bigint[] = []
 		const { init, killThreads } = await import('z3-solver')
 		const api = engine ?? await init({ printErr: reportSmtDiagnostic })
 		try {
-			const { Solver, Bool, Xor, And, isTrue } = new api.Context('sweeping')
+			let context = contexts.get(api)
+			if (!context) { context = newContext(api); contexts.set(api, context); stats.contextInitializations = (stats.contextInitializations ?? 0) + 1 }
+			const { Solver, Bool, Xor, And, isTrue } = context
 			while (!stopped()) {
 				const { graph, rows } = working
 				stats.passes = (stats.passes ?? 0) + 1
@@ -107,12 +151,17 @@ export async function sweepFactored(gates: Gate[], options: FactoredOptions, dea
 								if (refined[form.id] !== refined[prior.id]) { stats.refinementSkips = (stats.refinementSkips ?? 0) + 1; continue }
 								// Define cones outside push/pop, so cached expressions always
 								// retain their permanent definitions after a miter is removed.
+								const encodingStarted = performance.now()
 								const left = expression(form), right = expression(prior)
+								stats.encodingMs = (stats.encodingMs ?? 0) + performance.now() - encodingStarted
 								solver.push()
 								let result: 'sat' | 'unsat' | 'unknown', assignment: bigint | undefined
 								try {
 									graph.check(); solver.set('timeout', Math.max(1, Math.floor(deadline - performance.now())))
-									solver.add(Xor(left, right)); stats.queries++; result = await solver.check()
+									solver.add(Xor(left, right)); stats.queries++
+									const checkStarted = performance.now()
+									result = await solver.check()
+									stats.checkMs = (stats.checkMs ?? 0) + performance.now() - checkStarted
 									if (result === 'sat') {
 										const model = solver.model()
 										try {
@@ -132,11 +181,18 @@ export async function sweepFactored(gates: Gate[], options: FactoredOptions, dea
 						}
 					}
 				} finally { solver.release() }
-				if (!aliases.size) return undefined
-				working = graph.rebuild(rows, aliases)
-				stats.rebuilds = (stats.rebuilds ?? 0) + 1
-				const result = working.graph.emit(working.rows, gates.length)
-				if (result) return result
+				if (!aliases.size) return graph === initialGraph ? removeUnobservedWrites(gates, writes, aliases, stopped) : undefined
+				// Trace forms belong to the initial graph only.
+				const partial = graph === initialGraph ? removeUnobservedWrites(gates, writes, aliases, stopped) : undefined
+				try {
+					working = graph.rebuild(rows, aliases)
+					stats.rebuilds = (stats.rebuilds ?? 0) + 1
+					const result = working.graph.emit(working.rows, gates.length)
+					if (result) return result
+				} catch (error) {
+					if (!(error instanceof FactoredLimit) || !partial || stopped()) throw error
+				}
+				if (partial) return partial
 			}
 			return undefined
 		} finally { if (!engine) await killThreads(api.em) }
