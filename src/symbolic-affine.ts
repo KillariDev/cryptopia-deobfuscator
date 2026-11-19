@@ -1,4 +1,4 @@
-import { emitQuadraticMap } from './polynomial-synthesis.js'
+import { emitQuadraticMap, emitSharedCubicMap } from './polynomial-synthesis.js'
 import { Gate } from './types.js'
 import { evalGate, getVars } from './utils.js'
 import { simplifyAffineRegions, synthesizeAffineMap } from './affine.js'
@@ -132,10 +132,11 @@ export function synthesizeMixedAffine(input: Gate[], maximumWires: number, maxim
 	}
 	if (!allowQuadratic || stopped()) return undefined
 	const result = emitQuadraticMap(rows, wires, input.length, stopped)
+		?? emitSharedCubicMap(rows, wires, input.length, stopped, spend)
 	if (!result) return undefined
 	const actual = composePolynomials(result, wires, maximumTerms, stopped, spend)
 	if (!actual) return undefined
-	if (actual.some((row, i) => row.size !== rows[i].size || [...row].some(term => !rows[i].has(term)))) throw new Error('Quadratic synthesis failed exact polynomial verification')
+	if (actual.some((row, i) => row.size !== rows[i].size || [...row].some(term => !rows[i].has(term)))) throw new Error('Polynomial synthesis failed exact polynomial verification')
 	return result
 }
 

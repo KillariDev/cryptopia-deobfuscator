@@ -110,8 +110,10 @@ Sparse quadratic synthesis (`strategies.quadratic.enabled`, enabled by default) 
 emit genuinely nonlinear results: NOTs, controlled XORs, AND-controlled flips,
 and complemented variants. It orders target updates so all controls still have
 their original input values, then recomposes the candidate and checks every output
-polynomial exactly. Dependency cycles, target-dependent deltas and degree above
-two are declined by this emitter. The affine emitter still handles general
+polynomial exactly. The symbolic strategy also tries a limited cubic rewrite
+when all cubic terms share a pair of unchanged inputs and an otherwise unused,
+unchanged wire can temporarily be XORed with their product. The rewrite restores
+that wire and cancels the effect of its original value. The affine emitter still handles general
 invertible linear maps, including cyclic linear dependencies. Both local and
 broad searches use quadratic synthesis, sharing the existing symbolic resource
 limits and worker lifetime. The original recursive affine maze synthesizes to its

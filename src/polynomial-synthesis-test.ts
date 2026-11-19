@@ -3,10 +3,11 @@ import { readFileSync } from 'node:fs'
 import { synthesizePolynomial, searchPolynomialRegions } from './symbolic-affine.js'
 import { emitQuadraticMap } from './polynomial-synthesis.js'
 import { advancedRewrite } from './strategies.js'
+import { structuralNames } from './structural-strategies.js'
 import { config } from './config.js'
-import { evalCircuit, generateCombinations, verifyCircuit } from './utils.js'
+import { evalCircuit, generateCombinations, getVars, verifyCircuit } from './utils.js'
 import { seededRandom } from './random.js'
-import { Gate } from './types.js'
+import { CircuitData, Gate } from './types.js'
 const synthesize = (input: Gate[]) => synthesizePolynomial(input, 64, 100000, 10000000)
 const not: Gate = { a: 0, b: 0, target: 0, gate_i: 15 }
 const padding = Array.from({ length: 10 }, () => ({ ...not }))
@@ -25,7 +26,15 @@ assert.equal(ordered[0].target, 3)
 assert.equal(ordered.at(-1)!.target, 2, 'emit users of the original control before mutating that control')
 equivalent(chain, ordered, 4)
 const cubic = [toffoli, { a: 2, b: 3, target: 4, gate_i: 1 }, ...padding]
-assert.equal(synthesize(cubic), undefined, 'decline higher degree maps')
+assert.equal(synthesize(cubic), undefined, 'decline a cubic map without a reusable product')
+// The borrowed wire must be restored for both possible input values.
+const flipA: Gate = { a: 2, b: 3, target: 4, gate_i: 1 }
+const flipB: Gate = { a: 2, b: 5, target: 6, gate_i: 1 }
+const sharedCubic = [toffoli, flipA, toffoli, flipA, toffoli, flipB, toffoli, flipB]
+const sharedResult = synthesize(sharedCubic)
+assert.ok(sharedResult && sharedResult.length === 6)
+equivalent(sharedCubic, sharedResult, 7)
+assert.equal(synthesize(sharedResult), undefined, 'require strictly fewer gates for cubic rewrites')
 const fredkin = [{ a: 1, b: 0, target: 2, gate_i: 3 }, { a: 0, b: 2, target: 1, gate_i: 1 }, { a: 1, b: 0, target: 2, gate_i: 3 }, ...padding]
 assert.equal(synthesize(fredkin), undefined, 'decline target-dependent nonlinear deltas')
 assert.equal(emitQuadraticMap([new Set([1n, 6n]), new Set([2n, 5n]), new Set([4n])], [0, 1, 2], 20, () => false), undefined, 'decline dependency cycles')
@@ -51,9 +60,35 @@ const saved = { ...config.synthesis }
 try {
 	Object.assign(config.synthesis, { factored: false, blockCancellation: false, satSweeping: false, mixedBasis: false, quadratic: true, affine: false, forwardSemanticSearch: false, smt: false, meetInMiddle: false, equalitySaturation: false })
 	assert.deepEqual(await advancedRewrite([toffoli, ...padding]), [toffoli])
+	assert.deepEqual(await advancedRewrite(sharedCubic), sharedResult)
 	config.synthesis.quadratic = false
 	assert.equal(await advancedRewrite([toffoli, ...padding]), undefined)
 } finally { Object.assign(config.synthesis, saved) }
+const fixture: CircuitData = JSON.parse(readFileSync(new URL('../benchmarks/cases/shared-cubic-products.json', import.meta.url), 'utf8'))
+const sharedProducts = fixture.gates.map(([a, b, target, gate_i]) => ({ a, b, target, gate_i }))
+assert.equal(sharedProducts.length, 48)
+const comparisonBudgetMs = 2000
+const cubicReplacement = await advancedRewrite(sharedProducts, {
+	selectedStrategy: 'quadratic', deadline: performance.now() + comparisonBudgetMs
+})
+assert.ok(cubicReplacement && cubicReplacement.length === 26)
+for (const selectedStrategy of [
+	'gf2-affine', ...structuralNames, 'forward-semantic-search', 'z3', 'meet-in-the-middle', 'equality-saturation'
+]) {
+	const candidate = await advancedRewrite(sharedProducts, { selectedStrategy, deadline: performance.now() + comparisonBudgetMs })
+	assert.equal(candidate, undefined, selectedStrategy)
+}
+// Wires 15–26 are only XOR targets, so their initial values pass through
+// independently. Exhaust the 15 control inputs with all output targets zero.
+for (const gate of [...sharedProducts, ...cubicReplacement]) {
+	assert.ok(getVars(gate).slice(1).every(control => control < 15))
+}
+for (const controls of generateCombinations(15)) {
+	const input = [...controls, ...Array<boolean>(fixture.wire_count - controls.length).fill(false)]
+	assert.deepEqual(evalCircuit(cubicReplacement, input), evalCircuit(sharedProducts, input))
+}
+console.log('Shared cubic fixture: 48 → 26 gates, exhaustive control inputs, no replacement from the other synthesis strategies')
+
 const maze = JSON.parse(readFileSync(new URL('../data/recursive-affine-maze.json', import.meta.url), 'utf8'))
 const gates: Gate[] = maze.gates.map(([a,b,target,gate_i]: number[]) => ({a,b,target,gate_i}))
 const result = synthesize(gates)!

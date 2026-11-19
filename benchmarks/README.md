@@ -21,6 +21,22 @@ case-suite smoke test. Control `seconds`, `repeats`, `seed`, `workerCounts`,
 `variants` and output locations in the benchmark settings. A short search budget
 can be noisy; inspect per-trial reductions and overruns, not only averages.
 
+## Shared cubic products
+
+[shared-cubic-products.json](cases/shared-cubic-products.json) is a 48-gate,
+27-wire circuit. Twelve outputs each XOR in a different third control ANDed
+with the same pair of controls. The input interleaves the two uses of each
+output gate so the individual cubic operations are spread across the window.
+The cubic fallback emits 26 gates by sharing the compute and restore operations.
+
+Run `npx tsc && node dist/polynomial-synthesis-test.js` to compare the synthesis
+strategies in isolation with the default configuration and a two-second deadline
+per strategy. The test checks all 32,768 assignments to the 15 control wires
+and requires the other synthesis strategies to return no whole-window
+replacement. The four small-window strategies are outside their default size
+limits on this case. The fixture runs outside `cases.json`, whose benchmark
+runner is limited to eight wires.
+
 ## Complete lookup-table builds
 
 ```bash
