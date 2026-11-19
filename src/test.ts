@@ -514,6 +514,21 @@ try {
 	const oneWireIdentity = [not, not, not, not]
 	const oneWire = await massOptimizeStep(integrationPortfolio, new LimitedMap(100), new LimitedMap(100), oneWireIdentity, 4, true, true, false, undefined, undefined, new RoundStrategyPicker(['variable-elimination']))
 	assert.deepEqual(oneWire.gates, [], 'the variables strategy cancels a one-wire identity')
+	const toggle = (a: number, target: number): Gate => ({ a, b: 0, target, gate_i: 3 })
+	const padding = Array.from({ length: 61 }, (_, i) => ({ ...not, target: 3 + i }))
+	const scratch = [toggle(0, 1), toggle(1, 2), ...padding, toggle(1, 2), toggle(0, 1)]
+	const scratchInputs = generateCombinations(3).map(input => [...input, ...padding.map(() => false)])
+	const variableCaches = { ...createOptimizerCaches(), strategyPicker: new RoundStrategyPicker(['variable-elimination']) }
+	const reducedScratch = await optimize(integrationPortfolio, scratch, 64, 'repeated-write-test', true, variableCaches,
+		5000, undefined, undefined, undefined, false, 2, true)
+	assert.deepEqual(reducedScratch, padding, 'the repeated-write cut removes the temporary wire across unrelated gates')
+	assert.deepEqual(calculateAllOutputsArray(reducedScratch, scratchInputs), calculateAllOutputsArray(scratch, scratchInputs))
+
+	const observableScratch = [toggle(0, 1), toggle(1, 2), ...padding, toggle(0, 1)]
+	const keptScratch = await optimize(integrationPortfolio, observableScratch, 64, 'observable-write-test', true, variableCaches,
+		5000, undefined, undefined, undefined, false, 2, true)
+	assert.equal(keptScratch.length, observableScratch.length, 'a temporary value observed on another wire cannot be dropped')
+	assert.deepEqual(calculateAllOutputsArray(keptScratch, scratchInputs), calculateAllOutputsArray(observableScratch, scratchInputs))
 	const tested = new LimitedMap<string, boolean>(1000)
 	const processed = new LimitedMap<string, boolean>(1000)
 	const lookups = new LimitedMap<string, Gate[] | null>(1000)

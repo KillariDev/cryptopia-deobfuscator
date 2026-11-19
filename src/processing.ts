@@ -2,7 +2,7 @@ import { circuitWireCost, isBetterCircuit } from './circuit-cost.js'
 import { CheckpointWriter } from './checkpoint-writer.js'
 import { opaqueRainbow } from './opaque-rainbow.js'
 import { RoundStrategyPicker, StrategyPicker } from './strategy-picker.js'
-import { searchDependencyCuts } from './dependency-cuts.js'
+import { CutCancelled, DependencyCutIndex, searchDependencyCuts } from './dependency-cuts.js'
 import { setImmediate as yieldToCoordinator } from 'node:timers/promises'
 import { synthesizePolynomialShear, type PolynomialShearVerification } from './polynomial-shear.js'
 import { createPolynomialEquivalenceChecker } from './symbolic-affine.js'
@@ -320,6 +320,39 @@ const findExactReplacement = (variableIndexMapping: number[], mappedGates: Gate[
 }
 
 const canceledVariables = Symbol('canceled variable search')
+
+function removeRepeatedWriteWire(gates: Gate[], offset: number, minimumSpan: number, maximumGates: number, allowWide: boolean, shouldStop: () => boolean, claimAttempt: () => boolean): Gate[] | undefined {
+	if (gates.length < minimumSpan || maximumGates < 2) return undefined
+	try {
+		const index = new DependencyCutIndex(gates, shouldStop)
+		for (const { wire, cut } of index.repeatedWriteCuts(offset, minimumSpan, maximumGates, 64)) {
+			const nVariables = cut.wires.length
+			const inputs = BYTE_ALL_INPUTS.get(nVariables)
+			if (!inputs && !allowWide) continue
+			if (!claimAttempt() || shouldStop()) return undefined
+			const mapped = mapCircuit(cut.gates, cut.wires)
+			const variable = cut.wires.indexOf(wire)
+			const expected = inputs && calculateAllOutputsArray(mapped, inputs)
+			const sample = inputs ? undefined : createVariableSampleCheck(mapped, nVariables)
+			const prove = inputs ? undefined : createPolynomialEquivalenceChecker(mapped, nVariables, config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, shouldStop)
+			for (const remove of [removeVariable, removeNonTargetVariable]) {
+				if (shouldStop()) return undefined
+				const candidate = remove(mapped, variable)
+				if (!isReplacementSimpler(candidate, mapped)) continue
+				const equivalent = inputs && expected
+					? areBooleanArraysEqual(expected, calculateAllOutputsArray(candidate, inputs))
+					: sample?.(candidate) && prove?.(candidate) === true
+				if (!equivalent || shouldStop()) continue
+				const patched = index.patch(cut, reverseMapCircuit(candidate, cut.wires))
+				if (isReplacementSimpler(patched, gates)) return patched
+			}
+		}
+	} catch (error) {
+		if (!(error instanceof CutCancelled)) throw error
+	}
+	return undefined
+}
+
 const findUselessVars = (mapping: number[], gates: Gate[], shouldStop: () => boolean = () => false) => {
 	if (mapping.length > config.search.exactMaximumWires) return undefined
 	let result: Gate[] | undefined
@@ -1038,6 +1071,28 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 				}
 				if (timeToEndWorker()) break
 				if (!result.changed && !result.unavailable) caches.testedSubsets.set(attempt, true)
+			}
+			if (workerMode && (!optimizedVersion.length || checkLimitReached() || timeToEndWorker())) return finishWorker()
+		}
+		if (activity.passes === 1 && strategy === 'variable-elimination' && !checkLimitReached() && !timeToEndWorker()) {
+			const minimumSpan = Math.max(3, config.search.sliceMinimum) + 1
+			let attempts = 0
+			const started = performance.now()
+			const result = removeRepeatedWriteWire(optimizedVersion, workerRegionSeed(optimizedVersion.length, caches.workerIndex),
+				minimumSpan, Math.min(maximumSubset, config.search.sliceMaximum), config.search.probabilistic && phase === 'heavy',
+				timeToEndWorker, () => {
+					if (attempts >= 8 || !claimCheck()) return false
+					attempts++
+					activity.subsets++
+					activity.checks++
+					return true
+				})
+			recordStrategy('variable-elimination', { repeatedWriteCuts: true }, started, optimizedVersion.length, result?.length ?? optimizedVersion.length, result !== undefined)
+			if (result) {
+				caches.strategyPicker.observe(strategy, optimizedVersion.length - result.length)
+				optimizedVersion = result
+				candidateParts = new LazyCircuit([result])
+				activity.improvements++
 			}
 			if (workerMode && (!optimizedVersion.length || checkLimitReached() || timeToEndWorker())) return finishWorker()
 		}
