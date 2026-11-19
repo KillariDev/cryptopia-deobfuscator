@@ -1091,7 +1091,11 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 	const gates: Gate[] = inputCircuit.gates.map((x) => ({ a: x[0], b: x[1], target: x[2], gate_i: x[3] }))
 	if (originalCircuit.wire_count !== inputCircuit.wire_count) throw new Error('Latest circuit wire count differs from original')
 	if (originalGates.length < gates.length) throw new Error('Latest circuit has more gates than original')
-	onPhase('verifying input checkpoint')
+	const inputPairs = circuitWireCost(gates).effectivePairs
+	const originalPairs = inputCircuit === originalCircuit ? inputPairs : circuitWireCost(originalGates).effectivePairs
+	const startupPhase = 'verifying input checkpoint'
+	onPhase(startupPhase)
+	logTimed(formatCoordinatorPhase(gates.length, inputPairs, originalGates.length, originalGates.length, originalPairs, startupPhase, 0))
 	const writer = new CheckpointWriter(originalGates, inputCircuit.wire_count, config.validation.checkpointInputs)
 	const paths = outputPaths(pathToFileWithoutExt)
 	const solvedAtStartup = isSingleNoOp(gates)
@@ -1141,7 +1145,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 	let currentGates = gates.slice()
 	const wireCosts = new Map<number, number>()
 	let lastReportedGates = currentGates.length
-	let lastReportedPairs = circuitWireCost(currentGates).effectivePairs
+	let lastReportedPairs = inputPairs
 	let optimizerRound = 0
 	const globalStrategyPicker = new RoundStrategyPicker(broadStrategyOrder())
 	const completedBroadScans = new LimitedMap<string, Set<string>>(2, 'lru')

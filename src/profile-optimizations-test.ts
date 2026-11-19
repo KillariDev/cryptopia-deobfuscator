@@ -88,9 +88,16 @@ try {
  await assert.rejects(readFile(outputPaths(puzzle).latest), { code: 'ENOENT' })
  const noOpPuzzle = join(proofDir, 'single-no-op')
  const noOpCircuit = circuit([[0, 0, 0, 6]])
- await splitTaskAndRun(noOpPuzzle, noOpPuzzle, { originalCircuit: noOpCircuit, inputCircuit: noOpCircuit }, undefined, async () => {
-  assert.fail('a single no-op should finish before initializing rainbow tables')
- })
+ const originalNoOps = circuit([[0, 0, 0, 6], [0, 0, 0, 0]])
+ const startupLog: string[] = []
+ const log = console.log
+ try {
+  console.log = (...args: unknown[]) => { startupLog.push(args.join(' ')) }
+  await splitTaskAndRun(noOpPuzzle, noOpPuzzle, { originalCircuit: originalNoOps, inputCircuit: noOpCircuit }, undefined, async () => {
+   assert.fail('a single no-op should finish before initializing rainbow tables')
+  })
+ } finally { console.log = log }
+ assert.ok(startupLog.some(line => line.includes('Circuit: 1G 0.00W -1G -0.00W (50.00%) | verifying input checkpoint')))
  assert.equal(JSON.parse(await readFile(outputPaths(noOpPuzzle).latest, 'utf8')).gate_count, 0)
  const wideGates = fixture.before.map(([a, b, target, gate_i]: number[]) => ({ a, b, target, gate_i }))
  const wide = new CheckpointWriter(wideGates, 64, 1)
