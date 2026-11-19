@@ -398,71 +398,25 @@ export function assertNever(value: never): never {
 class SortedArray {
 	private elements: number[] = []
 
-	// Add one or multiple numbers to the sorted array
-	add(nums: number | number[]): void {
-		if (!Array.isArray(nums)) {
-			nums = [nums]
-		}
-
-		// Deduplicate and filter out existing elements
-		const uniqueNums = [...new Set(nums)].filter(num => !this.contains(num))
-
-		// Merge the new numbers into the sorted array
-		for (const num of uniqueNums) {
-			let left = 0
-			let right = this.elements.length
-
-			// Binary search for the correct position
-			while (left < right) {
-				const mid = Math.floor((left + right) / 2)
-				if (this.elements[mid] < num) {
-					left = mid + 1
-				} else {
-					right = mid
-				}
-			}
-
-			// Insert the number at the correct position
-			this.elements.splice(left, 0, num)
-		}
+	add(values: number | number[]) {
+		if (typeof values === 'number') this.insert(values)
+		else for (const value of values) this.insert(value)
 	}
 
-	// Check if the array contains a number
-	private contains(num: number): boolean {
-		let left = 0
-		let right = this.elements.length - 1
-
-		// Binary search for the number
-		while (left <= right) {
-			const mid = Math.floor((left + right) / 2)
-			if (this.elements[mid] === num) {
-				return true
-			} else if (this.elements[mid] < num) {
-				left = mid + 1
-			} else {
-				right = mid - 1
-			}
+	private insert(value: number) {
+		const length = this.elements.length
+		if (length === 0 || this.elements[length - 1] < value) {
+			this.elements.push(value)
+			return
 		}
-
-		return false
+		const index = wireAccessLowerBound(this.elements, value)
+		if (this.elements[index] !== value) this.elements.splice(index, 0, value)
 	}
 
-	// Remove and return the smallest element
-	popMin(): number | undefined {
+	popMin() {
 		return this.elements.shift()
 	}
-
-	// Remove and return the largest element
-	popMax(): number | undefined {
-		return this.elements.pop()
-	}
-
-	// Get the sorted elements (read-only)
-	get values(): readonly number[] {
-		return this.elements
-	}
 }
-
 
 export type WireAccessIndex = { accesses: Map<number, number[]>, writes: Map<number, number[]> }
 export function appendWireAccess(index: Map<number, number[]>, wire: number, id: number) {

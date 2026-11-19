@@ -1,14 +1,28 @@
 import { Gate } from './types.js'
 
+const smallBases = new Map<number, { bits: bigint[], indices: Map<bigint, number> }>()
+function emitterBasis(count: number) {
+	const cached = smallBases.get(count)
+	if (cached) return cached
+	const bits = Array.from({ length: count }, (_, i) => 1n << BigInt(i))
+	const basis = { bits, indices: new Map(bits.map((bit, i) => [bit, i])) }
+	if (count <= 64) smallBases.set(count, basis)
+	return basis
+}
+
 /** Emit triangular quadratic maps in an order that keeps controls at input values.
  * Cyclic dependencies, target-dependent deltas and higher degrees are declined. */
 export function emitQuadraticMap(rows: Set<bigint>[], wires: number[], maximumGates: number, stopped: () => boolean): Gate[] | undefined {
-	const bits = wires.map((_, i) => 1n << BigInt(i))
-	const bitIndices = new Map(bits.map((bit, i) => [bit, i]))
-	const changed = rows.map((row, i) => row.size === 1 && row.has(bits[i]) ? -1 : i).filter(i => i >= 0)
-	const changedWires = new Set(changed)
-	const dependencies = wires.map(() => new Set<number>()), incoming = wires.map(() => 0)
-	const terms = new Map<number, { constant: boolean, singles: number[], pairs: [number, number][] }>()
+	const { bits, indices: bitIndices } = emitterBasis(wires.length)
+	const changed: number[] = []
+	const changedWires = new Uint8Array(wires.length)
+	for (let i = 0; i < rows.length; i++) {
+		if (rows[i].size === 1 && rows[i].has(bits[i])) continue
+		changed.push(i)
+		changedWires[i] = 1
+	}
+	const dependencies: Set<number>[] = [], incoming = new Uint32Array(wires.length)
+	const terms: { constant: boolean, singles: number[], pairs: [number, number][] }[] = []
 	let gateCount = 0
 	for (const target of changed) {
 		const row = rows[target], targetBit = bits[target]
@@ -16,7 +30,8 @@ export function emitQuadraticMap(rows: Set<bigint>[], wires: number[], maximumGa
 		if (!row.has(targetBit) || stopped()) return undefined
 		const constant = row.has(0n)
 		const singles: number[] = [], pairs: [number, number][] = []
-		const uses = dependencies[target]
+		const uses = new Set<number>()
+		dependencies[target] = uses
 		for (const term of row) {
 			if (stopped()) return undefined
 			if (term === 0n || term === targetBit) continue
@@ -30,15 +45,15 @@ export function emitQuadraticMap(rows: Set<bigint>[], wires: number[], maximumGa
 				const b = bitIndices.get(rest)
 				if (b === undefined) return undefined
 				pairs.push([a, b])
-				if (changedWires.has(b)) uses.add(b)
+				if (changedWires[b]) uses.add(b)
 			}
-			if (changedWires.has(a)) uses.add(a)
+			if (changedWires[a]) uses.add(a)
 		}
 		gateCount += Math.max(Number(constant), pairs.length + Math.ceil(singles.length / 2))
 		if (gateCount >= maximumGates) return undefined
 		// This output must read its controls before they change.
 		for (const control of uses) incoming[control]++
-		terms.set(target, { constant, singles, pairs })
+		terms[target] = { constant, singles, pairs }
 	}
 	const ready = changed.filter(i => incoming[i] === 0), order: number[] = []
 	while (ready.length) {
@@ -51,7 +66,7 @@ export function emitQuadraticMap(rows: Set<bigint>[], wires: number[], maximumGa
 	const result: Gate[] = []
 	for (const target of order) {
 		if (stopped()) return undefined
-		let { constant, singles, pairs } = terms.get(target)!
+		let { constant, singles, pairs } = terms[target]
 		singles.sort((a, b) => a - b)
 		// Sorting by high bit, then low bit, preserves monomial order.
 		pairs.sort(([a, b], [c, d]) => b - d || a - c)
@@ -71,7 +86,7 @@ export function emitQuadraticMap(rows: Set<bigint>[], wires: number[], maximumGa
 
 /** Reuse one shared pair across cubic terms using a borrowed, restored wire. */
 export function emitSharedCubicMap(rows: Set<bigint>[], wires: number[], maximumGates: number, stopped: () => boolean, spend: () => boolean): Gate[] | undefined {
-	const bits = wires.map((_, i) => 1n << BigInt(i))
+	const { bits, indices } = emitterBasis(wires.length)
 	const unchanged = rows.map((row, i) => row.size === 1 && row.has(bits[i]))
 	const cubic: { target: number, term: bigint }[] = []
 	let usedControls = 0n
@@ -105,7 +120,7 @@ export function emitSharedCubicMap(rows: Set<bigint>[], wires: number[], maximum
 		const other = term ^ product
 		middle[target].delete(term)
 		middle[target].add(bits[borrowed] | other)
-		corrections.push({ a: wires[borrowed], b: wires[bits.indexOf(other)], target: wires[target], gate_i: 1 })
+		corrections.push({ a: wires[borrowed], b: wires[indices.get(other)!], target: wires[target], gate_i: 1 })
 	}
 	const body = emitQuadraticMap(middle, wires, maximumGates - corrections.length - 2, stopped)
 	if (!body) return undefined

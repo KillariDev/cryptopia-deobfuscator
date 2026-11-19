@@ -19,7 +19,102 @@ const sameControlCoefficients = coefficients.map(({ c }, gate) => ({
 }))
 const nonlinear = (gate: Gate) => gate.a !== gate.b && coefficients[gate.gate_i].ab !== 0
 
-function composePolynomials(input: Gate[], indices: ReadonlyMap<number, number>, maximumTerms: number, stopped: () => boolean, spend: () => boolean) {
+const maximumDenseScratchTerms = 200_000
+
+// Use two 32-bit words per monomial for large products. Keep this scratch
+// table bounded and use the same XOR toggles as the sparse BigInt path.
+function xorDenseProduct(
+	result: Set<bigint>, left: Set<bigint>, right: Set<bigint>, maximumTerms: number, stopped: () => boolean,
+): boolean {
+	const words = (terms: Set<bigint>) => {
+		const parts = new Int32Array(terms.size * 2)
+		let i = 0
+		for (const term of terms) {
+			if ((i & 511) === 0 && stopped()) return undefined
+			parts[i++] = Number(term & 0xffffffffn)
+			parts[i++] = Number(term >> 32n)
+		}
+		return parts
+	}
+	const a = words(left), b = words(right)
+	if (!a || !b) return false
+	const pairs = left.size * right.size
+	if (pairs - result.size > maximumTerms) {
+		let low = 0, high = 0
+		for (let i = 0; i < a.length; i += 2) {
+			low |= a[i]
+			high |= a[i + 1]
+			if ((i & 511) === 0 && stopped()) return false
+		}
+		let overlaps = false
+		for (let i = 0; i < b.length; i += 2) {
+			if ((low & b[i]) !== 0 || (high & b[i + 1]) !== 0) { overlaps = true; break }
+			if ((i & 511) === 0 && stopped()) return false
+		}
+		// Disjoint supports make every union unique. At most result.size of
+		// those terms can cancel against the existing target.
+		if (!overlaps) return false
+	}
+	const initial = words(result)
+	if (!initial) return false
+	// Keep the table at most half full, including the term that triggers the limit.
+	const liveLimit = Math.min(maximumTerms, result.size + pairs)
+	let capacity = 1
+	while (capacity < 2 * (liveLimit + 1)) capacity *= 2
+	const lowWords = new Int32Array(capacity), highWords = new Int32Array(capacity)
+	const present = new Uint8Array(capacity), mask = capacity - 1
+	const home = (low: number, high: number) => {
+		let hash = Math.imul(low, 0x9e3779b1) ^ Math.imul(high, 0x85ebca6b)
+		hash ^= hash >>> 16
+		return hash & mask
+	}
+	let size = 0
+	const toggle = (low: number, high: number) => {
+		let slot = home(low, high)
+		while (present[slot]) {
+			if (lowWords[slot] === low && highWords[slot] === high) {
+				// Shift entries whose linear-probe sequence crossed the hole.
+				let hole = slot
+				while (present[slot = (slot + 1) & mask]) {
+					const start = home(lowWords[slot], highWords[slot])
+					if (((hole - start) & mask) < ((slot - start) & mask)) {
+						lowWords[hole] = lowWords[slot]
+						highWords[hole] = highWords[slot]
+						hole = slot
+					}
+				}
+				present[hole] = 0
+				size--
+				return
+			}
+			slot = (slot + 1) & mask
+		}
+		present[slot] = 1
+		lowWords[slot] = low
+		highWords[slot] = high
+		size++
+	}
+	for (let i = 0; i < initial.length; i += 2) {
+		if ((i & 511) === 0 && stopped()) return false
+		toggle(initial[i], initial[i + 1])
+	}
+	let multiplied = 0
+	for (let i = 0; i < a.length; i += 2) {
+		const low = a[i], high = a[i + 1]
+		for (let j = 0; j < b.length; j += 2) {
+			toggle(low | b[j], high | b[j + 1])
+			if (size > maximumTerms || ((++multiplied & 255) === 0 && stopped())) return false
+		}
+	}
+	result.clear()
+	for (let i = 0; i < capacity; i++) {
+		if ((i & 255) === 0 && stopped()) return false
+		if (present[i]) result.add((BigInt(highWords[i] >>> 0) << 32n) | BigInt(lowWords[i] >>> 0))
+	}
+	return true
+}
+
+function composePolynomials(input: Gate[], indices: ReadonlyMap<number, number>, maximumTerms: number, stopped: () => boolean, spend: (count: number) => boolean) {
 	// A set is a polynomial over GF(2); 0 is the constant monomial.
 	// Multiplication unions variable masks because Boolean x*x equals x.
 	const rows = Array.from({ length: indices.size }, (_, i) => new Set([1n << BigInt(i)]))
@@ -34,27 +129,41 @@ function composePolynomials(input: Gate[], indices: ReadonlyMap<number, number>,
 		// For one repeated control, evaluate the diagonal of the truth table.
 		// Boolean p*p is p, so multiplying the same ANF by itself is unnecessary.
 		const rule = (gate.a === gate.b ? sameControlCoefficients : coefficients)[gate.gate_i]
+		if (!(rule.c || rule.a || rule.b || rule.ab)) continue
 		const target = indices.get(gate.target)!
 		const leftIndex = rule.a || rule.ab ? indices.get(gate.a)! : -1
 		const rightIndex = rule.b || rule.ab ? indices.get(gate.b)! : -1
 		const oldSize = rows[target].size
+		const maximumRowTerms = maximumTerms - terms + oldSize
 		// Preserve the pre-gate polynomial when a control reads the target.
 		const result = leftIndex === target || rightIndex === target ? new Set(rows[target]) : rows[target]
 		if (rule.c) toggle(result, 0n)
 		for (let operand = 0; operand < 2; operand++) {
 			const control = operand === 0 ? (rule.a ? leftIndex : -1) : (rule.b ? rightIndex : -1)
 			if (control === -1) continue
-			for (const monomial of rows[control]) {
-				if (spend()) return undefined
+			const source = rows[control]
+			if (spend(source.size)) return undefined
+			let copied = 0
+			for (const monomial of source) {
 				toggle(result, monomial)
-				if (terms - oldSize + result.size > maximumTerms) return undefined
+				if (result.size > maximumRowTerms || ((++copied & 255) === 0 && stopped())) return undefined
 			}
 		}
 		if (rule.ab) {
-			for (const left of rows[leftIndex]) for (const right of rows[rightIndex]) {
-				if (spend()) return undefined
-				toggle(result, left | right)
-				if (terms - oldSize + result.size > maximumTerms) return undefined
+			const leftTerms = rows[leftIndex], rightTerms = rows[rightIndex]
+			// Charge for every pair visited by either multiplication path.
+			const pairs = leftTerms.size * rightTerms.size
+			if (spend(pairs)) return undefined
+			if (pairs >= 16_384 && pairs >= 4 * maximumRowTerms && indices.size <= 64 &&
+				Math.min(leftTerms.size, rightTerms.size) >= 32 && maximumRowTerms <= maximumDenseScratchTerms &&
+				leftTerms.size + rightTerms.size <= maximumDenseScratchTerms) {
+				if (!xorDenseProduct(result, leftTerms, rightTerms, maximumRowTerms, stopped)) return undefined
+			} else {
+				let multiplied = 0
+				for (const left of leftTerms) for (const right of rightTerms) {
+					toggle(result, left | right)
+					if (result.size > maximumRowTerms || ((++multiplied & 255) === 0 && stopped())) return undefined
+				}
 			}
 		}
 		terms += result.size - oldSize
@@ -73,7 +182,10 @@ export function createPolynomialEquivalenceChecker(input: Gate[], nVariables: nu
 	return (candidate: Gate[]): boolean | undefined => {
 		if (shouldStop()) return undefined
 		let operations = 0
-		const spend = () => ++operations > maximumOperations || (operations % 256 === 0 && shouldStop())
+		const spend = (count = 1) => {
+			operations += count
+			return operations > maximumOperations || (operations % 256 < count && shouldStop())
+		}
 		if (!attempted) {
 			attempted = true
 			expected = composePolynomials(input, indices, maximumTerms, shouldStop, spend)
@@ -111,7 +223,10 @@ export function synthesizeMixedAffine(input: Gate[], maximumWires: number, maxim
 	const wires = [...used].sort((a, b) => a - b)
 	const indices = new Map(wires.map((wire, i) => [wire, i]))
 	let operations = 0
-	const spend = () => ++operations > maximumOperations || (operations % 256 === 0 && stopped())
+	const spend = (count = 1) => {
+		operations += count
+		return operations > maximumOperations || (operations % 256 < count && stopped())
+	}
 	const rows = composePolynomials(input, indices, maximumTerms, stopped, spend)
 	if (!rows) return undefined
 	const constant = 1n << BigInt(wires.length)

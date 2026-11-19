@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { synthesizeMixedAffine, searchAffineRegions } from './symbolic-affine.js'
+import { synthesizeMixedAffine, searchAffineRegions, createPolynomialEquivalenceChecker } from './symbolic-affine.js'
 import { evalCircuit, generateCombinations } from './utils.js'
 import { seededRandom } from './random.js'
 import { Gate } from './types.js'
@@ -41,4 +41,26 @@ for (let wires = 3; wires <= 6; wires++) for (let trial = 0; trial < 20; trial++
 	equivalent(input, result!, wires)
 	assert.deepEqual(input, copy)
 }
+// Copy a dense high-bit polynomial to another wire. The product of the
+// identical factors must equal the factor, even when the target aliases it.
+const denseFactors = [
+	...Array.from({ length: 7 }, (_, i) => ({ a: 63, b: i, target: 63, gate_i: 1 })),
+	{ a: 32, b: 0, target: 32, gate_i: 3 },
+	{ a: 63, b: 0, target: 32, gate_i: 3 },
+]
+const denseProduct = [...denseFactors, { a: 32, b: 63, target: 32, gate_i: 1 }]
+const reducedProduct = [...denseFactors, { a: 63, b: 0, target: 32, gate_i: 3 }]
+const denseProof = createPolynomialEquivalenceChecker(denseProduct, 64, 2000, 100_000)
+assert.equal(denseProof(reducedProduct), true)
+assert.equal(denseProof(denseFactors), false)
+assert.equal(createPolynomialEquivalenceChecker(denseProduct, 64, 2000, 10_000)(reducedProduct), undefined)
+
+const disjointProduct = [
+	...Array.from({ length: 7 }, (_, i) => ({ a: 32, b: i, target: 32, gate_i: 1 })),
+	...Array.from({ length: 7 }, (_, i) => ({ a: 63, b: i + 40, target: 63, gate_i: 1 })),
+	{ a: 32, b: 63, target: 31, gate_i: 1 },
+]
+assert.equal(createPolynomialEquivalenceChecker(disjointProduct, 64, 2000, 100_000)(disjointProduct), undefined)
+assert.equal(createPolynomialEquivalenceChecker(disjointProduct, 64, 20_000, 100_000)(disjointProduct), true)
+
 console.log('Mixed symbolic affine synthesis: all control functions and aliases, exhaustive randomized nonlinear cancellations, subwindows, true nonlinear rejection and resource limits passed')

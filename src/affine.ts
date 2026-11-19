@@ -51,31 +51,39 @@ export function synthesizeAffine(input: Gate[], maximumWires = 64, deadline = In
 /** Synthesize a matrix established by an exact symbolic analysis. */
 export function synthesizeAffineMap(original: bigint[], wires: number[], maximumGates: number, stopped: () => boolean): Gate[] | undefined {
 	const bits = wires.map((_, index) => 1n << BigInt(index))
+	const constant = 1n << BigInt(wires.length)
 	let changed = 0
+	const negated: number[] = []
 	// Each changed output needs at least one gate targeting its wire.
 	for (let i = 0; i < original.length; i++) {
 		if (original[i] !== bits[i] && ++changed >= maximumGates) return undefined
+		if ((original[i] & constant) !== 0n) negated.push(i)
 	}
 	const rows = original.slice()
-	const constant = 1n << BigInt(wires.length)
-	const operations: Gate[] = []
+	const operations: number[] = []
+	const operationLimit = (maximumGates - negated.length) * 2
 	const addRow = (source: number, target: number) => {
 		rows[target] ^= rows[source]
-		operations.push({ a: wires[source], b: 0, target: wires[target], gate_i: 3 })
+		operations.push(source, target)
 	}
 	for (let column = 0; column < wires.length; column++) {
 		if (stopped()) return undefined
-		const pivot = rows.findIndex((row, index) => index >= column && (row & bits[column]) !== 0n)
-		if (pivot < 0) return undefined
+		const bit = bits[column]
+		let pivot = column
+		while (pivot < rows.length && (rows[pivot] & bit) === 0n) pivot++
+		if (pivot === rows.length) return undefined
 		if (pivot !== column) {
 			addRow(pivot, column); addRow(column, pivot); addRow(pivot, column)
 		}
-		for (let row = 0; row < wires.length; row++) if (row !== column && (rows[row] & bits[column]) !== 0n) addRow(column, row)
-		if (operations.length >= maximumGates) return undefined
+		for (let row = 0; row < wires.length; row++) if (row !== column && (rows[row] & bit) !== 0n) addRow(column, row)
+		if (operations.length >= operationLimit) return undefined
 	}
 	// Row operations reduce M to I. Their reverse therefore synthesizes M.
-	const result = operations.reverse()
-	for (let index = 0; index < wires.length; index++) if ((original[index] & constant) !== 0n) result.push({ a: 0, b: 0, target: wires[index], gate_i: 15 })
+	const result: Gate[] = []
+	for (let i = operations.length - 2; i >= 0; i -= 2) {
+		result.push({ a: wires[operations[i]], b: 0, target: wires[operations[i + 1]], gate_i: 3 })
+	}
+	for (const index of negated) result.push({ a: 0, b: 0, target: wires[index], gate_i: 15 })
 	if (result.length >= maximumGates) return undefined
 	const actual = expressions(result, wires, stopped)
 	if (!actual) return undefined
