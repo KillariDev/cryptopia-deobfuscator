@@ -93,8 +93,14 @@ The solver combines several approaches:
   single output flip controlled by a positive conjunction of unchanged inputs.
   The pass uses bounded decision diagrams on up to 64 active wires, restores
   borrowed wires, and proves every output equivalent before accepting a shorter
-  circuit. Prioritize it with
-  `decision-diagram-product` in either strategy order.
+  circuit. It orders read-only controls before written wires and can retry in
+  numeric order when diagram construction exceeds its budget. Prioritize it with
+  `decision-diagram-product` in either strategy order. The default adaptive
+  mode ranks alternative orders when the first diagram grows quickly. It scores
+  up to four orders on short windows using progress, live nodes, and allocations,
+  then resumes the best order from its saved prefix. Set
+  `strategies.decisionDiagramProduct.trialOrdering` to `"upfront"` to rank every
+  region or `"off"` to skip trials.
 - **Strategy rotation:** a worker keeps its strategy for the entire round and
   advances after a round without a gate reduction. The local and broad searches
   have separate strategy orders. The checked-in config starts both with

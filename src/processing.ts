@@ -543,8 +543,9 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	if (selected === 'decision-diagram-product' && config.synthesis.decisionDiagramProduct) {
 		const deadline = synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000
 		const stopped = () => performance.now() >= deadline || synthesisBudget?.shouldStop?.() === true
-		const result = synthesizeDecisionDiagramProduct(originalGates, config.validation.maximumWires, stopped)
-		recordStrategy(selected, { verification: 'decision-diagram' }, attemptStarted,
+		const trialOrdering = config.synthesis.decisionDiagramTrialOrdering
+		const result = synthesizeDecisionDiagramProduct(originalGates, config.validation.maximumWires, stopped, trialOrdering)
+		recordStrategy(selected, { verification: 'decision-diagram', trialOrdering }, attemptStarted,
 			originalGates.length, result?.gates.length ?? originalGates.length, result !== undefined)
 		return finish({ gates: result?.gates ?? originalGates, changed: result !== undefined })
 	}

@@ -261,6 +261,43 @@ try {
 	const sparseProduct = rareProduct.map(({ a, b, target, gate_i }) => ({ a: 2 * a, b: 2 * b, target: 2 * target, gate_i }))
 	const sparseResult = synthesizeDecisionDiagramProduct(sparseProduct, 64, () => false)
 	assert.deepEqual(sparseResult?.gates, localProduct.gates.map(({ a, b, target, gate_i }) => ({ a: 2 * a, b: 2 * b, target: 2 * target, gate_i })))
+	// Reversing the labels puts every dirty wire before the controls in
+	// numeric order. The circuit-derived order should be identical.
+	const reverseWires = ({ a, b, target, gate_i }: Gate): Gate => ({ a: 38 - a, b: 38 - b, target: 38 - target, gate_i })
+	const reversedProduct = rareProduct.map(reverseWires)
+	const reversedResult = synthesizeDecisionDiagramProduct(reversedProduct, 64, () => false)
+	assert.equal(reversedResult?.orderingTrials, 0)
+	assert.deepEqual(reversedResult?.gates, localProduct.gates.map(reverseWires))
+	assert.equal(createPolynomialEquivalenceChecker(reversedProduct, 39, 100000, 10000000)(reversedResult!.gates), true)
+	// Restored NOTs make every wire appear written, with dirty wires first.
+	// Keep the previous numeric ordering available for cases like this.
+	const restoredWrites = Array.from({ length: 39 }, (_, i) => ({ a: 0, b: 0, target: 38 - i, gate_i: 15 }))
+		.flatMap(gate => [gate, gate])
+	const writtenProduct = [...restoredWrites, ...rareProduct]
+	const fallbackResult = synthesizeDecisionDiagramProduct(writtenProduct, 64, () => false)
+	assert.equal(fallbackResult?.gates.length, 72)
+	assert.equal(createPolynomialEquivalenceChecker(writtenProduct, 39, 100000, 10000000)(fallbackResult!.gates), true)
+	// Paired XOR masks need an order that keeps each pair together.
+	const pairLeft = factors.slice(0, 18)
+	const pairRight = pairLeft.map(wire => wire + 18)
+	const pairScratch = borrowed.slice(0, 16).map(wire => wire + 16)
+	const basis = pairLeft.map((a, i) => ({ a, b: a, target: pairRight[i], gate_i: 3 }))
+	const mask = [...basis, ...emitBorrowedProduct(pairRight, pairScratch, 52), ...basis.slice().reverse()]
+	const payload = emitBorrowedProduct(pairLeft.slice(0, 10), pairScratch, 52)
+	const lateMask = [
+		...Array.from({ length: 256 }, () => ({ a: 0, b: 0, target: 0, gate_i: 15 })),
+		...mask, ...payload, ...mask,
+	]
+	assert.equal(synthesizeDecisionDiagramProduct(lateMask, 64, () => false, 'off'), undefined)
+	const adaptiveResult = synthesizeDecisionDiagramProduct(lateMask, 64, () => false)
+	assert.ok(adaptiveResult && adaptiveResult.orderingTrials > 0 && adaptiveResult.reusedPrefixGates === 256)
+	assert.ok(adaptiveResult.liveNodes < adaptiveResult.diagramNodes)
+	assert.equal(parseConfig({ strategies: { decisionDiagramProduct: { trialOrdering: true } } }).synthesis.decisionDiagramTrialOrdering, 'upfront')
+	assert.equal(parseConfig({ strategies: { decisionDiagramProduct: { trialOrdering: false } } }).synthesis.decisionDiagramTrialOrdering, 'off')
+	assert.throws(() => parseConfig({ strategies: { decisionDiagramProduct: { trialOrdering: 'random' } } }), /trialOrdering/)
+	const pairedResult = await broadSearch(tables, lateMask, 53, createOptimizerCaches(), 5000, () => false, () => {})
+	assert.equal(pairedResult.length, payload.length)
+	assert.equal(createPolynomialEquivalenceChecker(payload, 53, 100000, 10000000)(pairedResult), true)
 	config.search.localStrategyOrder = []
 	config.search.broadStrategyOrder = []
 	config.synthesis.decisionDiagramProduct = false
