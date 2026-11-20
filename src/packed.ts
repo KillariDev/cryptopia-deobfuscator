@@ -36,6 +36,8 @@ export class IncrementalEvaluator {
 	readonly batches: number
 	private initial: Uint32Array
 	private masks: Uint32Array
+	private readonly checkpointSpacing: number
+	private scratch?: Uint32Array
 	constructor(gates: Gate[], inputs: boolean[][] | PackedInputs, prefixBytes: number, stride: number) {
 		const packed = inputs instanceof PackedInputs ? inputs : new PackedInputs(inputs)
 		this.inputs = packed.inputs
@@ -46,6 +48,7 @@ export class IncrementalEvaluator {
 		const capacity = this.initial.byteLength ? Math.floor(prefixBytes / this.initial.byteLength) : 0
 		this.gates = capacity ? gates.map(gate => ({ ...gate })) : gates
 		const spacing = Math.max(stride, Math.ceil(gates.length / Math.max(1, capacity)))
+		this.checkpointSpacing = spacing
 		const state = this.initial.slice()
 		gates.forEach((gate, i) => {
 			this.apply(state, gate)
@@ -67,6 +70,14 @@ export class IncrementalEvaluator {
 		if (!this.checkpoints.size) return { start: 0, prefix: this.initial }
 		let common = 0
 		while (common < candidate.length && common < this.gates.length && sameGate(candidate[common], this.gates[common])) common++
+		const spacing = this.checkpointSpacing
+		if (Number.isSafeInteger(spacing)) {
+			const start = Math.min(Math.floor(common / spacing), this.checkpoints.size) * spacing
+			if (start === 0) return { start, prefix: this.initial }
+			const prefix = this.checkpoints.get(start)
+			if (prefix) return { start, prefix }
+		}
+		// Non-integer strides can produce checkpoints on a different grid.
 		let start = 0, prefix = this.initial
 		for (const [line, state] of this.checkpoints) {
 			if (line > common) break
@@ -82,10 +93,12 @@ export class IncrementalEvaluator {
 		return state
 	}
 	equivalent(candidate: Gate[]) {
+		if (!this.batches) return true
 		const { start, prefix } = this.prefix(candidate)
+		const state = this.scratch ??= new Uint32Array(this.wires)
 		for (let batch = 0; batch < this.batches; batch++) {
 			const offset = batch * this.wires
-			const state = prefix.slice(offset, offset + this.wires)
+			for (let wire = 0; wire < this.wires; wire++) state[wire] = prefix[offset + wire]
 			for (let i = start; i < candidate.length; i++) this.applyAt(state, candidate[i], 0, this.masks[batch])
 			for (let wire = 0; wire < this.wires; wire++) if (state[wire] !== this.reference[offset + wire]) return false
 		}
