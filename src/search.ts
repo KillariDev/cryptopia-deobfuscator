@@ -1,5 +1,5 @@
 import { Gate } from './types.js'
-import { getVars, hashGates, mapCircuit, reverseMapCircuit } from './utils.js'
+import { gateControlMask, getVars, hashGates, mapCircuit, reverseMapCircuit } from './utils.js'
 import { LimitedMap } from './limitedMap.js'
 
 /** First-use renaming preserves gate order and control function orientation. */
@@ -26,7 +26,7 @@ export class RewriteCache {
 		return result === null ? undefined : reverseMapCircuit(result, wires)
 	}
 }
-export const improving = (old: Gate[]) => {
+export const improving = (old: Gate[], wireCount?: number) => {
 	const score = (gates: Gate[]) => {
 		const wires = new Set<number>()
 		let reads = 0
@@ -37,10 +37,48 @@ export const improving = (old: Gate[]) => {
 		}
 		return { wires: wires.size, reads }
 	}
-	const baseline = score(old)
+	// Mapped windows can reuse an epoch-stamped wire table between candidates.
+	const seen = wireCount === undefined ? undefined : new Uint32Array(wireCount)
+	let epoch = 0
+	const denseScore = (gates: Gate[]) => {
+		if (!seen) return score(gates)
+		if (epoch === 0xffffffff) {
+			seen.fill(0)
+			epoch = 0
+		}
+		epoch++
+		let wires = 0, reads = 0
+		for (const gate of gates) {
+			const controls = gateControlMask(gate)
+			if (seen[gate.target] === undefined) return score(gates)
+			if (seen[gate.target] !== epoch) {
+				seen[gate.target] = epoch
+				wires++
+			}
+			reads++
+			if (controls & 1) {
+				if (seen[gate.a] === undefined) return score(gates)
+				if (seen[gate.a] !== epoch) {
+					seen[gate.a] = epoch
+					wires++
+				}
+				reads++
+			}
+			if (controls & 2) {
+				if (seen[gate.b] === undefined) return score(gates)
+				if (seen[gate.b] !== epoch) {
+					seen[gate.b] = epoch
+					wires++
+				}
+				reads++
+			}
+		}
+		return { wires, reads }
+	}
+	const baseline = denseScore(old)
 	return (candidate: Gate[]) => {
 		if (candidate.length !== old.length) return candidate.length < old.length
-		const next = score(candidate)
+		const next = denseScore(candidate)
 		return next.wires !== baseline.wires ? next.wires < baseline.wires : next.reads < baseline.reads
 	}
 }

@@ -234,7 +234,7 @@ const normalizedRewrites = new RewriteCache(config.search.normalizedCacheEntries
 const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGates: Gate[], shouldStop: () => boolean = () => false) => {
 	if (shouldStop()) return undefined
 	const nVariables = variableIndexMapping.length
-	const canImprove = improving(mappedGates)
+	const canImprove = improving(mappedGates, nVariables)
 	if (nVariables < MAX_DETERMINISTIC_USELESS_VARS) return undefined // no need to do this approach for less than 8 vars as we have exact way already
 	const proveEquivalent = createPolynomialEquivalenceChecker(mappedGates, nVariables, config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, shouldStop)
 	const sampleMatch = createVariableSampleCheck(mappedGates, nVariables)
@@ -294,7 +294,7 @@ const findExactReplacement = (variableIndexMapping: number[], mappedGates: Gate[
 	const allInputs = BYTE_ALL_INPUTS.get(nVariables)
 	if (allInputs === undefined) return undefined
 	const newVars = randomOrder(nVariables)
-	const canImprove = improving(mappedGates)
+	const canImprove = improving(mappedGates, nVariables)
 	let packed = packedExactVariableInputs.get(nVariables)
 	if (!packed) {
 		packed = new PackedInputs(allInputs)

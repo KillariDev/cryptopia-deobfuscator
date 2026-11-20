@@ -453,7 +453,15 @@ for (let i = 0; i < 2; i++) assert.equal(misses.resolve(singleGate, () => { fail
 assert.equal(failures, 1)
 for (let i = 0; i < 100; i++) {
 	const before = makeGates(random(20), 8), after = makeGates(random(20), 8)
-	assert.equal(improving(before)(after), isReplacementSimpler(after, before))
+	const sameLength = makeGates(before.length, 8)
+	const dense = improving(before, 8)
+	const partial = improving(before, 4)
+	for (const candidate of [after, sameLength, before]) {
+		const expected = isReplacementSimpler(candidate, before)
+		assert.equal(improving(before)(candidate), expected)
+		assert.equal(dense(candidate), expected)
+		assert.equal(partial(candidate), expected)
+	}
 }
 const scheduler = new SearchScheduler(3)
 const arms = [{ subset: 3, slice: 2, method: 'all' as const }, { subset: 5, slice: 3, method: 'truth-table-lookup' as const }]
