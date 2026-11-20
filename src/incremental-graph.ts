@@ -4,6 +4,21 @@ import { ChunkedSequence } from './chunked-sequence.js'
 
 type WireEdit = { firstRemoval: number, lastRemoval: number, incoming: number[] }
 
+function editFor(edits: Map<number, WireEdit>, wire: number) {
+	let edit = edits.get(wire)
+	if (!edit) {
+		edit = { firstRemoval: Infinity, lastRemoval: -1, incoming: [] }
+		edits.set(wire, edit)
+	}
+	return edit
+}
+
+function markRemoval(edits: Map<number, WireEdit>, wire: number, position: number) {
+	const edit = editFor(edits, wire)
+	edit.firstRemoval = Math.min(edit.firstRemoval, position)
+	edit.lastRemoval = Math.max(edit.lastRemoval, position)
+}
+
 type Record = { gate: Gate, wires: number[], past0?: number, past1?: number, past2?: number, future?: number }
 /** Edges use stable gate IDs. Only users of edited wires need edge recomputation. */
 export class IncrementalGraph {
@@ -98,7 +113,9 @@ export class IncrementalGraph {
 	}
 	/** Access-list edits affect adjacent target users. Writes additionally
 	 * affect control dependencies between the surrounding writes. */
-	private collectAffected(ids: number[], affected: Set<number>) {
+	private collectAffected(ids: number[], affected: Set<number>, removals?: {
+		accesses: Map<number, WireEdit>, writes: Map<number, WireEdit>,
+	}) {
 		const ranges = new Map<number, [number, number][]>()
 		for (const id of ids) {
 			const { gate, wires } = this.records.get(id)!
@@ -108,6 +125,7 @@ export class IncrementalGraph {
 				if (wires.indexOf(wire) !== i) continue
 				const accesses = this.accesses.get(wire)!
 				const at = this.lowerBound(accesses, position)
+				if (removals) markRemoval(removals.accesses, wire, at)
 				const before = accesses[at - 1]
 				const after = accesses[at + 1]
 				if (before !== undefined) affected.add(before)
@@ -116,6 +134,7 @@ export class IncrementalGraph {
 			const wire = gate.target
 			const writes = this.writes.get(wire)!
 			const at = this.lowerBound(writes, position)
+			if (removals) markRemoval(removals.writes, wire, at)
 			const before = writes[at - 1]
 			const after = writes[at + 1]
 			const low = before === undefined ? 0 : this.order.indexOf(before)!
@@ -166,37 +185,10 @@ export class IncrementalGraph {
 	replace(selected: number[], replacement: Gate[]) {
 		const oldIds = selected.map(index => this.order.at(index))
 		const affected = new Set<number>()
-		this.collectAffected(oldIds, affected)
-		const newIds = replacement.map(gate => this.add(gate))
 		const accessEdits = new Map<number, WireEdit>(), writeEdits = new Map<number, WireEdit>()
-		const editFor = (edits: Map<number, WireEdit>, wire: number) => {
-			let edit = edits.get(wire)
-			if (!edit) {
-				edit = { firstRemoval: Infinity, lastRemoval: -1, incoming: [] }
-				edits.set(wire, edit)
-			}
-			return edit
-		}
-		const markRemoval = (edits: Map<number, WireEdit>, wire: number, position: number) => {
-			const edit = editFor(edits, wire)
-			edit.firstRemoval = Math.min(edit.firstRemoval, position)
-			edit.lastRemoval = Math.max(edit.lastRemoval, position)
-		}
-		for (let i = 0; i < oldIds.length; i++) {
-			const { gate, wires } = this.records.get(oldIds[i])!
-			for (const wire of wires) markRemoval(accessEdits, wire, selected[i])
-			markRemoval(writeEdits, gate.target, selected[i])
-		}
-		// The lists still use the old circuit order here.
-		const locateRemovals = (index: Map<number, number[]>, edits: Map<number, WireEdit>) => {
-			for (const [wire, edit] of edits) {
-				const list = index.get(wire)!
-				edit.firstRemoval = this.lowerBound(list, edit.firstRemoval)
-				edit.lastRemoval = this.lowerBound(list, edit.lastRemoval)
-			}
-		}
-		locateRemovals(this.accesses, accessEdits)
-		locateRemovals(this.writes, writeEdits)
+		// Capture removal offsets before changing the order or either wire index.
+		this.collectAffected(oldIds, affected, { accesses: accessEdits, writes: writeEdits })
+		const newIds = replacement.map(gate => this.add(gate))
 		for (const id of newIds) {
 			const { gate, wires } = this.records.get(id)!
 			for (const wire of wires) {
