@@ -163,7 +163,8 @@ for (let wires = 1; wires < MAX_DETERMINISTIC_USELESS_VARS; wires++) {
 const INPUTS = config.validation.probabilisticInputs
 const randomInputs = generateNRandomBooleanArray(INPUTS, config.validation.maximumWires)
 const randomInputSets = new Map<number, boolean[][]>()
-const packedVariableSamples = new Map<number, PackedInputs>()
+const FIRST_VARIABLE_SAMPLE_BATCH_SIZE = 32
+const packedRemainingVariableSamples = new Map<number, PackedInputs>()
 const packedFirstVariableSamples = new Map<number, PackedInputs>()
 const packedExactVariableInputs = new Map<number, PackedInputs>()
 function sampledInputs(nVariables: number) {
@@ -178,36 +179,30 @@ function sampledInputs(nVariables: number) {
 /** The original region and samples are fixed for one variable search. */
 function createVariableSampleCheck(original: Gate[], nVariables: number) {
 	const inputs = sampledInputs(nVariables)
-	let firstOutput: boolean[] | undefined
 	let firstEvaluator: IncrementalEvaluator | undefined
-	let evaluator: IncrementalEvaluator | undefined
+	let remainingEvaluator: IncrementalEvaluator | undefined
 	const prefixBytes = config.search.incrementalEvaluation ? config.search.prefixCacheBytes : 0
-	return (candidate: Gate[], knownPrefix = 0) => {
+	return (candidate: Gate[], knownPrefix?: number) => {
 		if (!inputs.length) return true
-		if (prefixBytes && knownPrefix > 0 && !firstEvaluator) {
+		if (!firstEvaluator) {
 			let packed = packedFirstVariableSamples.get(nVariables)
 			if (!packed) {
-				packed = new PackedInputs([inputs[0]])
+				packed = new PackedInputs(inputs.slice(0, FIRST_VARIABLE_SAMPLE_BATCH_SIZE))
 				packedFirstVariableSamples.set(nVariables, packed)
 			}
 			firstEvaluator = new IncrementalEvaluator(original, packed, prefixBytes, 1)
 		}
-		if (firstEvaluator) {
-			if (!firstEvaluator.equivalent(candidate, knownPrefix)) return false
-		} else {
-			firstOutput ??= evalCircuit(original, inputs[0])
-			if (!areBooleanArraysEqual(firstOutput, evalCircuit(candidate, inputs[0]))) return false
-		}
-		if (inputs.length === 1) return true
-		if (!evaluator) {
-			let packed = packedVariableSamples.get(nVariables)
+		if (!firstEvaluator.equivalent(candidate, knownPrefix ?? 0)) return false
+		if (inputs.length <= FIRST_VARIABLE_SAMPLE_BATCH_SIZE) return true
+		if (!remainingEvaluator) {
+			let packed = packedRemainingVariableSamples.get(nVariables)
 			if (!packed) {
-				packed = new PackedInputs(inputs.slice(1))
-				packedVariableSamples.set(nVariables, packed)
+				packed = new PackedInputs(inputs.slice(FIRST_VARIABLE_SAMPLE_BATCH_SIZE))
+				packedRemainingVariableSamples.set(nVariables, packed)
 			}
-			evaluator = new IncrementalEvaluator(original, packed, prefixBytes, config.search.prefixStride)
+			remainingEvaluator = new IncrementalEvaluator(original, packed, prefixBytes, config.search.prefixStride)
 		}
-		return evaluator.equivalent(candidate)
+		return remainingEvaluator.equivalent(candidate, knownPrefix)
 	}
 }
 
