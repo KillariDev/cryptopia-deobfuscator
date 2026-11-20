@@ -5,8 +5,15 @@ import { LimitedMap } from './limitedMap.js'
 const budgets = new WeakMap<LimitedMap<string, boolean>, number>()
 const keyBytes = (key: string) => 2 * key.length + 64
 
+const keyCopyScratch = Buffer.allocUnsafe(4096)
+
 // Copy retained keys so a short window cannot keep the full encoding alive.
-export const retainWindowKey = (key: string) => Buffer.from(key, 'utf16le').toString('utf16le')
+export const retainWindowKey = (key: string) => {
+	const bytes = key.length * 2
+	if (bytes > keyCopyScratch.length) return Buffer.from(key, 'utf16le').toString('utf16le')
+	keyCopyScratch.write(key, 0, bytes, 'utf16le')
+	return keyCopyScratch.toString('utf16le', 0, bytes)
+}
 
 /** Rolling hashes are prefilters only. Cache hits require the exact structural key. */
 export class WindowFingerprints {
@@ -31,28 +38,38 @@ export class WindowFingerprints {
 		if (encodable) this.encoded = pieces.join('')
 	}
 	key(start: number, end: number) { return `window:${end - start}:${(this.prefix[end] - Math.imul(this.prefix[start], this.powers[end - start])) >>> 0}` }
-	exactKey(start: number, end: number) {
-		return this.encoded === undefined ? `${this.key(start, end)}:text:${JSON.stringify(this.gates.slice(start, end))}` : `${this.key(start, end)}:binary:${this.encoded.slice(start * 4, end * 4)}`
+	private exactKeyWithRollingKey(start: number, end: number, key: string) {
+		return this.encoded === undefined ? `${key}:text:${JSON.stringify(this.gates.slice(start, end))}` : `${key}:binary:${this.encoded.slice(start * 4, end * 4)}`
 	}
-	seen(cache: LimitedMap<string, boolean>, start: number, end: number) { return cache.has(this.key(start, end)) && cache.has(this.exactKey(start, end)) }
+	exactKey(start: number, end: number) {
+		return this.exactKeyWithRollingKey(start, end, this.key(start, end))
+	}
+	seen(cache: LimitedMap<string, boolean>, start: number, end: number) {
+		const key = this.key(start, end)
+		return cache.has(key) && cache.has(this.exactKeyWithRollingKey(start, end, key))
+	}
 	remember(cache: LimitedMap<string, boolean>, start: number, end: number) {
-		const key = this.key(start, end), exact = this.exactKey(start, end)
-		if (cache.has(key) && cache.has(exact)) return
-		const newBytes = keyBytes(key) + keyBytes(exact)
+		const key = this.key(start, end), exact = this.exactKeyWithRollingKey(start, end, key)
+		const hasKey = cache.has(key)
+		if (hasKey && cache.has(exact)) return
+		const rollingBytes = keyBytes(key), exactBytes = keyBytes(exact)
+		const newBytes = rollingBytes + exactBytes
 		if (newBytes > this.maximumBytes) return
 		let bytes = cache.size() ? budgets.get(cache) ?? 0 : 0
-		for (const entry of [key, exact]) {
-			if (cache.delete(entry)) bytes -= keyBytes(entry)
-		}
+		if (hasKey) {
+			cache.delete(key)
+			bytes -= rollingBytes
+		} else if (cache.delete(exact)) bytes -= exactBytes
 		while (bytes + newBytes > this.maximumBytes && cache.size()) {
 			const oldest = cache.keys().next().value!
 			cache.delete(oldest)
 			bytes -= keyBytes(oldest)
 		}
-		for (const entry of [key, retainWindowKey(exact)]) {
-			const evicted = cache.set(entry, true)
-			bytes += keyBytes(entry) - (evicted === undefined ? 0 : keyBytes(evicted))
-		}
+		const retained = retainWindowKey(exact)
+		const rollingEviction = cache.set(key, true)
+		const exactEviction = cache.set(retained, true)
+		bytes += newBytes - (rollingEviction === undefined ? 0 : keyBytes(rollingEviction)) -
+			(exactEviction === undefined ? 0 : keyBytes(exactEviction))
 		budgets.set(cache, bytes)
 	}
 }

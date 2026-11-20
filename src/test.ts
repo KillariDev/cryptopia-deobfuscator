@@ -830,7 +830,13 @@ console.log('Stable layer ETA and single-format generation regressions passed')
 
 const { patchCircuit, LazyCircuit } = await import('./circuit-edit.js')
 const { IncrementalGraph } = await import('./incremental-graph.js')
-const { WindowFingerprints } = await import('./fingerprints.js')
+const { WindowFingerprints, retainWindowKey } = await import('./fingerprints.js')
+const rawWindowKey = 'window:\u0000\ud800x\udfff'
+const retainedWindowKey = retainWindowKey(rawWindowKey)
+assert.equal(retainWindowKey('y'.repeat(2048)), 'y'.repeat(2048))
+assert.equal(retainedWindowKey, rawWindowKey)
+const oversizedWindowKey = rawWindowKey.repeat(2049)
+assert.equal(retainWindowKey(oversizedWindowKey), oversizedWindowKey)
 const { LookupBatcher } = await import('./lookup-batcher.js')
 for (let trial = 0; trial < 40; trial++) {
 	let gates = makeGates(40, 8)
