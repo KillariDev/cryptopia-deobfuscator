@@ -1,6 +1,7 @@
 export class LimitedMap<K, V> {
 	private map: Map<K, V>
 	private limit: number
+	private evictionCursor?: ReturnType<Map<K, V>['keys']>
 
 	constructor(limit: number, private policy: 'fifo' | 'lru' = 'fifo') {
 		if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('Limit must be a positive integer')
@@ -12,11 +13,20 @@ export class LimitedMap<K, V> {
 		if (this.map.has(key)) {
 			if (this.policy === 'lru') this.map.delete(key)
 		} else if (this.map.size >= this.limit) {
-			evicted = this.map.keys().next().value!
-			this.map.delete(evicted)
+			evicted = this.evictOldest()
 		}
 		this.map.set(key, value)
 		return evicted
+	}
+
+	evictOldest(): K | undefined {
+		if (!this.map.size) return undefined
+		// A live iterator skips earlier deletions without restarting at the front.
+		const cursor = this.evictionCursor ??= this.map.keys()
+		const { value: oldest, done } = cursor.next()
+		if (done) return undefined
+		this.map.delete(oldest)
+		return oldest
 	}
 
 	get(key: K): V | undefined {
@@ -40,6 +50,7 @@ export class LimitedMap<K, V> {
 
 	clear(): void {
 		this.map.clear()
+		this.evictionCursor = undefined
 	}
 
 	entries(): IterableIterator<[K, V]> {

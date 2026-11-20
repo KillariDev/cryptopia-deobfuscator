@@ -999,6 +999,20 @@ for (const window of [firstWindow, secondWindow, firstWindow]) {
 	window.remember(entryBounded, 0, 1)
 	assert.equal(window.seen(entryBounded, 0, 1), true, 'entry-count evictions release the byte budget')
 }
+const evictionOrder = new LimitedMap<string, boolean>(3, 'lru')
+for (const key of ['a', 'b', 'c']) evictionOrder.set(key, true)
+assert.equal(evictionOrder.set('d', true), 'a')
+evictionOrder.delete('b')
+evictionOrder.get('c')
+assert.equal(evictionOrder.evictOldest(), 'd')
+assert.equal(evictionOrder.evictOldest(), 'c')
+assert.equal(evictionOrder.evictOldest(), undefined)
+evictionOrder.set('e', true)
+assert.equal(evictionOrder.evictOldest(), 'e')
+evictionOrder.set('f', true)
+evictionOrder.clear()
+evictionOrder.set('g', true)
+assert.equal(evictionOrder.evictOldest(), 'g')
 console.log('Out-of-order jobs, cooperative queue cancellation, SQL request sharing and window-cache bounds passed')
 
 // Portfolio routing must use each table's truth-table width and its own cache namespace.

@@ -61,8 +61,7 @@ export class WindowFingerprints {
 			bytes -= rollingBytes
 		} else if (cache.delete(exact)) bytes -= exactBytes
 		while (bytes + newBytes > this.maximumBytes && cache.size()) {
-			const oldest = cache.keys().next().value!
-			cache.delete(oldest)
+			const oldest = cache.evictOldest()!
 			bytes -= keyBytes(oldest)
 		}
 		const retained = retainWindowKey(exact)
