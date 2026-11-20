@@ -263,9 +263,9 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 				return reverseMapCircuit(newRemovedCircuitNontarget, variableIndexMapping)
 			}
 		}
-		for (let newVar = 0; newVar < nVariables; newVar++) {
+		// The window's wire mapping is sorted, so only lower indices qualify.
+		for (let newVar = 0; newVar < variableIndex; newVar++) {
 			if (shouldStop()) return undefined
-			if (variableIndexMapping[variableIndex] <= variableIndexMapping[newVar]) continue
 			// Whole-wire replacement preserves gate/read counts. It only improves
 			// the cost when two distinct active wires merge.
 			if (active && uses[newVar].active) {
