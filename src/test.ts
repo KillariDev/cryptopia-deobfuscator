@@ -407,7 +407,7 @@ try {
 	assert.match(missingInputs.stderr, /Usage:/)
 } finally { await rm(configDir, { recursive: true, force: true }) }
 
-const { IncrementalEvaluator, PackedInputs } = await import('./packed.js')
+const { IncrementalEvaluator, PackedInputs, sameGate } = await import('./packed.js')
 const { RewriteCache, normalizeWindow, SearchScheduler, balancedChunks, improving } = await import('./search.js')
 const { isReplacementSimpler, findConvexSubsets } = await import('./utils.js')
 for (const wires of [1, 4, 8]) {
@@ -424,7 +424,11 @@ for (const wires of [1, 4, 8]) {
 			for (const candidate of variants) {
 				const expected = inputs.map(input => evalCircuit(candidate, input))
 				assert.deepEqual(evaluator.unpack(evaluator.evaluate(candidate)), expected)
-				assert.equal(evaluator.equivalent(candidate), JSON.stringify(expected) === JSON.stringify(inputs.map(input => evalCircuit(reference, input))))
+				const equivalent = JSON.stringify(expected) === JSON.stringify(inputs.map(input => evalCircuit(reference, input)))
+				assert.equal(evaluator.equivalent(candidate), equivalent)
+				let shared = 0
+				while (shared < Math.min(candidate.length, reference.length) && sameGate(candidate[shared], reference[shared])) shared++
+				assert.equal(evaluator.equivalent(candidate, shared), equivalent)
 			}
 		}
 	}

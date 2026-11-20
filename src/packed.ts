@@ -66,10 +66,12 @@ export class IncrementalEvaluator {
 	private apply(state: Uint32Array, gate: Gate) {
 		for (let batch = 0; batch < this.batches; batch++) this.applyAt(state, gate, batch * this.wires, this.masks[batch])
 	}
-	private prefix(candidate: Gate[]) {
+	private prefix(candidate: Gate[], knownPrefix?: number) {
 		if (!this.checkpoints.size) return { start: 0, prefix: this.initial }
-		let common = 0
-		while (common < candidate.length && common < this.gates.length && sameGate(candidate[common], this.gates[common])) common++
+		let common = knownPrefix ?? 0
+		if (knownPrefix === undefined) {
+			while (common < candidate.length && common < this.gates.length && sameGate(candidate[common], this.gates[common])) common++
+		}
 		const spacing = this.checkpointSpacing
 		if (Number.isSafeInteger(spacing)) {
 			const start = Math.min(Math.floor(common / spacing), this.checkpoints.size) * spacing
@@ -92,9 +94,10 @@ export class IncrementalEvaluator {
 		for (let i = start; i < candidate.length; i++) this.apply(state, candidate[i])
 		return state
 	}
-	equivalent(candidate: Gate[]) {
+	/** A known prefix must have the same effect as the reference on every input. */
+	equivalent(candidate: Gate[], knownPrefix?: number) {
 		if (!this.batches) return true
-		const { start, prefix } = this.prefix(candidate)
+		const { start, prefix } = this.prefix(candidate, knownPrefix)
 		const state = this.scratch ??= new Uint32Array(this.wires)
 		for (let batch = 0; batch < this.batches; batch++) {
 			const offset = batch * this.wires

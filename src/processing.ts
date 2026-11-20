@@ -164,6 +164,8 @@ const INPUTS = config.validation.probabilisticInputs
 const randomInputs = generateNRandomBooleanArray(INPUTS, config.validation.maximumWires)
 const randomInputSets = new Map<number, boolean[][]>()
 const packedVariableSamples = new Map<number, PackedInputs>()
+const packedFirstVariableSamples = new Map<number, PackedInputs>()
+const packedExactVariableInputs = new Map<number, PackedInputs>()
 function sampledInputs(nVariables: number) {
 	let inputs = randomInputSets.get(nVariables)
 	if (!inputs) {
@@ -177,11 +179,25 @@ function sampledInputs(nVariables: number) {
 function createVariableSampleCheck(original: Gate[], nVariables: number) {
 	const inputs = sampledInputs(nVariables)
 	let firstOutput: boolean[] | undefined
+	let firstEvaluator: IncrementalEvaluator | undefined
 	let evaluator: IncrementalEvaluator | undefined
-	return (candidate: Gate[]) => {
+	const prefixBytes = config.search.incrementalEvaluation ? config.search.prefixCacheBytes : 0
+	return (candidate: Gate[], knownPrefix = 0) => {
 		if (!inputs.length) return true
-		firstOutput ??= evalCircuit(original, inputs[0])
-		if (!areBooleanArraysEqual(firstOutput, evalCircuit(candidate, inputs[0]))) return false
+		if (prefixBytes && knownPrefix > 0 && !firstEvaluator) {
+			let packed = packedFirstVariableSamples.get(nVariables)
+			if (!packed) {
+				packed = new PackedInputs([inputs[0]])
+				packedFirstVariableSamples.set(nVariables, packed)
+			}
+			firstEvaluator = new IncrementalEvaluator(original, packed, prefixBytes, 1)
+		}
+		if (firstEvaluator) {
+			if (!firstEvaluator.equivalent(candidate, knownPrefix)) return false
+		} else {
+			firstOutput ??= evalCircuit(original, inputs[0])
+			if (!areBooleanArraysEqual(firstOutput, evalCircuit(candidate, inputs[0]))) return false
+		}
 		if (inputs.length === 1) return true
 		if (!evaluator) {
 			let packed = packedVariableSamples.get(nVariables)
@@ -189,7 +205,7 @@ function createVariableSampleCheck(original: Gate[], nVariables: number) {
 				packed = new PackedInputs(inputs.slice(1))
 				packedVariableSamples.set(nVariables, packed)
 			}
-			evaluator = new IncrementalEvaluator(original, packed, config.search.incrementalEvaluation ? config.search.prefixCacheBytes : 0, config.search.prefixStride)
+			evaluator = new IncrementalEvaluator(original, packed, prefixBytes, config.search.prefixStride)
 		}
 		return evaluator.equivalent(candidate)
 	}
@@ -227,7 +243,7 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 	if (nVariables < MAX_DETERMINISTIC_USELESS_VARS) return undefined // no need to do this approach for less than 8 vars as we have exact way already
 	const proveEquivalent = createPolynomialEquivalenceChecker(mappedGates, nVariables, config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, shouldStop)
 	const sampleMatch = createVariableSampleCheck(mappedGates, nVariables)
-	const accepted = (candidate: Gate[]) => sampleMatch(candidate) && proveEquivalent(candidate) === true
+	const accepted = (candidate: Gate[], knownPrefix?: number) => sampleMatch(candidate, knownPrefix) && proveEquivalent(candidate) === true
 	if (accepted([])) return []
 	
 	const combined = combineGates(mappedGates, shouldStop)
@@ -260,14 +276,15 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 			if (active && uses[newVar].active) {
 				const newCircuit = mappedGates.slice()
 				for (const index of all) newCircuit[index] = replaceVar(mappedGates[index], variableIndex, newVar)
-				if (accepted(newCircuit)) return reverseMapCircuit(newCircuit, variableIndexMapping)
+				if (accepted(newCircuit, all[0])) return reverseMapCircuit(newCircuit, variableIndexMapping)
 			}
 			
 			if (hasVariableIndexAsNontarget) {
 				simplified ??= mappedGates.map(simplifyGate)
 				const newCircuit2 = simplified.slice()
 				for (const index of controls) newCircuit2[index] = replaceNonTargetVar(mappedGates[index], variableIndex, newVar)
-				if (sampleMatch(newCircuit2) && canImprove(newCircuit2) && proveEquivalent(newCircuit2) === true) {
+				// Simplification preserves each unedited gate's function.
+				if (sampleMatch(newCircuit2, controls[0]) && canImprove(newCircuit2) && proveEquivalent(newCircuit2) === true) {
 					return reverseMapCircuit(newCircuit2, variableIndexMapping)
 				}
 			}
@@ -283,12 +300,18 @@ const findExactReplacement = (variableIndexMapping: number[], mappedGates: Gate[
 	if (allInputs === undefined) return undefined
 	const newVars = randomOrder(nVariables)
 	const canImprove = improving(mappedGates)
-	const expectedOutput = calculateAllOutputsArray(mappedGates, allInputs)
-	if (areBooleanArraysEqual(expectedOutput, allInputs.flat())) return []
+	let packed = packedExactVariableInputs.get(nVariables)
+	if (!packed) {
+		packed = new PackedInputs(allInputs)
+		packedExactVariableInputs.set(nVariables, packed)
+	}
+	const evaluator = new IncrementalEvaluator(mappedGates, packed,
+		config.search.incrementalEvaluation ? config.search.prefixCacheBytes : 0, config.search.prefixStride)
+	if (evaluator.equivalent([])) return []
 	for (let variableIndex = 0; variableIndex < nVariables; variableIndex++) {
 		if (shouldStop()) return undefined
 		const variableRemovedGates = removeVariable(mappedGates, variableIndex)
-		if (canImprove(variableRemovedGates) && areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(variableRemovedGates, allInputs))) {
+		if (canImprove(variableRemovedGates) && evaluator.equivalent(variableRemovedGates)) {
 			return reverseMapCircuit(variableRemovedGates, variableIndexMapping)
 		}
 		const hasVariableIndexAsNontarget = mappedGates.find((x) => {
@@ -297,7 +320,7 @@ const findExactReplacement = (variableIndexMapping: number[], mappedGates: Gate[
 		}) !== undefined
 		if (hasVariableIndexAsNontarget) {
 			const newRemovedCircuitNontarget = removeNonTargetVariable(mappedGates, variableIndex)
-			if (canImprove(newRemovedCircuitNontarget) && areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(newRemovedCircuitNontarget, allInputs))) {
+			if (canImprove(newRemovedCircuitNontarget) && evaluator.equivalent(newRemovedCircuitNontarget)) {
 				return reverseMapCircuit(newRemovedCircuitNontarget, variableIndexMapping)
 			}
 		}
@@ -305,13 +328,13 @@ const findExactReplacement = (variableIndexMapping: number[], mappedGates: Gate[
 			if (shouldStop()) return undefined
 			if (variableIndexMapping[variableIndex] <= variableIndexMapping[newVar]) continue
 			const newCircuit = mappedGates.map((gate) => replaceVar(gate, variableIndex, newVar))
-			if (canImprove(newCircuit) && areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(newCircuit, allInputs))) {
+			if (canImprove(newCircuit) && evaluator.equivalent(newCircuit)) {
 				return reverseMapCircuit(newCircuit, variableIndexMapping)
 			}
 			
 			if (hasVariableIndexAsNontarget) {
 				const newCircuit2 = mappedGates.map((gate) => replaceNonTargetVar(gate, variableIndex, newVar))
-				if (canImprove(newCircuit2) && areBooleanArraysEqual(expectedOutput, calculateAllOutputsArray(newCircuit2, allInputs))) {
+				if (canImprove(newCircuit2) && evaluator.equivalent(newCircuit2)) {
 					return reverseMapCircuit(newCircuit2, variableIndexMapping)
 				}
 			}
