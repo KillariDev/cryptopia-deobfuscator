@@ -1,4 +1,4 @@
-import { circuitWireCost, isBetterCircuit } from './circuit-cost.js'
+import { circuitWireCost, isBetterCircuit, withCachedBaselineCosts } from './circuit-cost.js'
 import { formatCircuitSize } from './logging.js'
 import { AsyncReductionCheckpoint } from './storage.js'
 import assert from 'node:assert/strict'
@@ -127,6 +127,10 @@ assert.deepEqual(circuitWireCost(morePairs), { operands: 8, pairUses: 6 })
 assert.deepEqual(circuitWireCost(fewerPairs), { operands: 8, pairUses: 4 })
 for (const input of generateCombinations(3)) assert.deepEqual(evalCircuit(morePairs, input), evalCircuit(fewerPairs, input))
 assert.equal(roundSearchResult([morePairs, fewerPairs], true), fewerPairs)
+const improvesSnapshot = withCachedBaselineCosts()
+assert.equal(improvesSnapshot(fewerPairs, morePairs), true)
+assert.equal(improvesSnapshot(fewerPairs, morePairs), true)
+assert.equal(improvesSnapshot(morePairs, fewerPairs), false)
 const pairCheckpoint = new AsyncReductionCheckpoint(morePairs, async gates => assert.equal(gates, fewerPairs))
 assert.equal(await pairCheckpoint.saveIfReduced(fewerPairs), true)
 assert.equal(await pairCheckpoint.saveIfReduced(morePairs), false)

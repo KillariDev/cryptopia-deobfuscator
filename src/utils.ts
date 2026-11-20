@@ -107,6 +107,16 @@ export const getVars = (gate: Gate) => {
 	}
 }
 
+/** Bit 0 denotes control a and bit 1 denotes control b. */
+export function gateControlMask(gate: Gate) {
+	const type = gate.gate_i
+	if (type === 0 || type === 15) return 0
+	if (type === 3 || type === 12) return 1
+	if (type === 5 || type === 10) return 2
+	if (Number.isInteger(type) && type >= 1 && type <= 14) return 3
+	throw new Error(`invalid control function: ${type}`)
+}
+
 export const simplifyGate = (gate: Gate): Gate => {
 	if (gate.a !== gate.b) {
 		if (gate.a > gate.b) {

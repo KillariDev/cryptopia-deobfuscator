@@ -1,5 +1,5 @@
 import { synthesizeDecisionDiagramProduct } from './decision-diagram-product.js'
-import { circuitWireCost, isBetterCircuit } from './circuit-cost.js'
+import { circuitWireCost, isBetterCircuit, withCachedBaselineCosts } from './circuit-cost.js'
 import { CheckpointWriter } from './checkpoint-writer.js'
 import { opaqueRainbow } from './opaque-rainbow.js'
 import { RoundStrategyPicker, StrategyPicker } from './strategy-picker.js'
@@ -26,7 +26,7 @@ import { IncrementalEvaluator, PackedInputs, sameGate } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, workerRegionSeed, createSearchArms, independentComponents } from './search.js'
 import { config, defaultBroadStrategyOrder, defaultLocalStrategyOrder, minimumBroadGates } from './config.js'
 import { formatCircuitSize, formatCoordinatorPhase, SummaryThrottle, verboseLogging, formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
-import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
+import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, gateControlMask, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
 import { Gate } from './types.js'
 import { seededRandom } from './random.js'
 import { RainbowPortfolio, RainbowMatch } from './rainbow-portfolio.js'
@@ -753,9 +753,9 @@ function* allGatesWithTarget(target: number, wires: number) {
 
 const shuffleCache = new LimitedMap<string, Gate[]>(config.cache.shuffleEntries)
 export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number, shouldStop: () => boolean = () => false, random = Math.random) {
-	const hasCommonNumber = (arr1: number, arr2: number[]): boolean => {
-		return arr2.includes(arr1)
-	}
+	const usesWire = (gate: Gate, wire: number, controls: number) =>
+		gate.target === wire || ((controls & 1) !== 0 && gate.a === wire) ||
+		((controls & 2) !== 0 && gate.b === wire)
 
 	const swapDependingGates = (gates: Gate[], previous: number, current: number, previousDependsOnThis: boolean, thisDependsOnPrevious: boolean) => {
 		const sliceGates = [gates[previous], gates[current]]
@@ -794,17 +794,16 @@ export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number, s
 		for (let gateI = 1; gateI < gates.length; gateI++) {
 			if ((gateI & 63) === 1 && shouldStop()) return
 			if (random() < 0.5) continue
-			const [thisAssigned, ...thisOthers] = getVars(gates[gateI])
-			const [previousAssigned, ...previousOthers] = getVars(gates[gateI - 1])
-			const previousDependsOnThis = hasCommonNumber(thisAssigned, [previousAssigned, ...previousOthers])
-			const thisDependsOnPrevious = hasCommonNumber(previousAssigned, [thisAssigned, ...thisOthers])
+			const current = gates[gateI], previous = gates[gateI - 1]
+			const currentControls = gateControlMask(current), previousControls = gateControlMask(previous)
+			const previousDependsOnThis = usesWire(previous, current.target, previousControls)
+			const thisDependsOnPrevious = usesWire(current, previous.target, currentControls)
 			if (previousDependsOnThis || thisDependsOnPrevious) {
 				swapDependingGates(gates, gateI - 1, gateI, previousDependsOnThis, thisDependsOnPrevious)
 				continue
 			}
-			const prevGate = gates[gateI - 1]
-			gates[gateI - 1] = gates[gateI]
-			gates[gateI] = prevGate
+			gates[gateI - 1] = current
+			gates[gateI] = previous
 		}
 	}
 }
@@ -1336,6 +1335,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
 			const chunkRevisions = approxGates.map(() => 0)
+			const improvesSnapshot = withCachedBaselineCosts()
 			const stopSignal = new Int32Array(new SharedArrayBuffer(4))
 			const checkpoint = new AsyncReductionCheckpoint(currentGates, async snapshot => {
 				await writer.write([paths.progress(snapshot.length), paths.latest], snapshot)
@@ -1361,7 +1361,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 				if (!pendingCheckpoint) return
 				const local = localCandidate()
 				const candidate = roundSearchResult([local, broadBest], true)
-				if (isBetterCircuit(candidate, bestObserved)) {
+				if (improvesSnapshot(candidate, bestObserved)) {
 					bestObserved = candidate
 					bestObservedSide = candidate === local ? 'local' : 'global'
 				}
@@ -1412,7 +1412,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 					do {
 						statuses[jobCount] = { updatedAtMs: performance.now() - lastIterationTime, done: false, started: false }
 						const accept = (candidate: Gate[], patch?: WorkerActivity['cutPatch']) => {
-							if (!isBetterCircuit(candidate, broadBest)) return
+							if (!improvesSnapshot(candidate, broadBest)) return
 							roundPatches?.observe(broadBest, patch)
 							broadBest = candidate
 							pendingCheckpoint = true
@@ -1458,7 +1458,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 						const accept = (candidate: Gate[]) => {
 							// Several idle lanes may retry the same remaining chunk. Their
 							// results are alternatives, never additional chunks to concatenate.
-							if (!isBetterCircuit(candidate, snapshots[target])) return
+							if (!improvesSnapshot(candidate, snapshots[target])) return
 							snapshots[target] = candidate; candidateCounts[target] = candidate.length
 							chunkRevisions[target]++
 							pendingCheckpoint = true

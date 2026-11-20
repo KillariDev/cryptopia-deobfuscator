@@ -1,5 +1,5 @@
 import { Gate } from './types.js'
-import { getVars } from './utils.js'
+import { gateControlMask } from './utils.js'
 
 /** Maintains used-wire counts before allocating a slice or a normalized mapping. */
 export class SlidingWindowWires {
@@ -11,12 +11,16 @@ export class SlidingWindowWires {
 	get end() { return this.start + this.length }
 	get wireCount() { return this.counts.size }
 	mapping() { return [...this.counts.keys()].sort((a, b) => a - b) }
+	private update(wire: number, change: number) {
+		const count = (this.counts.get(wire) ?? 0) + change
+		if (count) this.counts.set(wire, count)
+		else this.counts.delete(wire)
+	}
 	private add(gate: Gate, change: number) {
-		for (const wire of getVars(gate)) {
-			const count = (this.counts.get(wire) ?? 0) + change
-			if (count) this.counts.set(wire, count)
-			else this.counts.delete(wire)
-		}
+		const controls = gateControlMask(gate)
+		this.update(gate.target, change)
+		if (controls & 1) this.update(gate.a, change)
+		if (controls & 2) this.update(gate.b, change)
 	}
 	next() {
 		if (this.start + 1 + this.length > this.gates.length) return false
