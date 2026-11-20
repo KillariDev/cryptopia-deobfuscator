@@ -419,7 +419,13 @@ for (const wires of [1, 4, 8]) {
 		for (const bytes of [0, 64, 8192]) {
 			const evaluator = new IncrementalEvaluator(reference, bytes === 0 ? inputs : packedInputs, bytes, 4)
 			const firstBatch = count > 0 && count <= 32 ? new FirstBatchEvaluator(reference, packedInputs, bytes) : undefined
-			assert.deepEqual(evaluator.unpack(), inputs.map(input => evalCircuit(reference, input)))
+			const outputs = inputs.map(input => evalCircuit(reference, input))
+			assert.deepEqual(evaluator.unpack(), outputs)
+			if (firstBatch) {
+				for (let wire = 0; wire < wires; wire++) {
+					assert.equal(firstBatch.leavesWireUnchanged(wire), inputs.every((input, i) => input[wire] === outputs[i][wire]))
+				}
+			}
 			assert.ok([...evaluator.checkpoints.values()].reduce((sum, state) => sum + state.byteLength, 0) <= bytes)
 			const variants = [reference, [], reference.slice(1), reference.slice(0, -1), [...reference, ...makeGates(1, wires)], [...reference.slice(0, 30), ...makeGates(1, wires), ...reference.slice(31)]]
 			for (const candidate of variants) {

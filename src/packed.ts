@@ -150,6 +150,10 @@ export class FirstBatchEvaluator {
 		this.scratch = new Uint32Array(wires)
 	}
 
+	leavesWireUnchanged(wire: number) {
+		return this.packed.initial[wire] === this.reference[wire]
+	}
+
 	/** The supplied prefix must have the same effect as the reference. */
 	equivalent(candidate: Gate[], knownPrefix: number) {
 		const { wires, initial, masks } = this.packed

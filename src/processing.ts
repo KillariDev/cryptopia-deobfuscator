@@ -176,7 +176,7 @@ function createVariableSampleCheck(original: Gate[], nVariables: number) {
 	let firstEvaluator: FirstBatchEvaluator | undefined
 	let remainingEvaluator: IncrementalEvaluator | undefined
 	const prefixBytes = config.search.incrementalEvaluation ? config.search.prefixCacheBytes : 0
-	return (candidate: Gate[], knownPrefix?: number) => {
+	const equivalent = (candidate: Gate[], knownPrefix?: number) => {
 		if (!inputs.length) return true
 		if (!firstEvaluator) {
 			let packed = packedFirstVariableSamples.get(nVariables)
@@ -198,6 +198,7 @@ function createVariableSampleCheck(original: Gate[], nVariables: number) {
 		}
 		return remainingEvaluator.equivalent(candidate, knownPrefix)
 	}
+	return { equivalent, leavesWireUnchanged: (wire: number) => firstEvaluator?.leavesWireUnchanged(wire) ?? true }
 }
 
 /** Raw operand positions preserve substitutions on unused operands too.
@@ -238,7 +239,7 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 	if (nVariables < MAX_DETERMINISTIC_USELESS_VARS) return undefined // no need to do this approach for less than 8 vars as we have exact way already
 	const proveEquivalent = createPolynomialEquivalenceChecker(mappedGates, nVariables, config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, shouldStop)
 	const sampleMatch = createVariableSampleCheck(mappedGates, nVariables)
-	const accepted = (candidate: Gate[], knownPrefix?: number) => sampleMatch(candidate, knownPrefix) && proveEquivalent(candidate) === true
+	const accepted = (candidate: Gate[], knownPrefix?: number) => sampleMatch.equivalent(candidate, knownPrefix) && proveEquivalent(candidate) === true
 	if (accepted([])) return []
 	
 	const combined = combineGates(mappedGates, shouldStop)
@@ -252,9 +253,12 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 	let simplified: Gate[] | undefined
 	for (let variableIndex = 0; variableIndex < nVariables; variableIndex++) {
 		if (shouldStop()) return undefined
-		const newRemovedCircuit = removeVariable(mappedGates, variableIndex)
-		if (canImprove(newRemovedCircuit) && accepted(newRemovedCircuit)) {
-			return reverseMapCircuit(newRemovedCircuit, variableIndexMapping)
+		// Removing every write leaves this wire equal to its input on every sample.
+		if (sampleMatch.leavesWireUnchanged(variableIndex)) {
+			const newRemovedCircuit = removeVariable(mappedGates, variableIndex)
+			if (canImprove(newRemovedCircuit) && accepted(newRemovedCircuit)) {
+				return reverseMapCircuit(newRemovedCircuit, variableIndexMapping)
+			}
 		}
 		const { all, controls, active, targeted, activeControl: hasVariableIndexAsNontarget } = uses[variableIndex]
 		if (hasVariableIndexAsNontarget) {
@@ -272,7 +276,7 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 			if (active && uses[newVar].active) {
 				const newCircuit = mappedGates.slice()
 				for (const index of all) newCircuit[index] = replaceVar(mappedGates[index], variableIndex, newVar)
-				const matches = sampleMatch(newCircuit, all[0])
+				const matches = sampleMatch.equivalent(newCircuit, all[0])
 				// For a control-only source, both substitutions have the same effect.
 				if (!targeted) sharedSample = matches
 				if (matches && proveEquivalent(newCircuit) === true) return reverseMapCircuit(newCircuit, variableIndexMapping)
@@ -283,7 +287,7 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 				const newCircuit2 = simplified.slice()
 				for (const index of controls) newCircuit2[index] = replaceNonTargetVar(mappedGates[index], variableIndex, newVar)
 				// Simplification preserves each unedited gate's function.
-				if ((sharedSample ?? sampleMatch(newCircuit2, controls[0])) && canImprove(newCircuit2) && proveEquivalent(newCircuit2) === true) {
+				if ((sharedSample ?? sampleMatch.equivalent(newCircuit2, controls[0])) && canImprove(newCircuit2) && proveEquivalent(newCircuit2) === true) {
 					return reverseMapCircuit(newCircuit2, variableIndexMapping)
 				}
 			}
@@ -371,7 +375,7 @@ function removeRepeatedWriteWire(gates: Gate[], offset: number, minimumSpan: num
 				if (!isReplacementSimpler(candidate, mapped)) continue
 				const equivalent = inputs && expected
 					? areBooleanArraysEqual(expected, calculateAllOutputsArray(candidate, inputs))
-					: sample?.(candidate) && prove?.(candidate) === true
+					: sample?.equivalent(candidate) && prove?.(candidate) === true
 				if (!equivalent || shouldStop()) continue
 				const patched = index.patch(cut, reverseMapCircuit(candidate, cut.wires))
 				if (isReplacementSimpler(patched, gates)) return patched
