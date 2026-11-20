@@ -629,7 +629,11 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	const prepared = new Map<number, PreparedWindow>()
 	if (preparation.gates !== originalGates) throw new Error('Subset preparation belongs to a different circuit')
 	let strategyStarted = performance.now()
-	const changes = optimizeVariables(processedGatesCache, originalGates, sliceSize, useProbabilistically, findUselessVarsSetting, lookup ? tables.maximumWires : 0, prepared, preparation, () => synthesisBudget?.shouldStop?.() === true || (synthesisBudget !== undefined && performance.now() >= synthesisBudget.deadline), synthesisBudget?.onCandidate)
+	const changes = optimizeVariables(processedGatesCache, originalGates, sliceSize, useProbabilistically, findUselessVarsSetting,
+		lookup ? tables.maximumWires : 0, prepared, preparation,
+		() => synthesisBudget?.shouldStop?.() === true ||
+			(synthesisBudget !== undefined && !synthesisBudget.shouldStopChecksDeadline && performance.now() >= synthesisBudget.deadline),
+		synthesisBudget?.onCandidate)
 	if (findUselessVarsSetting && sliceSize > 2) recordStrategy('variable-elimination', { slice: sliceSize, probabilistic: useProbabilistically, exactMaximumWires: config.search.exactMaximumWires }, strategyStarted, originalGates.length, changes.gates.length, changes.changed)
 	if (!lookup) {
 		if (runSynthesis && !changes.changed) { const candidate = await advancedRewrite(originalGates, selectedBudget); if (candidate) return finish({ gates: candidate, changed: true }) }
@@ -1051,8 +1055,9 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		}
 		return false
 	}
-	const timeToEndWorker = () => {
+	const timeToEndWorker = (refreshAfterProgress = false) => {
 		const endTime = performance.now()
+		let reported = false
 		if (onProgress) {
 			const periodic = endTime - lastProgress >= config.timing.workerReportSeconds * 1000
 			if (periodic || (reportOnImprovement && !publishedReduction)) {
@@ -1061,10 +1066,13 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 					if (improved) publishedReduction = true
 					onProgress(candidateParts.length, progressActivity(), improved || !wantsSnapshot ? candidateParts.materialize() : undefined)
 					lastProgress = endTime
+					reported = true
 				}
 			}
 		}
-		return shouldFinish?.(activity) === true || endTime >= jobDeadline
+		// Publishing a snapshot can run long enough to cross the deadline.
+		return shouldFinish?.(activity) === true || endTime >= jobDeadline ||
+			(refreshAfterProgress && reported && performance.now() >= jobDeadline)
 	}
 	const heartbeat = onProgress ? setInterval(() => {
 		const improved = wantsSnapshot?.(candidateParts.length, activity.improvements)
@@ -1113,6 +1121,10 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 				activity.checks++
 				let published = false
 				const budget: SynthesisBudget = { deadline: jobDeadline, shouldStop: timeToEndWorker, forceStrategy: wholeCircuitStrategy }
+				if (strategy === 'variable-elimination') {
+					budget.shouldStop = () => timeToEndWorker(true)
+					budget.shouldStopChecksDeadline = true
+				}
 				if (reportOnImprovement && onProgress && !publishedReduction) budget.onCandidate = gates => {
 					published = true
 					activity.improvements++

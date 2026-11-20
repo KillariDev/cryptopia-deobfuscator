@@ -14,7 +14,7 @@ import { structuralNames, structuralChoices, structuralRewrite } from './structu
 
 const failed = new LimitedMap<string, boolean>(Math.min(10000, config.cache.processedEntries))
 const picker = new StrategyPicker(['gf2-affine', 'anf-synthesis', ...structuralNames, 'forward-semantic-search', 'smt-synthesis', 'meet-in-the-middle', 'commutation-search'])
-export type SynthesisBudget = { deadline: number, shouldStop?: () => boolean, broad?: boolean, minimumBroadGates?: number, dependencyRegion?: boolean, onProgress?: () => void, onCut?: (indices: number[], replacement: Gate[]) => void, onCandidate?: (gates: Gate[]) => void, selectedStrategy?: string, exhaustStrategies?: boolean, forceStrategy?: boolean }
+export type SynthesisBudget = { deadline: number, shouldStop?: () => boolean, shouldStopChecksDeadline?: boolean, broad?: boolean, minimumBroadGates?: number, dependencyRegion?: boolean, onProgress?: () => void, onCut?: (indices: number[], replacement: Gate[]) => void, onCandidate?: (gates: Gate[]) => void, selectedStrategy?: string, exhaustStrategies?: boolean, forceStrategy?: boolean }
 // Serialize synthesis so Z3 initialization and cleanup cannot overlap.
 let pending: Promise<unknown> = Promise.resolve()
 export async function advancedRewrite(gates: Gate[], budget: SynthesisBudget = { deadline: performance.now() + config.workers.jobSeconds * 1000 }): Promise<Gate[] | undefined> {
