@@ -107,6 +107,14 @@ export class IncrementalEvaluator {
 		}
 		return true
 	}
+	/** Compare one wire's reference output with its input in every batch. */
+	leavesWireUnchanged(wire: number) {
+		for (let batch = 0; batch < this.batches; batch++) {
+			const offset = batch * this.wires + wire
+			if (this.initial[offset] !== this.reference[offset]) return false
+		}
+		return true
+	}
 	unpack(state = this.reference) {
 		return this.inputs.map((_, i) => Array.from({ length: this.wires }, (_, wire) => ((state[Math.floor(i / 32) * this.wires + wire] >>> (i % 32)) & 1) !== 0))
 	}

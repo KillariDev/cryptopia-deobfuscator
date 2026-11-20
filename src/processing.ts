@@ -310,9 +310,13 @@ const findExactReplacement = (variableIndexMapping: number[], mappedGates: Gate[
 	if (evaluator.equivalent([])) return []
 	for (let variableIndex = 0; variableIndex < nVariables; variableIndex++) {
 		if (shouldStop()) return undefined
-		const variableRemovedGates = removeVariable(mappedGates, variableIndex)
-		if (canImprove(variableRemovedGates) && evaluator.equivalent(variableRemovedGates)) {
-			return reverseMapCircuit(variableRemovedGates, variableIndexMapping)
+		// Removing or merging this wire leaves its output equal to its input.
+		const leavesWireUnchanged = evaluator.leavesWireUnchanged(variableIndex)
+		if (leavesWireUnchanged) {
+			const variableRemovedGates = removeVariable(mappedGates, variableIndex)
+			if (canImprove(variableRemovedGates) && evaluator.equivalent(variableRemovedGates)) {
+				return reverseMapCircuit(variableRemovedGates, variableIndexMapping)
+			}
 		}
 		const hasVariableIndexAsNontarget = mappedGates.find((x) => {
 			const vars = getVars(x)
@@ -327,9 +331,11 @@ const findExactReplacement = (variableIndexMapping: number[], mappedGates: Gate[
 		for (const newVar of newVars) {
 			if (shouldStop()) return undefined
 			if (variableIndexMapping[variableIndex] <= variableIndexMapping[newVar]) continue
-			const newCircuit = mappedGates.map((gate) => replaceVar(gate, variableIndex, newVar))
-			if (canImprove(newCircuit) && evaluator.equivalent(newCircuit)) {
-				return reverseMapCircuit(newCircuit, variableIndexMapping)
+			if (leavesWireUnchanged) {
+				const newCircuit = mappedGates.map((gate) => replaceVar(gate, variableIndex, newVar))
+				if (canImprove(newCircuit) && evaluator.equivalent(newCircuit)) {
+					return reverseMapCircuit(newCircuit, variableIndexMapping)
+				}
 			}
 			
 			if (hasVariableIndexAsNontarget) {

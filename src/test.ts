@@ -433,6 +433,13 @@ for (const wires of [1, 4, 8]) {
 		}
 	}
 }
+// The high control is false on the first batch and true on the second.
+const laterBatchGate = { a: 5, b: 1, target: 0, gate_i: 1 }
+const laterBatchInputs = generateCombinations(6)
+assert.equal(new IncrementalEvaluator([laterBatchGate], laterBatchInputs.slice(0, 32), 0, 1).leavesWireUnchanged(0), true)
+const laterBatchEvaluator = new IncrementalEvaluator([laterBatchGate], laterBatchInputs, 0, 1)
+assert.equal(laterBatchEvaluator.leavesWireUnchanged(0), false)
+assert.equal(laterBatchEvaluator.leavesWireUnchanged(5), true)
 const mixedWindow = normalizeWindow([
 	{ a: 11, b: 13, target: 7, gate_i: 15 },
 	{ a: 9, b: 11, target: 4, gate_i: 3 },
