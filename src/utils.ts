@@ -477,11 +477,22 @@ export type DependencyQueries = {
 export function dependencyQueries(dependantMap: Map<number, number[]>, nodes: DependencyNode[], gates: Gate[] | { at(index: number): Gate }, access: WireAccessIndex): DependencyQueries {
 	return {
 		past: line => nodes[line].dependOnPastLines,
-		followers: (line, before, selected) => (dependantMap.get(line) ?? []).filter(next => next < before && !selected.has(next)),
+		followers: (line, before, selected) => {
+			const followers: number[] = []
+			const dependants = dependantMap.get(line)
+			if (dependants) {
+				for (const next of dependants) {
+					if (next < before && !selected.has(next)) followers.push(next)
+				}
+			}
+			return followers
+		},
 		lastConflict: (line, before, selected) => {
-			const [target, ...controls] = getVars(gateAt(gates, line))
-			let last = lastUnselected(access.accesses.get(target), line, before, selected)
-			for (const wire of controls) last = Math.max(last, lastUnselected(access.writes.get(wire), line, before, selected))
+			const gate = gateAt(gates, line)
+			const controls = gateControlMask(gate)
+			let last = lastUnselected(access.accesses.get(gate.target), line, before, selected)
+			if (controls & 1) last = Math.max(last, lastUnselected(access.writes.get(gate.a), line, before, selected))
+			if (controls & 2) last = Math.max(last, lastUnselected(access.writes.get(gate.b), line, before, selected))
 			return last
 		},
 	}
