@@ -91,32 +91,26 @@ export function combineGates(gates: Gate[], shouldStop: () => boolean = () => fa
 	return { combined: true, gates: newGates.filter((gate): gate is Gate => gate !== undefined) }
 }
 
-const removeVariable = (gates: Gate[], variable: number) => {
-	return gates.map((gate) => {
-		if (gate.target === variable) return undefined
-		const vars = getVars(gate)
-		if (vars.length === 2 && vars[1] === variable) return undefined
-		if (gate.a === variable || gate.b === variable) {
-			const simplified = simplifyGate(removeVariableFromGate(gate, gate.a === variable))
-			if (simplified.gate_i === 0) return undefined // false gate that is identity gate, we can just remove it
-			return simplified
-		}
-		return gate
-	}).filter((gate): gate is Gate => gate !== undefined)
+function removeWireFromGate(gate: Gate, variable: number, removeTarget: boolean): Gate | undefined {
+	if (removeTarget && gate.target === variable) return undefined
+	const controls = gateControlMask(gate)
+	if ((controls === 1 && gate.a === variable) || (controls === 2 && gate.b === variable)) return undefined
+	if (gate.a !== variable && gate.b !== variable) return gate
+	const replacement = simplifyGate(removeVariableFromGate(gate, gate.a === variable))
+	return replacement.gate_i === 0 ? undefined : replacement
 }
 
-const removeNonTargetVariable = (gates: Gate[], variable: number) => {
-	return gates.map((gate) => {
-		const vars = getVars(gate)
-		if (vars.length === 2 && vars[1] === variable) return undefined
-		if (gate.a === variable || gate.b === variable) {
-			const simplified = simplifyGate(removeVariableFromGate(gate, gate.a === variable))
-			if (simplified.gate_i === 0) return undefined // false gate that is identity gate, we can just remove it
-			return simplified
-		}
-		return gate
-	}).filter((gate): gate is Gate => gate !== undefined)
+function removeWire(gates: Gate[], variable: number, removeTarget: boolean): Gate[] {
+	const result: Gate[] = []
+	for (const gate of gates) {
+		const replacement = removeWireFromGate(gate, variable, removeTarget)
+		if (replacement !== undefined) result.push(replacement)
+	}
+	return result
 }
+
+const removeVariable = (gates: Gate[], variable: number) => removeWire(gates, variable, true)
+const removeNonTargetVariable = (gates: Gate[], variable: number) => removeWire(gates, variable, false)
 
 export const areCircuitsProbabilisticallyTheSame = (cachedOutputs: boolean[][], oldCircuit: Gate[], newCircuit: Gate[], attempts: number, nVariables: number) => {
 	if (attempts < 0 || attempts > INPUTS || !Number.isInteger(attempts)) throw new Error('Invalid attempt count')
