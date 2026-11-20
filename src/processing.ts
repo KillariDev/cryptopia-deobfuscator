@@ -22,7 +22,7 @@ import { IncrementalGraph } from './incremental-graph.js'
 import { retainWindowKey, WindowFingerprints } from './fingerprints.js'
 import { createHash } from 'node:crypto'
 import { advancedRewrite, wholeCircuitAffineSearch, SynthesisBudget } from './strategies.js'
-import { IncrementalEvaluator, PackedInputs, sameGate } from './packed.js'
+import { FirstBatchEvaluator, IncrementalEvaluator, PackedInputs, sameGate } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, workerRegionSeed, createSearchArms, independentComponents } from './search.js'
 import { config, defaultBroadStrategyOrder, defaultLocalStrategyOrder, minimumBroadGates } from './config.js'
 import { formatCircuitSize, formatCoordinatorPhase, SummaryThrottle, verboseLogging, formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
@@ -179,7 +179,7 @@ function sampledInputs(nVariables: number) {
 /** The original region and samples are fixed for one variable search. */
 function createVariableSampleCheck(original: Gate[], nVariables: number) {
 	const inputs = sampledInputs(nVariables)
-	let firstEvaluator: IncrementalEvaluator | undefined
+	let firstEvaluator: FirstBatchEvaluator | undefined
 	let remainingEvaluator: IncrementalEvaluator | undefined
 	const prefixBytes = config.search.incrementalEvaluation ? config.search.prefixCacheBytes : 0
 	return (candidate: Gate[], knownPrefix?: number) => {
@@ -190,7 +190,7 @@ function createVariableSampleCheck(original: Gate[], nVariables: number) {
 				packed = new PackedInputs(inputs.slice(0, FIRST_VARIABLE_SAMPLE_BATCH_SIZE))
 				packedFirstVariableSamples.set(nVariables, packed)
 			}
-			firstEvaluator = new IncrementalEvaluator(original, packed, prefixBytes, 1)
+			firstEvaluator = new FirstBatchEvaluator(original, packed, prefixBytes)
 		}
 		if (!firstEvaluator.equivalent(candidate, knownPrefix ?? 0)) return false
 		if (inputs.length <= FIRST_VARIABLE_SAMPLE_BATCH_SIZE) return true

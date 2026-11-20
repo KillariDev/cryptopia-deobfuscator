@@ -5,6 +5,13 @@ export function packedControl(f: number, a: number, b: number) {
 	return ((f & 8) ? ~a & ~b : 0) | ((f & 4) ? ~a & b : 0) | ((f & 2) ? a & ~b : 0) | ((f & 1) ? a & b : 0)
 }
 
+function applyPackedGate(state: Uint32Array, gate: Gate, offset: number, mask: number) {
+	const f = gate.gate_i
+	if (!Number.isInteger(f) || f < 0 || f > 15) throw new Error(`invalid control function: ${f}`)
+	const a = state[offset + gate.a], b = state[offset + gate.b]
+	const control = packedControl(f, a, b)
+	state[offset + gate.target] = (state[offset + gate.target] ^ control) & mask
+}
 
 /** Immutable input batches can be reused across reference circuits. */
 export class PackedInputs {
@@ -56,15 +63,8 @@ export class IncrementalEvaluator {
 		})
 		this.reference = state
 	}
-	private applyAt(state: Uint32Array, gate: Gate, offset: number, mask: number) {
-		const f = gate.gate_i
-		if (!Number.isInteger(f) || f < 0 || f > 15) throw new Error(`invalid control function: ${f}`)
-		const a = state[offset + gate.a], b = state[offset + gate.b]
-		const control = packedControl(f, a, b)
-		state[offset + gate.target] = (state[offset + gate.target] ^ control) & mask
-	}
 	private apply(state: Uint32Array, gate: Gate) {
-		for (let batch = 0; batch < this.batches; batch++) this.applyAt(state, gate, batch * this.wires, this.masks[batch])
+		for (let batch = 0; batch < this.batches; batch++) applyPackedGate(state, gate, batch * this.wires, this.masks[batch])
 	}
 	private prefix(candidate: Gate[], knownPrefix?: number) {
 		if (!this.checkpoints.size) return { start: 0, prefix: this.initial }
@@ -102,7 +102,7 @@ export class IncrementalEvaluator {
 		for (let batch = 0; batch < this.batches; batch++) {
 			const offset = batch * this.wires
 			for (let wire = 0; wire < this.wires; wire++) state[wire] = prefix[offset + wire]
-			for (let i = start; i < candidate.length; i++) this.applyAt(state, candidate[i], 0, this.masks[batch])
+			for (let i = start; i < candidate.length; i++) applyPackedGate(state, candidate[i], 0, this.masks[batch])
 			for (let wire = 0; wire < this.wires; wire++) if (state[wire] !== this.reference[offset + wire]) return false
 		}
 		return true
@@ -117,5 +117,51 @@ export class IncrementalEvaluator {
 	}
 	unpack(state = this.reference) {
 		return this.inputs.map((_, i) => Array.from({ length: this.wires }, (_, wire) => ((state[Math.floor(i / 32) * this.wires + wire] >>> (i % 32)) & 1) !== 0))
+	}
+}
+
+/** A single packed sample batch with caller-supplied unchanged prefixes. */
+export class FirstBatchEvaluator {
+	private readonly spacing: number
+	private readonly checkpointCount: number
+	private readonly checkpoints: Uint32Array
+	private readonly reference: Uint32Array
+	private readonly scratch: Uint32Array
+
+	constructor(gates: Gate[], private readonly packed: PackedInputs, prefixBytes: number) {
+		if (packed.batches !== 1) throw new Error('First batch evaluation requires one packed batch')
+		const { wires, initial, masks } = packed
+		const mask = masks[0]
+		const capacity = initial.byteLength ? Math.max(0, Math.floor(prefixBytes / initial.byteLength)) : 0
+		this.spacing = Math.max(1, Math.ceil(gates.length / Math.max(1, capacity)))
+		this.checkpointCount = Math.min(capacity, Math.floor(gates.length / this.spacing))
+		this.checkpoints = new Uint32Array(this.checkpointCount * wires)
+		const state = initial.slice()
+		let checkpoint = 0, nextCheckpoint = this.spacing
+		for (let i = 0; i < gates.length; i++) {
+			applyPackedGate(state, gates[i], 0, mask)
+			if (i + 1 === nextCheckpoint && checkpoint < this.checkpointCount) {
+				this.checkpoints.set(state, checkpoint * wires)
+				checkpoint++
+				nextCheckpoint += this.spacing
+			}
+		}
+		this.reference = state
+		this.scratch = new Uint32Array(wires)
+	}
+
+	/** The supplied prefix must have the same effect as the reference. */
+	equivalent(candidate: Gate[], knownPrefix: number) {
+		const { wires, initial, masks } = this.packed
+		const mask = masks[0]
+		const checkpoint = Math.min(Math.floor(knownPrefix / this.spacing), this.checkpointCount)
+		const start = checkpoint * this.spacing
+		const prefix = checkpoint ? this.checkpoints : initial
+		const offset = checkpoint ? (checkpoint - 1) * wires : 0
+		const state = this.scratch
+		for (let wire = 0; wire < wires; wire++) state[wire] = prefix[offset + wire]
+		for (let i = start; i < candidate.length; i++) applyPackedGate(state, candidate[i], 0, mask)
+		for (let wire = 0; wire < wires; wire++) if (state[wire] !== this.reference[wire]) return false
+		return true
 	}
 }
