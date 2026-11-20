@@ -50,6 +50,15 @@ const denseFactors = [
 ]
 const denseProduct = [...denseFactors, { a: 32, b: 63, target: 32, gate_i: 1 }]
 const reducedProduct = [...denseFactors, { a: 63, b: 0, target: 32, gate_i: 3 }]
+const toggleFirst = [{ a: 0, b: 0, target: 0, gate_i: 15 }]
+const toggleSecond = [{ a: 0, b: 0, target: 1, gate_i: 15 }]
+const proveFirst = createPolynomialEquivalenceChecker(toggleFirst, 2, 20, 100)
+const proveSecond = createPolynomialEquivalenceChecker(toggleSecond, 2, 20, 100)
+assert.equal(proveFirst(toggleFirst), true)
+assert.equal(proveSecond(toggleFirst), false)
+assert.equal(proveSecond(toggleSecond), true)
+assert.equal(proveFirst(toggleSecond), false)
+
 const denseProof = createPolynomialEquivalenceChecker(denseProduct, 64, 2000, 100_000)
 assert.equal(denseProof(reducedProduct), true)
 assert.equal(denseProof(denseFactors), false)

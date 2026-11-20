@@ -1,5 +1,6 @@
 import { emitQuadraticMap, emitSharedCubicMap } from './polynomial-synthesis.js'
 import { Gate } from './types.js'
+import { LimitedMap } from './limitedMap.js'
 import { evalGate, getVars } from './utils.js'
 import { simplifyAffineRegions, synthesizeAffineMap } from './affine.js'
 
@@ -173,11 +174,18 @@ function composePolynomials(input: Gate[], indices: ReadonlyMap<number, number>,
 	return stopped() ? undefined : rows
 }
 
+// Dense wire indices are immutable and depend only on the window width.
+const proofWireIndices = new LimitedMap<number, ReadonlyMap<number, number>>(32)
+
 /** Exact admission check after sampling. Inconclusive/resource-limited checks
  * return undefined, never permission to rewrite. Cache the original ANF only
  * for this candidate search, and compute it lazily after samples agree. */
 export function createPolynomialEquivalenceChecker(input: Gate[], nVariables: number, maximumTerms: number, maximumOperations: number, shouldStop: () => boolean = () => false) {
-	const indices = new Map(Array.from({ length: nVariables }, (_, i) => [i, i]))
+	let indices = proofWireIndices.get(nVariables)
+	if (!indices) {
+		indices = new Map(Array.from({ length: nVariables }, (_, i) => [i, i]))
+		proofWireIndices.set(nVariables, indices)
+	}
 	let attempted = false, expected: Set<bigint>[] | undefined
 	return (candidate: Gate[]): boolean | undefined => {
 		if (shouldStop()) return undefined
