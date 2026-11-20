@@ -23,9 +23,9 @@ try {
 	Object.assign(config.search, { strategyAdaptive: true, subsetMaximum: 3, sliceMaximum: 3, sliceMinimum: 2, rainbow: true })
 	const broadInput = gates.slice(0, 8)
 	const broadCaches = createOptimizerCaches()
-	const scan = async (stop = () => false, caches = broadCaches) => {
+	const scan = async (stop: (activity?: WorkerActivity) => boolean = () => false, caches = broadCaches) => {
 		let activity: WorkerActivity | undefined
-		await broadSearch(tables, structuredClone(broadInput), 8, caches, 5000, stop, (_, update) => { activity = update })
+		await broadSearch(tables, structuredClone(broadInput), 8, caches, 5000, () => stop(activity), (_, update) => { activity = update })
 		return activity!
 	}
 	broadCaches.broadStrategyPicker.beginRound(1, 'block-cancellation')
@@ -40,6 +40,15 @@ try {
 	let stopChecks = 0
 	assert.equal((await scan(() => ++stopChecks >= 4, interrupted)).broadExhausted, false)
 	assert.equal((await scan(() => false, interrupted)).checks, 4, 'retry the interrupted region and cover the remaining regions')
+
+	const shearCaches = createOptimizerCaches()
+	shearCaches.broadStrategyPicker.beginRound(1, 'polynomial-shear-interpolation')
+	const stoppedShear = await scan(activity => (activity?.checks ?? 0) >= 5, shearCaches)
+	assert.equal(stoppedShear.broadExhausted, false)
+	const resumedShear = await scan(() => false, shearCaches)
+	assert.equal(resumedShear.broadExhausted, true)
+	assert.equal(stoppedShear.checks, 5, 'stop after reaching the exhaustive pass')
+	assert.equal(resumedShear.checks + stoppedShear.checks, 28, 'cover all 28 windows across two jobs')
 
 	const localInput = [gates[0], gates[0]]
 	const localScan = async (cache: ReturnType<typeof createOptimizerCaches>, stopAfterCheck = false, maxSlice = 2) => {

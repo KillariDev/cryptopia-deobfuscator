@@ -50,6 +50,8 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 	const length = input.length
 	const key = `${minimum}:${hashGates(input)}`
 	const passes = choices.map(({ name }) => {
+		const shear = name === 'polynomial-shear-interpolation'
+		const minimumWindow = shear ? 2 : minimum
 		let cursor = state.get(name)
 		if (!cursor) { cursor = new SearchProgress(); state.set(name, cursor) }
 		cursor.reset(input, function* () {
@@ -57,26 +59,38 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 			yield { start: 0, end: length }
 			regions.next()
 			const seen = new Set<string>()
-			if (name === 'polynomial-shear-interpolation') {
+			if (shear) {
 				for (const region of polynomialShearRegions(input, wires, minimum)) {
 					seen.add(`${region.start}:${region.end}`)
 					yield region
 				}
 			}
 			for (const region of regions) {
-				if (!seen.has(`${region.start}:${region.end}`)) yield region
+				const id = `${region.start}:${region.end}`
+				if (seen.has(id)) continue
+				if (shear) seen.add(id)
+				yield region
+			}
+			if (shear) {
+				// Fill the gaps lazily so a worker can resume on its next job.
+				for (let width = minimumWindow; width < length; width++) {
+					for (let start = 0; start + width <= length; start++) {
+						const end = start + width
+						if (!seen.has(`${start}:${end}`)) yield { start, end }
+					}
+				}
 			}
 		}, key)
-		return { name, cursor }
+		return { name, cursor, minimumWindow }
 	})
 	const remaining = passes.slice()
 	while (!stopped()) {
 		const selected = caches.broadFallbackPicker.pick(remaining)
 		if (!selected) break
-		const task = selected.cursor.next(minimum, false)
+		const task = selected.cursor.next(selected.minimumWindow, false)
 		if (!task) { remaining.splice(remaining.indexOf(selected), 1); continue }
 		const { start, end, slice } = task
-		if (slice < minimum) continue
+		if (slice < selected.minimumWindow) continue
 		const region = input.slice(start, end)
 		activity.subsets++
 		activity.passes++
@@ -84,7 +98,7 @@ export async function broadSearch(tables: RainbowPortfolio, input: Gate[], wires
 		let cutPatch: CutPatch | undefined
 		const next = await massOptimizeStep(tables, caches.ioIdentifierCache, caches.processedGatesCache, region, slice,
 			config.search.probabilistic, false, false, new SubsetPreparation(region),
-			{ deadline, shouldStop, broad: true, minimumBroadGates: minimum, selectedStrategy: selected.name, onProgress: () => report(), onCut: (indices, replacement) => { cutPatch = { indices: indices.map(index => index + start), replacement } } },
+			{ deadline, shouldStop, broad: true, minimumBroadGates: selected.minimumWindow, selectedStrategy: selected.name, onProgress: () => report(), onCut: (indices, replacement) => { cutPatch = { indices: indices.map(index => index + start), replacement } } },
 			caches.broadStrategyPicker)
 		if (!next.changed && stopped()) selected.cursor.retry(task)
 		report()

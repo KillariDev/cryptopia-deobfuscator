@@ -221,7 +221,10 @@ improvement. The emitter packs compatible terms into a single gate and
 tries a shared-output basis change when overlapping target expressions can
 justify the cost of changing and restoring the basis. Broad search checks the
 whole circuit first, then tries up to 16 sampled restore windows before its
-regular windows. Each proposed window is verified independently.
+regular windows. After that, it scans every remaining contiguous window of at
+least two gates, from shortest to longest, resuming across worker jobs for the
+same circuit. This last pass has a quadratic number of windows in the circuit
+length. Each proposed replacement is verified independently.
 
 Regions of up to 12 active wires are checked exhaustively. Larger regions use
 the shared polynomial proof limits. An exact mismatch rejects the candidate.
