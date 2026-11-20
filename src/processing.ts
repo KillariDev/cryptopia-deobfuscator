@@ -212,19 +212,24 @@ function indexVariableUses(gates: Gate[], variableCount: number) {
 	const uses = Array.from({ length: variableCount }, () => ({ all: [] as number[], controls: [] as number[], active: false, activeControl: false, targeted: false }))
 	for (let i = 0; i < gates.length; i++) {
 		const gate = gates[i]
-		uses[gate.a]?.all.push(i)
-		uses[gate.a]?.controls.push(i)
+		const a = uses[gate.a], b = uses[gate.b], target = uses[gate.target]
+		a?.all.push(i)
+		a?.controls.push(i)
 		if (gate.b !== gate.a) {
-			uses[gate.b]?.all.push(i)
-			uses[gate.b]?.controls.push(i)
+			b?.all.push(i)
+			b?.controls.push(i)
 		}
-		if (gate.target !== gate.a && gate.target !== gate.b) uses[gate.target]?.all.push(i)
-		uses[gate.target].targeted = true
-		const wires = getVars(gate)
-		for (let j = 0; j < wires.length; j++) {
-			const use = uses[wires[j]]
-			use.active = true
-			if (j > 0) use.activeControl = true
+		if (gate.target !== gate.a && gate.target !== gate.b) target.all.push(i)
+		target.targeted = true
+		target.active = true
+		const controls = gateControlMask(gate)
+		if (controls & 1) {
+			a.active = true
+			a.activeControl = true
+		}
+		if (controls & 2) {
+			b.active = true
+			b.activeControl = true
 		}
 	}
 	return uses
