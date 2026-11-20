@@ -1,6 +1,5 @@
 import { Gate } from './types.js'
 import { gateControlMask, getVars, hashGates, reverseMapCircuit } from './utils.js'
-import { LimitedMap } from './limitedMap.js'
 
 /** First-use renaming preserves gate order and control function orientation. */
 export function normalizeWindow(gates: Gate[]) {
@@ -25,14 +24,34 @@ export function normalizeWindow(gates: Gate[]) {
 	return { wires, normalized, key: hashGates(normalized) }
 }
 export class RewriteCache {
-	private cache: LimitedMap<string, Gate[] | null>
-	constructor(entries: number) { this.cache = new LimitedMap(entries) }
+	private readonly cache = new Map<string, Gate[] | null>()
+	private readonly fifo: string[] = []
+	private oldest = 0
+
+	constructor(private readonly entries: number) {
+		if (!Number.isSafeInteger(entries) || entries < 1) throw new Error('Limit must be a positive integer')
+	}
+
+	private remember(key: string, result: Gate[] | null) {
+		// A nested computation may have inserted the key while this one ran.
+		if (!this.cache.has(key)) {
+			if (this.fifo.length < this.entries) {
+				this.fifo.push(key)
+			} else {
+				this.cache.delete(this.fifo[this.oldest])
+				this.fifo[this.oldest] = key
+				if (++this.oldest === this.entries) this.oldest = 0
+			}
+		}
+		this.cache.set(key, result)
+	}
+
 	resolve(gates: Gate[], compute: (normalized: Gate[]) => Gate[] | undefined) {
 		const { wires, normalized, key } = normalizeWindow(gates)
 		let result = this.cache.get(key)
 		if (result === undefined) {
 			result = compute(normalized) ?? null
-			this.cache.set(key, result)
+			this.remember(key, result)
 		}
 		return result === null ? undefined : reverseMapCircuit(result, wires)
 	}

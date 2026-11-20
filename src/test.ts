@@ -468,6 +468,15 @@ const misses = new RewriteCache(2)
 let failures = 0
 for (let i = 0; i < 2; i++) assert.equal(misses.resolve(singleGate, () => { failures++; return undefined }), undefined)
 assert.equal(failures, 1)
+const fifoCache = new RewriteCache(2)
+const fifoMisses: number[] = []
+for (const gate_i of [0, 15, 0, 3, 15, 0, 3, 15]) {
+	fifoCache.resolve([{ a: 0, b: 1, target: 2, gate_i }], () => {
+		fifoMisses.push(gate_i)
+		return undefined
+	})
+}
+assert.deepEqual(fifoMisses, [0, 15, 3, 0, 15])
 for (let i = 0; i < 100; i++) {
 	const before = makeGates(random(20), 8), after = makeGates(random(20), 8)
 	const sameLength = makeGates(before.length, 8)
