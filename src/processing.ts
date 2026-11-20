@@ -28,6 +28,7 @@ import { config, defaultBroadStrategyOrder, defaultLocalStrategyOrder, minimumBr
 import { formatCircuitSize, formatCoordinatorPhase, SummaryThrottle, verboseLogging, formatProgress, formatWorkerActivity, formatStatus, WorkerActivity, WorkerStatus, shouldFinishReducedRound, logVerbose } from './logging.js'
 import { areBooleanArraysEqual, calculateAllOutputsArray, chunkArray, dependencyGraphToMap, dependencySort, evalCircuit, findConvexSubsets, generateCombinations, generateNRandomBooleanArray, getRandomNumberInRange, getVars, hashGates, ioHash, isReplacementSimpler, logTimed, mapCircuit, mapVariablesToIndexes, randomOrder, replace, reverseMapCircuit, simplifyGate, verifyCircuit } from './utils.js'
 import { Gate } from './types.js'
+import { seededRandom } from './random.js'
 import { RainbowPortfolio, RainbowMatch } from './rainbow-portfolio.js'
 import { LimitedMap } from './limitedMap.js'
 import { WorkerPool, configuredWorkerCount } from './threads.js'
@@ -751,7 +752,7 @@ function* allGatesWithTarget(target: number, wires: number) {
 }
 
 const shuffleCache = new LimitedMap<string, Gate[]>(config.cache.shuffleEntries)
-export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number, shouldStop: () => boolean = () => false) {
+export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number, shouldStop: () => boolean = () => false, random = Math.random) {
 	const hasCommonNumber = (arr1: number, arr2: number[]): boolean => {
 		return arr2.includes(arr1)
 	}
@@ -792,7 +793,7 @@ export function shuffleRowsWithDependentGateSwap(gates: Gate[], times: number, s
 	for (let time = 0; time < times; time++) {
 		for (let gateI = 1; gateI < gates.length; gateI++) {
 			if ((gateI & 63) === 1 && shouldStop()) return
-			if (Math.random() < 0.5) continue
+			if (random() < 0.5) continue
 			const [thisAssigned, ...thisOthers] = getVars(gates[gateI])
 			const [previousAssigned, ...previousOthers] = getVars(gates[gateI - 1])
 			const previousDependsOnThis = hasCommonNumber(thisAssigned, [previousAssigned, ...previousOthers])
@@ -945,7 +946,7 @@ export const createOptimizerCaches = (workerIndex = 0) => ({
 	methodCaches: new Map<string, LimitedMap<string, boolean>>(),
 })
 
-export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number, improvements: number) => boolean, reportOnImprovement = false, checkBudget: number | BigInt64Array = 0, wholeCircuitStrategy = false) => {
+export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], wires: number, problemName: string, workerMode: boolean, caches = createOptimizerCaches(), roundDurationMs = WORKER_ROUND_MS, onProgress?: (gates: number, activity: WorkerActivity, snapshot?: Gate[]) => void, shouldFinish?: (activity?: WorkerActivity) => boolean, wantsSnapshot?: (gates: number, improvements: number) => boolean, reportOnImprovement = false, checkBudget: number | BigInt64Array = 0, wholeCircuitStrategy = false, helperShuffleSeed?: number) => {
 	resetStrategyStats()
 	const jobStarted = performance.now(), jobDeadline = jobStarted + roundDurationMs, databaseStarted = lookupDatabaseTime()
 	let optimizedVersion = originalGates.slice()
@@ -954,6 +955,14 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 	optimizedVersion = gateSimplifier(optimizedVersion)
 	if (isSingleNoOp(optimizedVersion)) optimizedVersion = []
 	recordStrategy('gate-simplification', {}, simplifyStarted, originalGates.length, optimizedVersion.length, optimizedVersion.length < originalGates.length)
+	let skipContiguousStartup = false
+	if (helperShuffleSeed !== undefined) {
+		const beforeShuffle = optimizedVersion.slice()
+		const shuffleDeadline = Math.min(jobDeadline, performance.now() + Math.min(10, roundDurationMs * 0.05))
+		shuffleRowsWithDependentGateSwap(optimizedVersion, 3,
+			() => performance.now() >= shuffleDeadline || shouldFinish?.() === true, seededRandom(helperShuffleSeed))
+		skipContiguousStartup = optimizedVersion.every((gate, index) => sameGate(gate, beforeShuffle[index]))
+	}
 	const startupVerificationStarted = performance.now()
 	if (optimizedVersion.length !== originalGates.length ||
 		!optimizedVersion.every((gate, index) => sameGate(gate, originalGates[index]))) {
@@ -1051,7 +1060,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		activity.passes++
 		activity.stage = 'searching'
 		const startLength = optimizedVersion.length
-		if (activity.passes === 1 && scanContiguous) {
+		if (activity.passes === 1 && scanContiguous && !skipContiguousStartup) {
 			const first = strategy === 'variable-elimination' ? Math.max(3, config.search.sliceMinimum) : config.search.sliceMinimum
 			let preparation = new SubsetPreparation(optimizedVersion, sliceResults)
 			let key = createHash('sha256').update(hashGates(optimizedVersion)).digest('base64')
@@ -1326,6 +1335,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 			const approxGates = wholeCircuit ? Array.from({ length: jobCount }, () => currentGates.slice()) : config.search.balancedWorkers ? balancedChunks(currentGates, jobCount, wireCosts) : splitArrayIntoApproximatelyChunks(currentGates, jobCount)
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
+			const chunkRevisions = approxGates.map(() => 0)
 			const stopSignal = new Int32Array(new SharedArrayBuffer(4))
 			const checkpoint = new AsyncReductionCheckpoint(currentGates, async snapshot => {
 				await writer.write([paths.progress(snapshot.length), paths.latest], snapshot)
@@ -1440,6 +1450,9 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 							chunk = next
 						}
 						const target = chunk, dataChunk = snapshots[target]
+						const helperShuffleSeed = target === index ? undefined :
+							Math.imul(optimizerRound, 0x9e3779b1) ^ Math.imul(target, 0x85ebca6b) ^
+							Math.imul(chunkRevisions[target], 0xc2b2ae35) ^ index
 						if (workerFile) writeCircuit(workerFile, inputCircuit.wire_count, dataChunk)
 						let executionStarted: number | undefined
 						const accept = (candidate: Gate[]) => {
@@ -1447,6 +1460,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 							// results are alternatives, never additional chunks to concatenate.
 							if (!isBetterCircuit(candidate, snapshots[target])) return
 							snapshots[target] = candidate; candidateCounts[target] = candidate.length
+							chunkRevisions[target]++
 							pendingCheckpoint = true
 							if (!candidate.length && !localCount()) Atomics.store(stopSignal, 0, 1)
 						}
@@ -1457,7 +1471,7 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 									try { accept(snapshot) } catch (error) { Atomics.store(stopSignal, 0, 1); rejectCheckpoint(error) }
 								}
 								statuses[index] = { activity, updatedAtMs: performance.now() - lastIterationTime, done: false, started: true }
-						}, stopSignal.buffer as SharedArrayBuffer, localJobBudget, false, 'local', optimizerRound, assigned, !wholeCircuit)
+						}, stopSignal.buffer as SharedArrayBuffer, localJobBudget, false, 'local', optimizerRound, assigned, !wholeCircuit, helperShuffleSeed)
 						if (executionStarted !== undefined) {
 							const cost = (performance.now() - executionStarted) / Math.max(1, dataChunk.length)
 							for (const wire of new Set(dataChunk.flatMap(getVars))) wireCosts.set(wire, ((wireCosts.get(wire) ?? cost) + cost) / 2)

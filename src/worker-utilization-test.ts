@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { config } from './config.js'
 import { WorkerPool } from './threads.js'
-import { splitTaskAndRun } from './processing.js'
+import { createOptimizerCaches, optimize, shuffleRowsWithDependentGateSwap, splitTaskAndRun } from './processing.js'
+import { RainbowPortfolio } from './rainbow-portfolio.js'
+import { seededRandom } from './random.js'
 
 const fixtureSource = `
 import {parentPort} from 'node:worker_threads';
@@ -69,15 +71,23 @@ try {
 	config.workers.wholeCircuitMaximumGates = 0
 	firstSignal = undefined
 	let retriesFromBest = 0
-	WorkerPool.prototype.run = function(gates, wires, onProgress, signal, budget, restart, solver) {
+	const helperSeeds = new Set<number>()
+	let ownerRetried = false
+	WorkerPool.prototype.run = function(gates, wires, onProgress, signal, budget, restart, solver, round, assigned, splitCircuit, helperShuffleSeed) {
 		if (!firstSignal && solver !== 'broad') { firstSignal = signal; watchdog = setTimeout(() => Atomics.store(new Int32Array(firstSignal!), 0, 1), 5000) }
 		if (solver !== 'broad' && signal !== firstSignal) return Promise.reject(done)
 		;(this as unknown as { workerUrl: URL }).workerUrl = shrinkFixture
-		if (gates.length === 1) retriesFromBest++
-		return originalRun.call(this, gates, wires, onProgress, signal, budget, restart, solver)
+		if (gates.length === 1) {
+			retriesFromBest++
+			if (helperShuffleSeed === undefined) ownerRetried = true
+			else helperSeeds.add(helperShuffleSeed)
+		}
+		return originalRun.call(this, gates, wires, onProgress, signal, budget, restart, solver, round, assigned, splitCircuit, helperShuffleSeed)
 	}
 	await assert.rejects(splitTaskAndRun(join(directory, 'shrinking'), 'unused', { originalCircuit: circuit, inputCircuit: circuit }), error => error === done)
 	assert.ok(retriesFromBest > 4, 'empty lanes retry the current remaining best rather than their original chunks')
+	assert.ok(ownerRetried, 'the owner retries the surviving chunk without a startup shuffle')
+	assert.equal(helperSeeds.size, 3, 'each helper gets a distinct, stable seed for the same revision')
 	assert.equal(JSON.parse(await readFile(join(directory, 'shrinking-latest.json'), 'utf8')).gates.length, 1, 'alternative retries of one chunk are never concatenated')
 	clearTimeout(watchdog)
 
@@ -96,6 +106,33 @@ try {
 	await assert.rejects(splitTaskAndRun(join(directory, 'simpler'), 'unused', { originalCircuit: small, inputCircuit: small }), error => error === done)
 	assert.equal(reusedSimpler, true, 'retain equally short candidates with lower wire cost for the next attempt')
 	assert.equal(JSON.parse(await readFile(join(directory, 'simpler-latest.json'), 'utf8')).gates.length, 1)
+
+	const independent = Array.from({ length: 12 }, (_, target) => ({ a: 0, b: 0, target, gate_i: 15 }))
+	const shuffle = (seed: number) => {
+		const copy = independent.slice()
+		shuffleRowsWithDependentGateSwap(copy, 3, () => false, seededRandom(seed))
+		return copy
+	}
+	assert.deepEqual(shuffle(42), shuffle(42))
+	assert.notDeepEqual(shuffle(42), shuffle(43))
+	assert.deepEqual(shuffle(42).sort((a, b) => a.target - b.target), independent)
+
+	const repeated = Array.from({ length: 5 }, () => ({ a: 0, b: 0, target: 1, gate_i: 15 }))
+	config.search.variableElimination = true
+	for (const helperShuffleSeed of [undefined, 42]) {
+		const caches = createOptimizerCaches()
+		caches.strategyPicker.beginRound(1, 'variable-elimination')
+		let checkedContiguous = false
+		const has = caches.testedSubsets.has.bind(caches.testedSubsets)
+		caches.testedSubsets.has = key => {
+			if (key.startsWith('contiguous:')) checkedContiguous = true
+			return has(key)
+		}
+		await optimize(new RainbowPortfolio([]), repeated, 2, 'unchanged shuffle', true, caches, 100,
+			undefined, undefined, undefined, false, 1, true, helperShuffleSeed)
+		assert.equal(checkedContiguous, helperShuffleSeed === undefined)
+	}
+
 } finally {
 	clearTimeout(watchdog)
 	WorkerPool.prototype.run = originalRun; console.log = log; Object.assign(config, saved)

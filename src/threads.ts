@@ -12,7 +12,7 @@ export function configuredWorkerCount() {
 	return count
 }
 
-type Job = { solver: 'local' | 'affine' | 'broad' | 'shuffle', restartOnImprovement: boolean, round: number, assignedStrategy?: string, splitCircuit: boolean, budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
+type Job = { solver: 'local' | 'affine' | 'broad' | 'shuffle', restartOnImprovement: boolean, round: number, assignedStrategy?: string, splitCircuit: boolean, helperShuffleSeed?: number, budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
 type WorkerSlot = { worker: Worker, index: number, localIndex?: number, job?: Job, retiring?: boolean }
 export class WorkerPool {
 	private slots: WorkerSlot[] = []
@@ -63,11 +63,11 @@ export class WorkerPool {
 		}
 		await Promise.all(retired.map(worker => worker.terminate()))
 	}
-	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000, restartOnImprovement = false, solver: 'local' | 'affine' | 'broad' | 'shuffle' = 'local', round = 0, assignedStrategy?: string, splitCircuit = false): Promise<Gate[]> {
+	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000, restartOnImprovement = false, solver: 'local' | 'affine' | 'broad' | 'shuffle' = 'local', round = 0, assignedStrategy?: string, splitCircuit = false, helperShuffleSeed?: number): Promise<Gate[]> {
 		if (this.failure) return Promise.reject(this.failure)
 		if (!Number.isFinite(budgetMs) || budgetMs <= 0) return Promise.reject(new Error('Invalid job budget'))
 		return new Promise((resolve, reject) => {
-			const job = { solver, restartOnImprovement, round, assignedStrategy, splitCircuit, budgetMs, gates, wires, stopSignal, onProgress, resolve, reject }
+			const job = { solver, restartOnImprovement, round, assignedStrategy, splitCircuit, helperShuffleSeed, budgetMs, gates, wires, stopSignal, onProgress, resolve, reject }
 			if (solver === 'broad') this.queue.unshift(job)
 			else this.queue.push(job)
 			this.dispatch()
@@ -128,7 +128,7 @@ export class WorkerPool {
 				slot.localIndex = localIndex
 			}
 			slot.job = this.queue.shift()!
-			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs, restartOnImprovement: slot.job.restartOnImprovement, solver: slot.job.solver, round: slot.job.round, localIndex: slot.localIndex, assignedStrategy: slot.job.assignedStrategy, splitCircuit: slot.job.splitCircuit })
+			slot.worker.postMessage({ gates: slot.job.gates, wires: slot.job.wires, stopSignal: slot.job.stopSignal, budgetMs: slot.job.budgetMs, restartOnImprovement: slot.job.restartOnImprovement, solver: slot.job.solver, round: slot.job.round, localIndex: slot.localIndex, assignedStrategy: slot.job.assignedStrategy, splitCircuit: slot.job.splitCircuit, helperShuffleSeed: slot.job.helperShuffleSeed })
 		}
 	}
 	private fail(error: Error) {

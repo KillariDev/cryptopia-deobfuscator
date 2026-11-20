@@ -12,7 +12,7 @@ import { WORKER_ROUND_MS } from './job.js'
 let portfolio: ReturnType<typeof openRainbowPortfolio> | undefined
 let localCaches: ReturnType<typeof createOptimizerCaches> | undefined
 let broadCaches: ReturnType<typeof createOptimizerCaches> | undefined
-parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, localIndex, assignedStrategy, solver = 'local', restartOnImprovement = false, splitCircuit = false }: { gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, localIndex?: number, assignedStrategy?: string, restartOnImprovement?: boolean, splitCircuit?: boolean, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
+parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, localIndex, assignedStrategy, solver = 'local', restartOnImprovement = false, splitCircuit = false, helperShuffleSeed }: { gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, localIndex?: number, assignedStrategy?: string, restartOnImprovement?: boolean, splitCircuit?: boolean, helperShuffleSeed?: number, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
 	try {
 		if (solver === 'shuffle') {
 			resetStrategyStats()
@@ -54,7 +54,7 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 			if (candidate) lastConsideredImprovement = activity.improvements
 			if (snapshot) lastSnapshot = snapshot
 			parentPort!.postMessage({ progress: count, activity, snapshot })
-		}, () => (restartOnImprovement && lastSnapshot.length < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0), (count, improvements) => count < lastSnapshot.length || (count === lastSnapshot.length && improvements > lastConsideredImprovement), true, workerData?.remainingChecks, assignedStrategy !== undefined)
+		}, () => (restartOnImprovement && lastSnapshot.length < gates.length) || (stop !== undefined && Atomics.load(stop, 0) !== 0), (count, improvements) => count < lastSnapshot.length || (count === lastSnapshot.length && improvements > lastConsideredImprovement), true, workerData?.remainingChecks, assignedStrategy !== undefined, helperShuffleSeed)
 		parentPort!.postMessage({ gates: result })
 	} catch (error) {
 		parentPort!.postMessage({ error: String(error) })
