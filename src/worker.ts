@@ -4,15 +4,16 @@ import { recordStrategy, resetStrategyStats, strategySnapshot } from './strategy
 import { config } from './config.js'
 import { wholeCircuitAffineSearch } from './strategies.js'
 import { parentPort, workerData } from 'worker_threads'
-import { createOptimizerCaches, optimize, shuffleRowsWithDependentGateSwap } from './processing.js'
+import { createOptimizerCaches, optimize, polynomialShearSearch, shuffleRowsWithDependentGateSwap } from './processing.js'
 import { openRainbowPortfolio } from './rainbow-portfolio.js'
 import { Gate } from './types.js'
+import type { WorkerSolver } from './threads.js'
 import { WORKER_ROUND_MS } from './job.js'
 
 let portfolio: ReturnType<typeof openRainbowPortfolio> | undefined
 let localCaches: ReturnType<typeof createOptimizerCaches> | undefined
 let broadCaches: ReturnType<typeof createOptimizerCaches> | undefined
-parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, localIndex, assignedStrategy, solver = 'local', restartOnImprovement = false, splitCircuit = false, helperShuffleSeed }: { gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, localIndex?: number, assignedStrategy?: string, restartOnImprovement?: boolean, splitCircuit?: boolean, helperShuffleSeed?: number, solver?: 'local' | 'affine' | 'broad' | 'shuffle' }) => {
+parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0, localIndex, assignedStrategy, solver = 'local', restartOnImprovement = false, splitCircuit = false, helperShuffleSeed }: { gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, budgetMs: number, round?: number, localIndex?: number, assignedStrategy?: string, restartOnImprovement?: boolean, splitCircuit?: boolean, helperShuffleSeed?: number, solver?: WorkerSolver }) => {
 	try {
 		if (solver === 'shuffle') {
 			resetStrategyStats()
@@ -28,6 +29,13 @@ parentPort!.on('message', async ({ gates, wires, stopSignal, budgetMs, round = 0
 			const stop = stopSignal ? new Int32Array(stopSignal) : undefined
 			const result = wholeCircuitAffineSearch(gates, budgetMs, () => stop !== undefined && Atomics.load(stop, 0) !== 0)
 			parentPort!.postMessage({ gates: result, activity: { passes: 1, subsets: 1, checks: 1, improvements: Number(result.length < gates.length), stage: 'verifying', strategies: strategySnapshot() } })
+			return
+		}
+		if (solver === 'shear-probe') {
+			resetStrategyStats()
+			const stop = stopSignal ? new Int32Array(stopSignal) : undefined
+			const result = polynomialShearSearch(gates, performance.now() + budgetMs, () => stop !== undefined && Atomics.load(stop, 0) !== 0)
+			parentPort!.postMessage({ gates: result ?? gates })
 			return
 		}
 		// Open once per persistent worker and wait for every connection to be ready.

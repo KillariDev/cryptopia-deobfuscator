@@ -183,6 +183,32 @@ try {
 		{ originalCircuit: splitFixture, inputCircuit: splitFixture }), error => error === done)
 	assert.deepEqual(attempts, ['anf-synthesis', 'truth-table-lookup', 'block-cancellation', 'decision-diagram-product'])
 
+
+	config.workers.wholeCircuitMaximumGates = 0
+	config.synthesis.quadraticShear = true
+	const probePath = join(directory, 'startup-shear')
+	let shearProbes = 0
+	WorkerPool.prototype.run = async function(gates, _wires, _progress, _signal, budget, _restart, solver, round, _assigned, split) {
+		if (solver === 'shear-probe') {
+			assert.equal(++shearProbes, 1)
+			assert.equal(gates.length, circuit.gate_count)
+			assert.ok(budget! > 0 && budget! <= 1000)
+			return gates.slice(2)
+		}
+		if (round === 2) throw done
+		if (solver === 'local') {
+			assert.equal(shearProbes, 1)
+			assert.equal(split, true)
+			assert.equal(gates.length, circuit.gate_count - 2)
+			const latest: CircuitData = JSON.parse(await readFile(outputPaths(probePath).latest, 'utf8'))
+			assert.equal(latest.gate_count, gates.length)
+		}
+		return gates
+	}
+	await assert.rejects(splitTaskAndRun(probePath, 'unused',
+		{ originalCircuit: circuit, inputCircuit: circuit }), error => error === done)
+	assert.equal(shearProbes, 1)
+
 } finally {
 	Object.assign(config, saved)
 	WorkerPool.prototype.run = run

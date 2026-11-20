@@ -12,7 +12,9 @@ export function configuredWorkerCount() {
 	return count
 }
 
-type Job = { solver: 'local' | 'affine' | 'broad' | 'shuffle', restartOnImprovement: boolean, round: number, assignedStrategy?: string, splitCircuit: boolean, helperShuffleSeed?: number, budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
+export type WorkerSolver = 'local' | 'affine' | 'broad' | 'shuffle' | 'shear-probe'
+
+type Job = { solver: WorkerSolver, restartOnImprovement: boolean, round: number, assignedStrategy?: string, splitCircuit: boolean, helperShuffleSeed?: number, budgetMs: number, gates: Gate[], wires: number, stopSignal?: SharedArrayBuffer, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, resolve: (gates: Gate[]) => void, reject: (error: Error) => void }
 type WorkerSlot = { worker: Worker, index: number, localIndex?: number, job?: Job, retiring?: boolean }
 export class WorkerPool {
 	private slots: WorkerSlot[] = []
@@ -63,7 +65,7 @@ export class WorkerPool {
 		}
 		await Promise.all(retired.map(worker => worker.terminate()))
 	}
-	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000, restartOnImprovement = false, solver: 'local' | 'affine' | 'broad' | 'shuffle' = 'local', round = 0, assignedStrategy?: string, splitCircuit = false, helperShuffleSeed?: number): Promise<Gate[]> {
+	run(gates: Gate[], wires: number, onProgress?: (gates: number, activity?: WorkerActivity, snapshot?: Gate[]) => void, stopSignal?: SharedArrayBuffer, budgetMs = config.workers.jobSeconds * 1000, restartOnImprovement = false, solver: WorkerSolver = 'local', round = 0, assignedStrategy?: string, splitCircuit = false, helperShuffleSeed?: number): Promise<Gate[]> {
 		if (this.failure) return Promise.reject(this.failure)
 		if (!Number.isFinite(budgetMs) || budgetMs <= 0) return Promise.reject(new Error('Invalid job budget'))
 		return new Promise((resolve, reject) => {

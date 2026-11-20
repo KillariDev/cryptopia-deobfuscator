@@ -494,6 +494,19 @@ const optimizeVariables = (processedGatesCache: LimitedMap<string, boolean>, gat
 const adaptiveFailureCaches = new WeakMap<StrategyPicker | RoundStrategyPicker, Map<string, LimitedMap<string, boolean>>>()
 const dependencySearches = new WeakMap<object, { picker: StrategyPicker, processed: LimitedMap<string, boolean>, offset: number }>()
 
+export function polynomialShearSearch(originalGates: Gate[], deadline: number, shouldStop?: () => boolean) {
+	const attemptStarted = performance.now()
+	const stopped = () => performance.now() >= deadline || shouldStop?.() === true
+	const fallbackSamples = config.search.probabilistic ? Math.max(4096, config.validation.probabilisticInputs) : 0
+	const maximumDegree = config.synthesis.quadraticShearMaximumDegree
+	let verification: PolynomialShearVerification | undefined
+	const result = synthesizePolynomialShear(originalGates, config.validation.maximumWires,
+		config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, stopped, fallbackSamples, outcome => { verification = outcome }, maximumDegree)
+	recordStrategy('polynomial-shear-interpolation', { maximumWires: Math.min(64, config.validation.maximumWires), maximumDegree, ...verification },
+		attemptStarted, originalGates.length, result?.length ?? originalGates.length, result !== undefined)
+	return result
+}
+
 export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCache: LimitedMap<string, Gate[] | null>, processedGatesCache: LimitedMap<string, boolean>, originalGates: Gate[], sliceSize: number, useProbabilistically: boolean, findUselessVarsSetting: boolean, lookup = true, preparation = new SubsetPreparation(originalGates), synthesisBudget?: SynthesisBudget, strategyPicker?: StrategyPicker | RoundStrategyPicker): Promise<{ gates: Gate[], changed: boolean, unavailable?: true }> => {
 	const attemptStarted = performance.now()
 	lookup &&= config.search.rainbow
@@ -581,14 +594,7 @@ export const massOptimizeStep = async (tables: RainbowPortfolio, ioIdentifierCac
 	}
 	if (selected === 'polynomial-shear-interpolation' && config.synthesis.quadraticShear) {
 		const deadline = synthesisBudget?.deadline ?? performance.now() + config.workers.jobSeconds * 1000
-		const stopped = () => performance.now() >= deadline || synthesisBudget?.shouldStop?.() === true
-		const fallbackSamples = config.search.probabilistic ? Math.max(4096, config.validation.probabilisticInputs) : 0
-		const maximumDegree = config.synthesis.quadraticShearMaximumDegree
-		let verification: PolynomialShearVerification | undefined
-		const result = synthesizePolynomialShear(originalGates, config.validation.maximumWires,
-			config.synthesis.affineMaximumTerms, config.synthesis.affineMaximumOperations, stopped, fallbackSamples, outcome => { verification = outcome }, maximumDegree)
-		recordStrategy(selected, { maximumWires: Math.min(64, config.validation.maximumWires), maximumDegree, ...verification },
-			attemptStarted, originalGates.length, result?.length ?? originalGates.length, result !== undefined)
+		const result = polynomialShearSearch(originalGates, deadline, synthesisBudget?.shouldStop)
 		return finish({ gates: result ?? originalGates, changed: result !== undefined })
 	}
 	if (selected === 'polynomial-region-search') {
@@ -1330,6 +1336,22 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 			beginPhase('preparing next round')
 			currentGates = gateSimplifier(currentGates)
 			let lastIterationTime = performance.now()
+			const probeShear = optimizerRound === 1 && nMaxWorkers === 1 && config.synthesis.quadraticShear &&
+				config.workers.broadSearchSeconds > 0 && currentGates.length >= minimumBroadGates() &&
+				currentGates.length > config.workers.wholeCircuitMaximumGates
+			if (probeShear) {
+				beginPhase('probing whole-circuit polynomial shear')
+				const budget = Math.min(1000, WORKER_ROUND_MS / 2, config.workers.broadSearchSeconds * 1000, config.workers.jobSeconds * 1000)
+				const candidate = await Promise.race([memoryFailure,
+					pool.run(currentGates, inputCircuit.wire_count, undefined, undefined, budget, false, 'shear-probe')])
+				if (isBetterCircuit(candidate, currentGates)) {
+					await writer.write([paths.progress(candidate.length), paths.latest], candidate)
+					logTimed(`Whole-circuit polynomial shear removed ${currentGates.length - candidate.length} gates`)
+					currentGates = candidate
+					if (!currentGates.length) break
+				}
+				beginPhase('preparing next round')
+			}
 			const nPrevGates = currentGates.length
 			let winner: 'local' | 'global' | 'combined' = 'local'
 			const workersSize = roundChunkSize(currentGates.length, config.workers.minimumChunkGates, config.workers.maximumChunkFraction)
@@ -1358,7 +1380,8 @@ async function runPuzzle(pathToFileWithoutExt: string, circuits: JobCircuits, on
 			const jobCount = wholeCircuit ? Math.max(requestedJobs, wholeStrategies.length) : Math.min(currentGates.length, requestedJobs)
 			const pendingWholeStrategies = new Set(wholeStrategies)
 			const strategyWaves = Math.max(1, Math.ceil(wholeStrategies.length / Math.max(1, nWorkers - Number(runBroad))))
-			const localJobBudget = Math.min(config.workers.jobSeconds * 1000, WORKER_ROUND_MS / strategyWaves)
+			const localRoundBudget = probeShear ? Math.max(1, WORKER_ROUND_MS - (performance.now() - lastIterationTime)) : WORKER_ROUND_MS
+			const localJobBudget = Math.min(config.workers.jobSeconds * 1000, localRoundBudget / strategyWaves)
 			const approxGates = wholeCircuit ? Array.from({ length: jobCount }, () => currentGates.slice()) : config.search.balancedWorkers ? balancedChunks(currentGates, jobCount, wireCosts) : splitArrayIntoApproximatelyChunks(currentGates, jobCount)
 			const candidateCounts = approxGates.map(chunk => chunk.length)
 			const snapshots = approxGates.slice()
