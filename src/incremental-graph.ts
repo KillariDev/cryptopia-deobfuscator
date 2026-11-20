@@ -260,12 +260,15 @@ export class IncrementalGraph {
 	*regions(size: number, preferredWires: ReadonlySet<number> | undefined, seeds: number[], stopped: () => boolean) {
 		const visited = new Set<number>()
 		let queries = this.queries
+		// Building the dense context takes longer on larger circuits. Keep using
+		// stable indexes longer there, with a cap for uninterrupted searches.
+		const denseContextAt = Math.max(33, Math.min(257, 1 + Math.ceil(this.order.length / 768)))
 		const choose = (line: number) => {
 			if (line < 0 || line >= this.order.length || visited.has(line)) return undefined
 			visited.add(line)
 			// Amortize the dense context on long scans. Early candidates
 			// usually only need the stable indexes.
-			if (visited.size === 33) {
+			if (visited.size === denseContextAt) {
 				const { nodes, dependantMap, access } = this.context()
 				const gates = { length: this.order.length, at: (index: number) => this.records.get(this.order.at(index))!.gate }
 				queries = dependencyQueries(dependantMap, nodes, gates, access)
