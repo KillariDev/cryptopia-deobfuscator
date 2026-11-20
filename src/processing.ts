@@ -209,7 +209,7 @@ function createVariableSampleCheck(original: Gate[], nVariables: number) {
 /** Raw operand positions preserve substitutions on unused operands too.
  * Active controls separately determine whether to try the control-only rewrite. */
 function indexVariableUses(gates: Gate[], variableCount: number) {
-	const uses = Array.from({ length: variableCount }, () => ({ all: [] as number[], controls: [] as number[], active: false, activeControl: false }))
+	const uses = Array.from({ length: variableCount }, () => ({ all: [] as number[], controls: [] as number[], active: false, activeControl: false, targeted: false }))
 	for (let i = 0; i < gates.length; i++) {
 		const gate = gates[i]
 		uses[gate.a]?.all.push(i)
@@ -219,6 +219,7 @@ function indexVariableUses(gates: Gate[], variableCount: number) {
 			uses[gate.b]?.controls.push(i)
 		}
 		if (gate.target !== gate.a && gate.target !== gate.b) uses[gate.target]?.all.push(i)
+		uses[gate.target].targeted = true
 		const wires = getVars(gate)
 		for (let j = 0; j < wires.length; j++) {
 			const use = uses[wires[j]]
@@ -256,7 +257,7 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 		if (canImprove(newRemovedCircuit) && accepted(newRemovedCircuit)) {
 			return reverseMapCircuit(newRemovedCircuit, variableIndexMapping)
 		}
-		const { all, controls, active, activeControl: hasVariableIndexAsNontarget } = uses[variableIndex]
+		const { all, controls, active, targeted, activeControl: hasVariableIndexAsNontarget } = uses[variableIndex]
 		if (hasVariableIndexAsNontarget) {
 			const newRemovedCircuitNontarget = removeNonTargetVariable(mappedGates, variableIndex)
 			if (canImprove(newRemovedCircuitNontarget) && accepted(newRemovedCircuitNontarget)) {
@@ -268,18 +269,22 @@ const findProbabilisticUselessVars = (variableIndexMapping: number[], mappedGate
 			if (shouldStop()) return undefined
 			// Whole-wire replacement preserves gate/read counts. It only improves
 			// the cost when two distinct active wires merge.
+			let sharedSample: boolean | undefined
 			if (active && uses[newVar].active) {
 				const newCircuit = mappedGates.slice()
 				for (const index of all) newCircuit[index] = replaceVar(mappedGates[index], variableIndex, newVar)
-				if (accepted(newCircuit, all[0])) return reverseMapCircuit(newCircuit, variableIndexMapping)
+				const matches = sampleMatch(newCircuit, all[0])
+				// For a control-only source, both substitutions have the same effect.
+				if (!targeted) sharedSample = matches
+				if (matches && proveEquivalent(newCircuit) === true) return reverseMapCircuit(newCircuit, variableIndexMapping)
 			}
 			
-			if (hasVariableIndexAsNontarget) {
+			if (hasVariableIndexAsNontarget && sharedSample !== false) {
 				simplified ??= mappedGates.map(simplifyGate)
 				const newCircuit2 = simplified.slice()
 				for (const index of controls) newCircuit2[index] = replaceNonTargetVar(mappedGates[index], variableIndex, newVar)
 				// Simplification preserves each unedited gate's function.
-				if (sampleMatch(newCircuit2, controls[0]) && canImprove(newCircuit2) && proveEquivalent(newCircuit2) === true) {
+				if ((sharedSample ?? sampleMatch(newCircuit2, controls[0])) && canImprove(newCircuit2) && proveEquivalent(newCircuit2) === true) {
 					return reverseMapCircuit(newCircuit2, variableIndexMapping)
 				}
 			}
