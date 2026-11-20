@@ -433,6 +433,14 @@ for (const wires of [1, 4, 8]) {
 		}
 	}
 }
+const mixedWindow = normalizeWindow([
+	{ a: 11, b: 13, target: 7, gate_i: 15 },
+	{ a: 9, b: 11, target: 4, gate_i: 3 },
+	{ a: 8, b: 3, target: 9, gate_i: 5 },
+	{ a: 7, b: 4, target: 3, gate_i: 1 },
+])
+assert.deepEqual(mixedWindow.wires, [7, 4, 9, 3])
+assert.equal(mixedWindow.key, '0,0,0,15;2,0,1,3;0,3,2,5;0,1,3,1')
 const rewriteCache = new RewriteCache(100)
 let computations = 0
 for (let f = 0; f < 16; f++) {

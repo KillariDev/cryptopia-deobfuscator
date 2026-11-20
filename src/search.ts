@@ -1,15 +1,26 @@
 import { Gate } from './types.js'
-import { gateControlMask, getVars, hashGates, mapCircuit, reverseMapCircuit } from './utils.js'
+import { gateControlMask, getVars, hashGates, reverseMapCircuit } from './utils.js'
 import { LimitedMap } from './limitedMap.js'
 
 /** First-use renaming preserves gate order and control function orientation. */
 export function normalizeWindow(gates: Gate[]) {
-	const wires = [...new Set(gates.flatMap(getVars))]
-	const normalized = mapCircuit(gates, wires).map(gate => {
-		if ([0, 15].includes(gate.gate_i)) return { ...gate, a: 0, b: 0 }
-		if ([3, 12].includes(gate.gate_i)) return { ...gate, b: 0 }
-		if ([5, 10].includes(gate.gate_i)) return { ...gate, a: 0 }
-		return gate
+	const wires: number[] = []
+	const indices = new Map<number, number>()
+	const indexOf = (wire: number) => {
+		let index = indices.get(wire)
+		if (index === undefined) {
+			index = wires.length
+			wires.push(wire)
+			indices.set(wire, index)
+		}
+		return index
+	}
+	const normalized = gates.map(gate => {
+		const controls = gateControlMask(gate)
+		const target = indexOf(gate.target)
+		const a = controls & 1 ? indexOf(gate.a) : 0
+		const b = controls & 2 ? indexOf(gate.b) : 0
+		return { a, b, target, gate_i: gate.gate_i }
 	})
 	return { wires, normalized, key: hashGates(normalized) }
 }
