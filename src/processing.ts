@@ -20,7 +20,7 @@ import { SlidingWindowWires } from './window-wires.js'
 import { LazyCircuit } from './circuit-edit.js'
 import { IncrementalGraph } from './incremental-graph.js'
 import { retainWindowKey, WindowFingerprints } from './fingerprints.js'
-import { createHash } from 'node:crypto'
+import { hash } from 'node:crypto'
 import { advancedRewrite, wholeCircuitAffineSearch, SynthesisBudget } from './strategies.js'
 import { FirstBatchEvaluator, IncrementalEvaluator, PackedInputs, sameGate } from './packed.js'
 import { RewriteCache, SearchScheduler, balancedChunks, improving, SearchArm, NeighborhoodQueue, workerRegionSeed, createSearchArms, independentComponents } from './search.js'
@@ -898,7 +898,7 @@ export const optimizeSubset = async (tables: RainbowPortfolio, slicedVersion: Ga
 			while (lines.length) {
 				const inGates = lines.map(line => circuit.at(line))
 				let preparation: SubsetPreparation | undefined
-				const gateKey = active ? createHash('sha256').update(hashGates(inGates)).digest('base64') : undefined
+				const gateKey = active ? hash('sha256', hashGates(inGates), 'base64') : undefined
 				let changed = false
 				for (let slice = firstSlice; slice <= Math.min(lastSlice, lines.length); slice++) {
 					if (timeToEndWorker()) return circuit.toArray()
@@ -1100,7 +1100,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 		if (activity.passes === 1 && scanContiguous && !skipContiguousStartup) {
 			const first = strategy === 'variable-elimination' ? Math.max(3, config.search.sliceMinimum) : config.search.sliceMinimum
 			let preparation = new SubsetPreparation(optimizedVersion, sliceResults)
-			let key = createHash('sha256').update(hashGates(optimizedVersion)).digest('base64')
+			let key = hash('sha256', hashGates(optimizedVersion), 'base64')
 			// Start with the shortest size for variables and up to two for
 			// rainbow. Graph search still covers longer and noncontiguous windows.
 			const last = strategy === 'variable-elimination' ? first : first + 1
@@ -1127,7 +1127,7 @@ export const optimize = async (tables: RainbowPortfolio, originalGates: Gate[], 
 					optimizedVersion = result.gates
 					candidateParts = new LazyCircuit([optimizedVersion])
 					preparation = new SubsetPreparation(optimizedVersion, sliceResults)
-					key = createHash('sha256').update(hashGates(optimizedVersion)).digest('base64')
+					key = hash('sha256', hashGates(optimizedVersion), 'base64')
 				}
 				if (timeToEndWorker()) break
 				if (!result.changed && !result.unavailable) caches.testedSubsets.set(attempt, true)
